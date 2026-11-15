@@ -12,6 +12,7 @@ from core.inspector import FormInspector
 from core.identity import generate_identity
 from core.pilot import human_type, smart_agree_tos
 from core.scaffold import scaffold_site
+from core.exporter import run_export
 from sites import discover_adapters
 
 
@@ -191,12 +192,22 @@ def main():
     parser.add_argument("--count", type=int, default=1, help="Number of accounts to generate")
     parser.add_argument("--url", type=str, default=None, help="Inspect URL or target URL for scaffolding")
     parser.add_argument("--cdp", type=str, default=None, help="Connect to an external Fingerprint/Anti-Detect browser CDP (e.g. http://127.0.0.1:9222)")
-    parser.add_argument("command", nargs="?", default=None, help="Subcommand like 'doctor'")
+    parser.add_argument("--export", type=str, default=None, choices=["csv", "json", "bitwarden"], help="Export accounts to csv, json or bitwarden format")
+    parser.add_argument("command", nargs="?", default=None, help="Subcommand like 'doctor' or 'export'")
 
     args = parser.parse_args()
 
     if args.command == "doctor":
         run_doctor()
+        return
+
+    if args.command == "export" or args.export:
+        fmt = args.export or "csv"
+        try:
+            exported_path = run_export(fmt=fmt)
+            print(f"[+] Accounts successfully exported to [{fmt.upper()}]: {exported_path.resolve()}")
+        except Exception as e:
+            print(f"[-] Export error: {e}")
         return
 
     if args.scaffold:

@@ -16,6 +16,9 @@
 - **📬 Disposable Email Integration**: Built-in support for free disposable mailboxes to receive verification codes without paid third-party APIs.
 - **🧩 Local Slider & Track Simulator**: CPU-based puzzle calculation and non-linear bezier track generator mimicking human hand inertia.
 - **📦 Clean Architecture**: Extensible `BaseSiteAdapter` lifecycle design (`probe` -> `fill_form` -> `submit_and_confirm`).
+- **📊 Universal Vault Exporter**: Export generated credentials into CSV, structured JSON, or official **Bitwarden / 1Password** importable vault format (`python main.py export --export bitwarden`).
+- **🛡️ Network Jitter Resilience**: Automatic retry decorators (`@retry_on_failure`) with exponential backoff on transient network delays or DOM mutations.
+- **🧪 Production Test Suite**: Comes with comprehensive unit tests (`pytest tests/`) validating identity entropy, dynamic discovery, and exporter accuracy.
 - **🩺 Built-in Doctor Diagnostics**: One-command environment check (`python main.py doctor`) to ensure Playwright and dependencies are operational.
 
 ---

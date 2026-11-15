@@ -4,10 +4,34 @@ Provides natural keyboard typing rhythms, robust clicking, and viewport scrollin
 """
 import time
 import random
-from typing import Optional, Union
+import functools
+from typing import Optional, Union, Callable
 from playwright.sync_api import Page, Locator
 
 
+def retry_on_failure(max_retries: int = 3, initial_delay: float = 1.0, backoff_factor: float = 1.5):
+    """
+    Decorator that retries browser interactions upon transient network or DOM errors.
+    """
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            delay = initial_delay
+            last_err = None
+            for attempt in range(1, max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_err = e
+                    if attempt < max_retries:
+                        time.sleep(delay)
+                        delay *= backoff_factor
+            raise last_err
+        return wrapper
+    return decorator
+
+
+@retry_on_failure(max_retries=3, initial_delay=0.8)
 def human_type(page: Page, target: Union[str, Locator], text: str, min_delay: float = 0.03, max_delay: float = 0.09):
     """
     Type text character-by-character with natural human cadence,
@@ -32,6 +56,7 @@ def human_type(page: Page, target: Union[str, Locator], text: str, min_delay: fl
     time.sleep(random.uniform(0.1, 0.2))
 
 
+@retry_on_failure(max_retries=2, initial_delay=0.5)
 def smart_click(page: Page, target: Union[str, Locator], timeout: int = 15000) -> bool:
     """
     Click an element after ensuring it is visible, in viewport, and enabled (not disabled).

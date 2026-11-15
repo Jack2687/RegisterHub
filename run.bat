@@ -20,10 +20,12 @@ echo   [3] 运行全球通用注册靶场测试 (AutomationExercise 实战)
 echo   [4] 运行系统环境诊断 (Doctor)
 echo   [5] 输入目标网址直接探测 (--url)
 echo   [6] 一键生成新站适配器模板 (--scaffold)
+echo   [7] 导出账号资产 (CSV / JSON / Bitwarden 密码本)
+echo   [8] 运行自动化测试套件 (Pytest)
 echo   [0] 退出
 echo.
 echo ======================================================
-set /p choice="请输入选项 [0-6]: "
+set /p choice="请输入选项 [0-8]: "
 
 if "%choice%"=="1" (
     echo.
@@ -71,8 +73,22 @@ if "%choice%"=="6" (
     pause
     goto MENU
 )
-        python main.py --scaffold %sname% --url %surl%
-    )
+if "%choice%"=="7" (
+    echo.
+    echo   [A] 导出为标准 CSV
+    echo   [B] 导出为结构化 JSON
+    echo   [C] 导出为 Bitwarden / 1Password 密码管理器 CSV
+    set /p exp_fmt="请选择格式 [A/B/C]: "
+    if /i "%exp_fmt%"=="A" python main.py export --export csv
+    if /i "%exp_fmt%"=="B" python main.py export --export json
+    if /i "%exp_fmt%"=="C" python main.py export --export bitwarden
+    pause
+    goto MENU
+)
+if "%choice%"=="8" (
+    echo.
+    echo [*] 正在运行自动化单元测试套件...
+    pytest tests/ -v
     pause
     goto MENU
 )
