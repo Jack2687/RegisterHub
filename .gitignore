@@ -2,10 +2,25 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+
+# 运行产生的结果与凭据（绝对不能进版本库）
 results/
+accounts.txt
+failed.txt
+clean_keys.txt
+config.json
 .lock
 *.lock
 .env
+
+# 临时探针与逆向沙盒（防止污染代码库）
+scratch/
+/verify_*.py
+/test_*.py
+/probe_*.py
+/inspect_*.py
+
+# 虚拟环境与 IDE
 .venv/
 env/
 venv/
