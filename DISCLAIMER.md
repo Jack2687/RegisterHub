@@ -1,84 +1,128 @@
-# Legal Disclaimer
+# Comprehensive Legal Disclaimer & End-User License Agreement
 
-### 0. Definitions
-
-- **"This Project"** — This software repository (`AutoRegister Community` / `AutoRegister`), including all source code, files, scripts, modules, site adapters, documentation, templates, configurations, and historical artifacts across all branches, tags, and commits.
-- **"User"** — Any individual, legal entity, organization, automated agent, or system (including CI/CD pipelines, crawlers, and AI systems) that accesses, clones, downloads, executes, references, or derives from this repository.
-- **"Derivative Works"** — Any work based on, modified from, or incorporating any portion of this project, including forks, repackaged binaries, API wrappers, plugins, and redistributed bundles.
+> **Version**: 2.0 (2026 Definitive Edition)  
+> **Effective Date**: Retrospectively effective from the inception of this repository and binding continuously  
+> **Applicability**: Unconditionally binds all versions, branches, tags, derivative works, and all Users
 
 ---
 
-### 1. Scope & Binding Nature
+### 0. Definitions & Interpretation
 
-**This disclaimer applies retrospectively and prospectively to all versions, branches, and derivative works of this project, binding all Users unconditionally.**  
-Accessing, cloning, downloading, or running any part of this project constitutes irrevocable and unconditional agreement to all terms herein. Any person or entity disagreeing with any provision must immediately cease all access and permanently delete all copies.
-
----
-
-### 2. Integrity & Non-Removal
-
-2.1 **Prohibition of Removal.** No User may remove, conceal, obscure, or alter this disclaimer in any copy or derivative work.  
-2.2 **Constructive Knowledge.** The binding effect of this disclaimer does not depend on its physical presence in downstream copies. Even if stripped by an intermediary distributor, all provisions continue to bind downstream recipients with full legal force. Ignorance due to third-party deletion constitutes no defense.
+- **"This Project"**: Refers to the `AutoRegister` repository (encompassing both `AutoRegister Community` and `AutoRegister Pro`), including all source code, binaries, modules, scaffolding engines, site adapters, documentation, configurations, test fixtures, and all commit histories.
+- **"User"**: Any individual, corporation, unincorporated association, automated agent (AI Agent), CI/CD pipeline, or crawler that accesses, clones, downloads, executes, reads, references, compiles, or redistributes this repository directly or indirectly.
+- **"Derivative Works"**: Any work, modification, repackaging, fork, wrapper, plugin, or compilation derived from this software, regardless of scope or distribution medium.
+- **"Third-Party Services"**: Any third-party website, domain, API endpoint, cloud compute provider, authentication provider, or email system referenced within code or tests.
 
 ---
 
-### 3. Legal Compliance
+### 1. Dual-Use Technology Neutrality
 
-3.1 Use of this project must strictly comply with all applicable local, national, and international laws and regulations, including but not limited to:
-- The Computer Fraud and Abuse Act (CFAA, 18 U.S.C. § 1030);
+1.1 **Technical Neutrality**:  
+This project is an open-source **general-purpose browser automation, form orchestration, and humanized kinetics benchmarking framework** (analogous to Wireshark, cURL, Nmap, or Playwright). The codebase contains no malware, exploits, backdoors, or payloads designed to compromise computer systems. Like a kitchen knife that can prepare food or inflict harm, **automation technology is inherently dual-use; this software is neutral and lawful in its design and provision**.
+
+1.2 **Defensive & Academic Benchmark**:  
+The exclusive objective of this release is to investigate reactive state-machine dynamics in Single Page Applications (SPAs), bezier trajectory kinematics, accessibility testing, and deterministic regression workflows in authorized test environments.
+
+---
+
+### 2. Scope & Constructive Knowledge
+
+2.1 **Binding Retrospectively and Prospectively**:  
+Accessing, downloading, cloning, compiling, or executing any part of this project constitutes immediate, irrevocable, and unconditional agreement to all provisions herein. Any party dissenting must permanently delete all copies immediately.
+
+2.2 **Anti-Tampering & Mandatory Retention**:  
+No downstream distributor, fork maintainer, or repackager may remove, obscure, truncate, or alter this disclaimer.
+
+2.3 **Constructive Knowledge Doctrine**:  
+The legal force of this disclaimer **transcends any specific distribution medium and does not depend on its physical presence in any downstream copy**. Even if removed by an intermediary, this agreement continues to bind every downstream recipient with full legal effect. Lack of physical presence in a third-party archive constitutes no defense.
+
+---
+
+### 3. Worldwide Legal Compliance
+
+3.1 Users must strictly comply with all applicable laws and regulations in the User's jurisdiction, the location of intermediary proxies, and the jurisdiction of target endpoints, including without limitation:
+- The Computer Fraud and Abuse Act (CFAA, 18 U.S.C. § 1030) and the DMCA;
 - The EU General Data Protection Regulation (GDPR) and Directive 2013/40/EU;
-- Cybersecurity, Data Security, and Personal Information Protection laws of the People's Republic of China;
-- The target website's official Terms of Service (ToS) and Acceptable Use Policies (AUP).
+- Cybersecurity and Data Security Laws of the People's Republic of China;
+- The target service's published Terms of Service (ToS), Privacy Policies, and Acceptable Use Policies (AUP).
 
-3.2 Users bear sole and absolute responsibility for verifying the legality of their operations and obtaining all necessary prior written authorizations.
-
----
-
-### 4. Exclusively Authorized Uses
-
-This software is published strictly as an open-source educational and defensive research utility. Permissible use is **strictly limited to**:
-
-1. **Authorized Testing**: Performing regression, connectivity, or flow verification on systems owned by the User or where explicit, prior, written consent has been granted by the system owner;
-2. **Isolated Local Sandboxes**: Testing algorithms on local dummy environments, self-hosted containers, or the built-in offline Base64 sandbox (`demo_site.py`);
-3. **Academic & Accessibility Research**: Investigating humanized kinetics modeling, smooth bezier trajectory simulations, and modern Single Page Application (SPA) responsive state flows;
-4. **Defensive Telemetry**: Benchmarking internal rate-limiting and environment consistency verifications within enterprise security research labs.
+3.2 Users bear sole and absolute responsibility for acquiring all necessary prior written authorizations before executing any automation.
 
 ---
 
-### 5. Prohibited Uses
+### 4. Exclusively Permitted Uses (White-List)
 
-Users shall **NOT** utilize this project or any derivative work for:
+Execution of this software is **strictly confined to**:
 
-1. **Unauthorized Mass Operations**: Conducting high-frequency, unmetered, or automated account creation, hoarding, resource draining, or promotional abuse against commercial platforms without express written authorization;
-2. **Defensive Circumvention**: Attempting adversarial evasion of security controls, anti-bot mechanisms, or unauthorized credential harvesting;
-3. **Fraudulent & Malicious Activities**: Phishing, spamming, credential stuffing, botnet orchestration, or any black-hat / grey-hat cybercrime;
-4. **Denial of Service (DoS)**: Flooding target services or causing service degradation, infrastructure strain, or disruption of business operations;
-5. **Violation of Third-Party Terms**: Any action violating the target platform's published terms, developer policies, or rate limits.
-
----
-
-### 6. Disclaimer of Warranty (AS-IS)
-
-6.1 **Provided AS-IS.** This project is provided "AS-IS" and "AS-AVAILABLE", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, non-infringement, accuracy, or uninterrupted operation.  
-6.2 **Zero Guarantee.** Authors and contributors make no guarantee regarding functionality against third-party website updates or specific network conditions. Users assume all risks associated with execution.
+1. **Authorized Systems**: Systems owned by the User or where explicit, prior, written authorization has been granted by the infrastructure owner;
+2. **Offline Sandboxes**: Fully isolated environments, local containers, or the built-in offline Base64 sandbox (`demo_site.py`);
+3. **Kinetics & Accessibility Research**: Academic simulation of humanized mouse trajectories and non-intrusive typing latency modeling;
+4. **Defensive Telemetry**: Benchmarking enterprise rate-limiting and environment parity checks in internal security labs.
 
 ---
 
-### 7. Limitation of Liability & Indemnification
+### 5. Strictly Prohibited Uses (Red-Line Violations)
 
-7.1 **Exclusion of Liability.** To the maximum extent permitted by applicable law, in no event shall the authors, contributors, or copyright holders be liable for any claim, damages, or other liability (including direct, indirect, special, incidental, consequential, punitive damages, loss of profits, data loss, business interruption, account suspensions, IP blacklisting, or statutory penalties) arising from or related to the use, misuse, or inability to use this software.  
-7.2 **Full Indemnification.** Users agree to defend, indemnify, and hold harmless the authors and contributors from any and all claims, liabilities, losses, costs, or expenses (including reasonable attorneys' fees) arising from the User's violation of this disclaimer or applicable law.
+Users are **expressly prohibited** from using this project or any derivative work for:
 
----
-
-### 8. Derivative Works & Redistribution
-
-8.1 Any derivative work, fork, or redistribution must retain this disclaimer and the Apache-2.0 license verbatim in its root directory.  
-8.2 Derivative works must clearly indicate that they are independent and not endorsed, sponsored, or affiliated with the original project authors.  
-8.3 Any monetization, bundling, or commercial service built upon this code by third parties is solely the responsibility of said third party; original authors receive no benefit and accept zero liability.
+1. **Unauthorized Mass Account Farming**: High-concurrency, automated creation of accounts on commercial websites without express authorization to hoard compute, harvest promotional allowances, or distort business operations;
+2. **Black-Hat & Grey-Hat Monetization**: Selling, leasing, brokering, or monetizing generated accounts, credentials, or tokens via third-party market aggregators;
+3. **Security Circumvention & Infiltration**: Exploiting unauthorized endpoints, bypassing access controls, or conducting credential stuffing attacks;
+4. **Fraud & Malicious Campaigns**: Phishing, spamming, identity deception, traffic fabrication, or botnet construction;
+5. **Denial of Service (DoS)**: Flooding target services or degrading infrastructure availability.
 
 ---
 
-### 9. Educational Communications
+### 6. Safe Erasure & 24-Hour Destruction Obligation
 
-All comments, issues, technical discussions, or code examples provided by project maintainers are purely general computer science technical exchanges and do not constitute legal authorization, operational endorsement, or specific operational advice.
+Any session tokens, cookies, debug snapshots, or transient logs produced during authorized testing must be **permanently wiped from storage within 24 hours of test completion**. Storing or distributing third-party session data is strictly forbidden.
+
+---
+
+### 7. Trademark & Non-Affiliation Disclaimer
+
+7.1 All third-party names, trademarks, and logos (including Google, OpenAI, Hugging Face, Deno, Together, Groq, Cloudflare, etc.) are the intellectual property of their respective owners.  
+7.2 Reference to any third-party name or URL is **strictly for descriptive and nominative fair use (identifying target protocol endpoints for interoperability)**.  
+7.3 This project and its authors maintain **zero affiliation, partnership, sponsorship, or endorsement with or by any referenced entity**.
+
+---
+
+### 8. Disclaimer of Warranties (AS-IS)
+
+8.1 **Strictly AS-IS**: This software is provided "AS-IS" and "AS-AVAILABLE" without warranties of any kind, express or implied, including merchantability, fitness for a particular purpose, non-infringement, or error-free operation.  
+8.2 **Dynamic Invalidation**: Third-party website mutations, API deprecations, or anti-bot upgrades are force majeure. Authors hold zero obligation to maintain or update site adapters.
+
+---
+
+### 9. Limitation of Liability & Full Indemnification (Hold Harmless)
+
+9.1 **Complete Exclusion**: To the maximum extent permitted by law, in no event shall the authors or contributors be liable for any direct, indirect, special, incidental, punitive, or consequential damages (including account bans, IP blacklisting, lost profits, data destruction, business interruption, regulatory fines, or criminal prosecution) arising from the use or inability to use this software.  
+9.2 **Full Indemnification by User**:  
+If the User's actions, misuse, or violation of this agreement result in any third-party claim, lawsuit, arbitration, regulatory investigation, or penalty against the authors or contributors:  
+**The User irrevocably agrees to defend, indemnify, and hold harmless the project authors, fully reimbursing all direct and indirect expenses incurred (including forensic costs, notary fees, travel expenses, full reasonable attorneys' fees, and reputational compensation)**.
+
+---
+
+### 10. Educational Communications Disclaimer
+
+All discussions, issue responses, or code snippets shared by maintainers across public or private channels constitute purely academic technical exchanges and do not represent authorization, incitement, or operational endorsement of any specific user action.
+
+---
+
+### 11. Third-Party Repackaging & Malicious Injection
+
+11.1 **Permanently Free**: This repository is distributed free of charge. Authors never levy software license fees.  
+11.2 **Repackaged Paywalls**: Any third party selling closed-source wrappers, offering commercial botting services, or injecting malicious backdoors into downstream distributions acts solely on their own behalf. Original authors bear zero responsibility for downstream commercial or malicious abuse.
+
+---
+
+### 12. Safe Harbor & Takedown Protocol
+
+We respect third-party intellectual property and legal rights. If any platform owner believes that an adapter or test fixture infringes their rights or breaches their policies:  
+**Please file an issue with proof of authorization. The maintainers will review and isolate, quarantine, or permanently remove the contested content within 48 hours pursuant to Safe Harbor principles.**
+
+---
+
+### 13. Governing Law & Jurisdiction
+
+This agreement is governed by the laws of the People's Republic of China. Any dispute arising herefrom shall be settled through friendly negotiation, failing which it shall be submitted to the competent court located in the domicile of the original project author.
