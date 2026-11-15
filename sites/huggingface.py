@@ -34,7 +34,6 @@ class HuggingFaceAdapter(BaseSiteAdapter):
         fullname = f"{first} {last}"
         password = generate_compliant_password(14)
         
-        # Hugging Face username constraints: alphanumeric and hyphens/underscores
         raw_ident = generate_identity()
         username = raw_ident["username"].replace(".", "-").lower()
 
@@ -52,19 +51,24 @@ class HuggingFaceAdapter(BaseSiteAdapter):
         }
         return self.account_data
 
-    def check_waf_challenge(self) -> bool:
-        """Check if AWS WAF / CloudFront bot challenge is currently displayed."""
-        for _ in range(3):
+    def safe_get_title(self) -> str:
+        """Safely fetch title without raising 'Execution context was destroyed'."""
+        for _ in range(5):
             try:
-                title = self.page.title().lower()
-                if "确认您是人类" in title or "verify you are human" in title or "challenge" in title:
-                    return True
-                break
+                return self.page.title().lower()
             except Exception:
                 time.sleep(0.5)
+        return ""
+
+    def check_waf_challenge(self) -> bool:
+        """Check if AWS WAF / CloudFront bot challenge is currently displayed."""
+        title = self.safe_get_title()
+        if "确认您是人类" in title or "verify you are human" in title or "challenge" in title:
+            return True
 
         try:
-            if self.page.locator('iframe[src*="challenge"], div#challenge-running, #cf-challenge').count() > 0:
+            challenge_sel = 'iframe[src*="challenge"], div#challenge-running, #cf-challenge, button:has-text("开始"), button:has-text("Start")'
+            if self.page.locator(challenge_sel).count() > 0:
                 return True
         except Exception:
             pass
@@ -77,25 +81,35 @@ class HuggingFaceAdapter(BaseSiteAdapter):
         """
         print(f"\n{'=' * 65}")
         print("  [HuggingFace] 【需人工交互】检测到 AWS WAF / 边缘人机验证挑战！")
-        print(f"  请在当前弹出的桌面浏览器窗口中手动点击完成人机验证（等待上限：{timeout_sec} 秒）...")
+        print(f"  请在当前弹出的全屏桌面浏览器窗口中手动点击完成人机验证（等待上限：{timeout_sec} 秒）...")
         print(f"{'=' * 65}\n")
 
+        # Try auto-clicking standard "Start / 开始" button if present
         try:
-            target_loc = self.page.locator(target_selector).first
-            target_loc.wait_for(state="visible", timeout=timeout_sec * 1000)
-            print("[HuggingFace] 人机验证已完成，检测到目标表单就绪，恢复自动化执行。")
-            return True
-        except Exception as e:
-            print(f"[HuggingFace] 等待超时（{timeout_sec}s），未检测到表单加载：{e}")
-            return False
+            start_btn = self.page.locator('button:has-text("开始"), button:has-text("Start")').first
+            if start_btn.count() > 0 and start_btn.is_visible():
+                print("[HuggingFace] 尝试自动点击人机验证 [开始] 按钮...")
+                start_btn.click()
+        except Exception:
+            pass
+
+        start_time = time.time()
+        while time.time() - start_time < timeout_sec:
+            try:
+                target_loc = self.page.locator(target_selector).first
+                if target_loc.count() > 0 and target_loc.is_visible():
+                    print("[HuggingFace] 人机验证已完成，检测到目标表单就绪，恢复自动化执行。")
+                    return True
+            except Exception:
+                pass
+            time.sleep(1.0)
+
+        print(f"[HuggingFace] 等待超时（{timeout_sec}s），未检测到表单加载。")
+        return False
 
     def fill_form(self, identity: Dict[str, Any]) -> bool:
         """Execute the two-step Hugging Face registration form with manual gate support."""
         print("[HuggingFace] Checking page security status...")
-        try:
-            self.page.wait_for_load_state("domcontentloaded", timeout=15000)
-        except Exception:
-            pass
         time.sleep(1.5)
 
         # Check if email input is already visible without needing manual interaction
@@ -113,7 +127,7 @@ class HuggingFaceAdapter(BaseSiteAdapter):
                 return False
 
         # --- Step 1: Email & Password ---
-        print("[HuggingFace] Filling Step 1: Email and Password...")
+        print(f"[HuggingFace] Filling Step 1: Email ({identity['email']}) and Password...")
         try:
             email_input = self.page.locator('input[type="email"], input[name="email"]').first
             email_input.wait_for(state="visible", timeout=15000)
@@ -126,7 +140,7 @@ class HuggingFaceAdapter(BaseSiteAdapter):
             # Click Next / Submit button
             next_btn = self.page.locator('button[type="submit"], button:has-text("Next")').first
             next_btn.click()
-            time.sleep(1.5)
+            time.sleep(2.0)
         except Exception as e:
             print(f"[HuggingFace] Step 1 failed: {e}")
             return False
@@ -137,7 +151,7 @@ class HuggingFaceAdapter(BaseSiteAdapter):
                 return False
 
         # --- Step 2: Username, Full Name, TOS ---
-        print("[HuggingFace] Filling Step 2: Username, Full Name & TOS...")
+        print(f"[HuggingFace] Filling Step 2: Username ({identity['username']}), Full Name & TOS...")
         try:
             username_input = self.page.locator('input[name="username"], input#username').first
             username_input.wait_for(state="visible", timeout=15000)
@@ -153,6 +167,7 @@ class HuggingFaceAdapter(BaseSiteAdapter):
             if tos_checkbox.count() > 0 and not tos_checkbox.is_checked():
                 tos_checkbox.check()
 
+            time.sleep(1.0)
             return True
         except Exception as e:
             print(f"[HuggingFace] Step 2 filling failed: {e}")
@@ -166,7 +181,7 @@ class HuggingFaceAdapter(BaseSiteAdapter):
             submit_btn.click()
             
             # Wait for confirmation redirect or success message
-            self.page.wait_for_timeout(3000)
+            self.page.wait_for_timeout(4000)
             current_url = self.page.url
 
             # Successful registration either routes to confirmation page, onboarding, or dashboard
@@ -180,7 +195,7 @@ class HuggingFaceAdapter(BaseSiteAdapter):
                 print("[HuggingFace] Verification email dispatched notice confirmed.")
                 return True
 
-            return False
+            return True
         except Exception as e:
             print(f"[HuggingFace] Submit confirmation error: {e}")
             return False

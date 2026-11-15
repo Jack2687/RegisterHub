@@ -83,7 +83,11 @@ def run_doctor():
 def inspect_url(target_url: str, cdp_endpoint: str = None):
     from playwright.sync_api import sync_playwright
     from core.stealth import apply_stealth_to_context, connect_fingerprint_browser
+    import os
     print(f"[*] Navigating to {target_url} for heuristic form inspection...")
+    
+    cfg = load_config()
+    proxy_server = cfg.get("browser", {}).get("proxy") or os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
     
     with sync_playwright() as p:
         if cdp_endpoint:
@@ -91,12 +95,27 @@ def inspect_url(target_url: str, cdp_endpoint: str = None):
             browser = connect_fingerprint_browser(p, cdp_endpoint)
             context = browser.contexts[0] if browser.contexts else browser.new_context()
         else:
-            browser = p.chromium.launch(
-                headless=False,
-                args=["--disable-blink-features=AutomationControlled"]
-            )
+            launch_args = [
+                "--disable-blink-features=AutomationControlled",
+                "--start-maximized",
+                "--no-first-run",
+                "--no-default-browser-check"
+            ]
+            launch_kwargs = {
+                "headless": False,
+                "args": launch_args,
+                "ignore_default_args": ["--enable-automation"]
+            }
+            if proxy_server:
+                launch_kwargs["proxy"] = {"server": proxy_server}
+                
+            try:
+                browser = p.chromium.launch(channel="chrome", **launch_kwargs)
+            except Exception:
+                browser = p.chromium.launch(**launch_kwargs)
+
             context = browser.new_context(
-                viewport={"width": 1280, "height": 800},
+                no_viewport=True,
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
             )
 
