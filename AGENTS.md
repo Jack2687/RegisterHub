@@ -1,11 +1,30 @@
-# AutoRegister AI 交互契约与场景决策规范 (AGENTS.md)
+# AutoRegister AI 交互契约与自包含隔离规范 (AGENTS.md)
 
-> **适用于**：Cursor / Claude Code / Windsurf / GitHub Copilot / Gemini 等各类接入本仓库的 AI 编程助手。  
-> **核心原则**：中文、直接、结论先行。不给长篇大论的废话，只提供高信号事实与精确选项。
+> **适用于**：Cursor / Claude Code / Windsurf / GitHub Copilot / Gemini 等各类接入本开源仓库的 AI 编程助手。  
+> **核心原则**：纯净自包含、零外部依赖、中文、直接、结论先行。
 
 ---
 
-## 0. 输出契约（必须严格遵守的汇报规范）
+## ⚠️ 最高红线：绝对自包含沙盒隔离 (Strict Self-Contained Sandbox)
+
+**所有接入本项目的 AI 必须严格遵守以下隔离禁令，违者视为严重逻辑污染：**
+
+1. **🚫 严禁读取宿主机任何外部目录与历史项目**：
+   - 严禁检索、列出或读取本仓库目录（`register-community`）之外的任何文件夹（如宿主机上的母港 `register-template`、历史注册子项目 `*-register` 等）；
+   - 严禁读取任何私有历史代码偷看答案，必须假定自己处于一个陌生开源用户的纯净电脑上！
+2. **🚫 严禁调用外部全局 Skill 与私有知识库**：
+   - 严禁加载或引用任何外部全局私有 Skill（如 `register-workflow`、`register-compound`、`register-harvest` 等）；
+   - 一切能力必须且只能基于本仓库自有的 `core/`、`sites/`、`main.py` 和 `config.json` 闭环实现！
+3. **⚡ 收到目标 URL 立即直接开跑（URL Quick-Trigger Pipeline）**：
+   - 当用户在对话中直接发送一个注册网址时，AI **严禁在开工前长篇大论分析，严禁去外部搜索**，必须且只能立即在当前目录执行：
+     ```bash
+     python main.py --scaffold <site_name> --url <target_url>
+     ```
+   - 依赖本地开源内置的 `FormInspector` 探测真实字段，生成 `sites/<site_name>.py`，然后以标准五段式格式向用户汇报！
+
+---
+
+## 0. 输出契约（必须严格遵守的五段式汇报）
 
 当 AI 协助用户探测新站点、分析流程或遇到卡点时，**严禁输出冗长的排查心路历程**，输出只在这四种时机触发：
 1. **探测结束并已装配骨架**
@@ -96,15 +115,15 @@
 └────────────────────────────────────────────────────────┘
 ```
 
-1. **能用协议就不用浏览器**：
+1. **能用协议不用浏览器**：
    - 目标站若只需普通 POST 表单 / JSON 且无复杂设备风控指纹，强制优先走协议（`requests`），单号耗时 1~2s、内存消耗十几 MB、零弹窗干扰；
 2. **必须使用浏览器的步骤，先走无头（Headless）**：
-   - 面对 SvelteKit、React、Elm 等强受控动态 SPA 时，切入浏览器自动化；
+   - 面对 SvelteKit、React、Elm 等强受控动态 SPA 时才切入浏览器；
    - 默认保持 `headless=True` 静默执行，时延最小，且绝对不弹窗抢夺人类桌面打字焦点；
 3. **无头无法闭环时，才优雅降级为有头（Headful）**：
    - 仅在以下两种场景切入有头：
-     ① 页面检测到 headless 特征并拒绝放行；
-     ② 动态挂载了人机挑战（reCAPTCHA v2、Turnstile、AWS WAF 橙色按钮）且无外部打码 API。
+     ① 页面检测到 headless 特征并阻断；
+     ② 页面动态挂载了人机挑战（reCAPTCHA v2、Turnstile、AWS WAF 橙色按钮）且无外部打码 API。
    - 此时必须唤起官方真机 Google Chrome（全屏最大化），提示用户在真实视口中完成点击，点完后底层监听表单就绪状态并自动接管后续全流程。
 
 ---
