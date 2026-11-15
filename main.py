@@ -80,13 +80,28 @@ def run_doctor():
     print("=" * 50)
 
 
-def inspect_url(target_url: str):
+def inspect_url(target_url: str, cdp_endpoint: str = None):
     from playwright.sync_api import sync_playwright
+    from core.stealth import apply_stealth_to_context, connect_fingerprint_browser
     print(f"[*] Navigating to {target_url} for heuristic form inspection...")
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        page = browser.new_page()
+        if cdp_endpoint:
+            print(f"[*] Connecting to fingerprint browser at {cdp_endpoint}...")
+            browser = connect_fingerprint_browser(p, cdp_endpoint)
+            context = browser.contexts[0] if browser.contexts else browser.new_context()
+        else:
+            browser = p.chromium.launch(
+                headless=False,
+                args=["--disable-blink-features=AutomationControlled"]
+            )
+            context = browser.new_context(
+                viewport={"width": 1280, "height": 800},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            )
+
+        apply_stealth_to_context(context)
+        page = context.new_page()
         try:
             page.goto(target_url, timeout=30000, wait_until="domcontentloaded")
             inspector = FormInspector(page)
@@ -121,6 +136,7 @@ def main():
     parser.add_argument("--run", type=str, default=None, help="Target site adapter name (e.g. demo)")
     parser.add_argument("--count", type=int, default=1, help="Number of accounts to generate")
     parser.add_argument("--url", type=str, default=None, help="Inspect and test autofill on a URL directly")
+    parser.add_argument("--cdp", type=str, default=None, help="Connect to an external Fingerprint/Anti-Detect browser CDP (e.g. http://127.0.0.1:9222)")
     parser.add_argument("command", nargs="?", default=None, help="Subcommand like 'doctor'")
 
     args = parser.parse_args()
@@ -130,11 +146,11 @@ def main():
         return
 
     if args.url:
-        inspect_url(args.url)
+        inspect_url(args.url, cdp_endpoint=args.cdp)
         return
 
     cfg = load_config()
-    runner = StandardRunner(cfg)
+    runner = StandardRunner(cfg, cdp_endpoint=args.cdp)
 
     adapter_name = (args.run or "demo").lower()
     if adapter_name in ADAPTER_REGISTRY:

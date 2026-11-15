@@ -6,18 +6,21 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Type
+from typing import Dict, Any, Type, Optional
 from playwright.sync_api import sync_playwright
 
 from core.adapter import BaseSiteAdapter
+from core.stealth import apply_stealth_to_context, connect_fingerprint_browser
 
 
 class StandardRunner:
     """Manages automation execution and ledger recording."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], cdp_endpoint: Optional[str] = None):
         self.config = config
         self.headless = config.get("browser", {}).get("headless", False)
+        self.enable_stealth = config.get("browser", {}).get("enable_stealth", True)
+        self.cdp_endpoint = cdp_endpoint or config.get("browser", {}).get("cdp_endpoint")
         self.output_dir = Path(config.get("output_dir", "./results"))
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.success_file = self.output_dir / "accounts.txt"
@@ -40,11 +43,27 @@ class StandardRunner:
 
     def execute_adapter(self, adapter_cls: Type[BaseSiteAdapter], count: int = 1) -> int:
         success_count = 0
-        self.log("info", f"Starting automation session (target count: {count}, headless: {self.headless})...")
+        mode_desc = f"external CDP ({self.cdp_endpoint})" if self.cdp_endpoint else f"local Chromium (headless={self.headless})"
+        self.log("info", f"Starting automation session (target count: {count}, mode: {mode_desc}, stealth: {self.enable_stealth})...")
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=self.headless)
-            context = browser.new_context(viewport={"width": 1280, "height": 800})
+            if self.cdp_endpoint:
+                self.log("info", f"Connecting to external fingerprint browser at {self.cdp_endpoint}...")
+                browser = connect_fingerprint_browser(p, self.cdp_endpoint)
+                context = browser.contexts[0] if browser.contexts else browser.new_context(viewport={"width": 1280, "height": 800})
+            else:
+                browser = p.chromium.launch(
+                    headless=self.headless,
+                    args=["--disable-blink-features=AutomationControlled"]
+                )
+                context = browser.new_context(
+                    viewport={"width": 1280, "height": 800},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                )
+
+            if self.enable_stealth:
+                apply_stealth_to_context(context)
+                self.log("info", "Anti-fingerprint masking scripts injected into context.")
             
             for idx in range(1, count + 1):
                 self.log("info", f"--- Processing task [{idx}/{count}] ---")

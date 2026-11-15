@@ -7,6 +7,8 @@
 
 ## ✨ Features
 
+- **🕵️ Built-in Stealth & Fingerprint Engine**: Auto-injects anti-fingerprint masking scripts (overriding `navigator.webdriver=false`, WebGL renderer harmonization, plugin emulation).
+- **🌐 Fingerprint Browser Bridge (CDP)**: Natively connects to external anti-detect/fingerprint browsers (AdsPower, BitBrowser, Hubstudio, MoreLogin) via a single `--cdp` flag.
 - **🚀 Heuristic Form Inspection**: Pass any target registration URL with `--url`, and AutoRegister automatically identifies username, email, password, and submission controls.
 - **👤 Synthetic Identity Engine**: Generates coherent, believable multi-locale usernames, compliant high-entropy passwords, and realistic personas.
 - **📬 Disposable Email Integration**: Built-in support for free disposable mailboxes to receive verification codes without paid third-party APIs.
@@ -54,6 +56,14 @@ You can test heuristic field detection on any live registration page:
 
 ```bash
 python main.py --url https://example.com/signup
+```
+
+### 5. Use External Fingerprint Browser (AdsPower / BitBrowser / Hubstudio)
+
+Connect directly to your active anti-detect browser profile via CDP:
+
+```bash
+python main.py --run demo --cdp http://127.0.0.1:9222
 ```
 
 ---
