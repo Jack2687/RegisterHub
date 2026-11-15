@@ -5,6 +5,9 @@ with genuine Chrome consistency, natural email input, modal dismissal, Cloudflar
 and instantaneous API key extraction.
 """
 import time
+import random
+import string
+from pathlib import Path
 from typing import Dict, Any, Optional
 from core.adapter import BaseSiteAdapter
 from core.identity import generate_identity
@@ -41,8 +44,14 @@ class MilionseekAdapter(BaseSiteAdapter):
             ident["email"] = custom_email
         else:
             # 100milionseek performs MX domain validation and blocks typical disposable domains.
-            # Use high-reputation domains (outlook.com, gmail.com, tempmail.io).
-            ident = generate_identity(email_domain="outlook.com", locale="US")
+            accepted_domains = ["outlook.com", "gmail.com", "proton.me", "icloud.com", "yahoo.com", "hotmail.com"]
+            chosen_domain = random.choice(accepted_domains)
+            ident = generate_identity(email_domain=chosen_domain, locale="US")
+            
+            # Append 4 random digits to ensure zero collision across batch runs
+            rnd_suffix = "".join(random.choices(string.digits, k=4))
+            user_part = ident["email"].split("@")[0]
+            ident["email"] = f"{user_part}_{rnd_suffix}@{chosen_domain}"
 
         self.account_data = ident
         return self.account_data
@@ -189,6 +198,17 @@ class MilionseekAdapter(BaseSiteAdapter):
                             self.account_data["api_key"] = api_key
                             # Standardize password field as api_key for accounts.txt export
                             self.account_data["password"] = api_key
+
+                            # Also save clean API key list to keys.txt for convenient copying
+                            try:
+                                out_dir = Path(self.config.get("output_dir", "./results"))
+                                out_dir.mkdir(parents=True, exist_ok=True)
+                                keys_file = out_dir / "keys.txt"
+                                with open(keys_file, "a", encoding="utf-8") as kf:
+                                    kf.write(f"{api_key}\n")
+                            except Exception:
+                                pass
+
                             return True
 
                 time.sleep(0.5)
