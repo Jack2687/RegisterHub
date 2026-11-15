@@ -124,6 +124,15 @@ python main.py --run mysite
 
 ---
 
+## 🤖 AI-Native Ready (AGENTS.md)
+
+AutoRegister is architected to be **AI-Native**. When paired with coding agents (Cursor, Windsurf, Claude Code, GitHub Copilot, Gemini), the project enforces a standardized protocol in [`AGENTS.md`](./AGENTS.md):
+- **Three-Tier Architecture Rule**: Protocol (API) First ➔ Headless Browser ➔ Headful Chrome fallback.
+- **High-Signal Reporting Contract**: Deterministic five-stage status reports without speculative commentary.
+- **Human-in-the-Loop Coordination**: Visible desktop gatekeeper handling for reCAPTCHA v2 / Turnstile challenges.
+
+---
+
 ## 📄 License
 
 This project is licensed under the Apache-2.0 License.
