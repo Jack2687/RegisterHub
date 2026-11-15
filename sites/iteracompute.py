@@ -63,16 +63,18 @@ class IteracomputeAdapter(BaseSiteAdapter):
     def check_turnstile_challenge(self) -> bool:
         """Detect whether Cloudflare Turnstile iframe is present on the page."""
         try:
-            for frame in self.page.frames:
-                if "challenges.cloudflare.com" in frame.url or "turnstile" in frame.url:
+            for _ in range(6):
+                for frame in self.page.frames:
+                    if "challenges.cloudflare.com" in frame.url or "turnstile" in frame.url:
+                        return True
+                if self.page.locator("iframe[src*='challenges.cloudflare.com'], iframe[src*='turnstile'], [class*='cf-turnstile']").count() > 0:
                     return True
-            if self.page.locator("iframe[src*='challenges.cloudflare.com'], iframe[src*='turnstile']").count() > 0:
-                return True
+                time.sleep(0.5)
         except Exception:
             pass
         return False
 
-    def wait_for_turnstile_verification(self, timeout_sec: int = 60) -> bool:
+    def wait_for_turnstile_verification(self, timeout_sec: int = 90) -> bool:
         """
         When Cloudflare Turnstile is detected, pause and guide the user to solve it in the visible UI.
         Once the submit button becomes enabled, automation automatically resumes.
@@ -86,6 +88,7 @@ class IteracomputeAdapter(BaseSiteAdapter):
         start_time = time.time()
         while time.time() - start_time < timeout_sec:
             try:
+                self.dismiss_cookie_banner()
                 submit_btn = self.page.locator("button[type='submit']").first
                 if submit_btn.count() > 0 and submit_btn.is_enabled():
                     print("[IteraCompute] Turnstile 人机验证已通过（提交按钮已激活），恢复自动化执行。")
