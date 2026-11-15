@@ -212,11 +212,26 @@ class MilionseekAdapter(BaseSiteAdapter):
         except Exception:
             pass
 
+    def try_click_turnstile(self) -> bool:
+        """Attempt to click Cloudflare Turnstile checkbox if interactive challenge is displayed."""
+        try:
+            for frame in self.page.frames:
+                if "challenges.cloudflare.com" in frame.url or "turnstile" in frame.url:
+                    for sel in ['input[type="checkbox"]', '#challenge-stage', '.ctp-checkbox-label', 'label.ctp-checkbox-label']:
+                        cb = frame.locator(sel).first
+                        if cb.count() > 0 and cb.is_visible():
+                            cb.click()
+                            time.sleep(0.5)
+                            return True
+        except Exception:
+            pass
+        return False
+
     def wait_for_turnstile(self, timeout_sec: int = 60) -> bool:
         """
         Wait for Cloudflare Turnstile token clearance.
         In genuine stealth Chrome, Turnstile typically passes automatically in 5~10s.
-        If flagged, falls back gracefully to human-in-the-loop prompt.
+        If interactive checkbox appears, auto-clicks it or falls back gracefully to human-in-the-loop prompt.
         """
         print("[*] [100milionseek] Waiting for Cloudflare Turnstile token clearance...")
         start_time = time.time()
@@ -235,7 +250,11 @@ class MilionseekAdapter(BaseSiteAdapter):
                     print(f"[+] [100milionseek] Turnstile token acquired (length: {len(tok)}).")
                     return True
 
-                if not prompted_user and time.time() - start_time > 12:
+                # If token not yet acquired after 4 seconds, attempt to auto-click interactive checkbox
+                if time.time() - start_time > 4:
+                    self.try_click_turnstile()
+
+                if not prompted_user and time.time() - start_time > 15:
                     prompted_user = True
                     print(f"\n{'=' * 65}")
                     print("  [100milionseek] 【需人机协同】Turnstile 正在验证中...")
