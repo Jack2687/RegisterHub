@@ -5,10 +5,12 @@ with genuine Chrome consistency, natural email input, modal dismissal, Cloudflar
 instantaneous API key extraction, and autonomous cascading referral pool management.
 """
 import time
+import os
 import json
 import random
 import string
 import requests
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Dict, Any, Optional
 from core.adapter import BaseSiteAdapter
@@ -21,11 +23,33 @@ class RefPoolManager:
     Manages autonomous cascading referral pool (母号接力裂变池).
     - Tracks how many invites each account has received (max 10).
     - Automatically rotates to the next available parent node when cap (10) is reached.
-    - Persists state to results/ref_pool.json.
+    - Persists state to results/ref_pool.json with cross-process file locking for concurrency.
     """
 
     def __init__(self, pool_path: Path):
         self.path = pool_path
+
+    @contextmanager
+    def _file_lock(self):
+        """Cross-process lock ensuring atomic read-modify-write across concurrent workers."""
+        lock_file = self.path.with_suffix(".lock")
+        lock_fd = None
+        for _ in range(80):
+            try:
+                lock_fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+                break
+            except OSError:
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            if lock_fd is not None:
+                try:
+                    os.close(lock_fd)
+                    if lock_file.exists():
+                        lock_file.unlink()
+                except Exception:
+                    pass
 
     def load(self) -> Dict[str, Any]:
         if self.path.exists():
@@ -42,61 +66,63 @@ class RefPoolManager:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
     def get_active_code(self, default_code: str = "3a4iwe7j") -> str:
-        data = self.load()
-        nodes = data.get("nodes", {})
-        active = data.get("active_code")
+        with self._file_lock():
+            data = self.load()
+            nodes = data.get("nodes", {})
+            active = data.get("active_code")
 
-        if active and active in nodes and not nodes[active].get("cap_reached") and nodes[active].get("invited", 0) < 10:
-            return active
+            if active and active in nodes and not nodes[active].get("cap_reached") and nodes[active].get("invited", 0) < 10:
+                return active
 
-        # Find first un-capped node
-        for code, node in nodes.items():
-            if not node.get("cap_reached") and node.get("invited", 0) < 10:
-                data["active_code"] = code
-                self.save(data)
-                return code
-
-        return default_code
-
-    def record_invite(self, used_code: str, new_code: Optional[str], new_email: str, new_key: str):
-        data = self.load()
-        nodes = data.setdefault("nodes", {})
-
-        # 1. Update the parent node that provided the referral code
-        if used_code in nodes:
-            nodes[used_code]["invited"] = nodes[used_code].get("invited", 0) + 1
-            cur_invited = nodes[used_code]["invited"]
-            if cur_invited >= 10:
-                nodes[used_code]["cap_reached"] = True
-                print(f"[RefPool] 🎯 恭喜！母号 [{used_code}] 已成功吃满 10 个 AFF（额外 1 亿 tokens/天 永久封顶）！")
-            else:
-                print(f"[RefPool] 📈 母号 [{used_code}] 进度: {cur_invited}/10")
-        else:
-            nodes[used_code] = {"invited": 1, "cap_reached": False}
-
-        # 2. Add the newly created account into the pool as a future parent node
-        if new_code and new_code not in nodes:
-            nodes[new_code] = {
-                "email": new_email,
-                "api_key": new_key,
-                "invited": 0,
-                "cap_reached": False
-            }
-            print(f"[RefPool] 🐣 新母号孵化入池: [{new_code}] ({new_email})")
-
-        # 3. Rotate active_code if current parent is capped
-        cur_active = data.get("active_code", used_code)
-        if cur_active in nodes and (nodes[cur_active].get("cap_reached") or nodes[cur_active].get("invited", 0) >= 10):
-            next_active = None
+            # Find first un-capped node
             for code, node in nodes.items():
                 if not node.get("cap_reached") and node.get("invited", 0) < 10:
-                    next_active = code
-                    break
-            data["active_code"] = next_active or used_code
-            if next_active and next_active != cur_active:
-                print(f"[RefPool] 🔄 自动接力切换：下一任挂载母号 ➔ [{next_active}]")
+                    data["active_code"] = code
+                    self.save(data)
+                    return code
 
-        self.save(data)
+            return default_code
+
+    def record_invite(self, used_code: str, new_code: Optional[str], new_email: str, new_key: str):
+        with self._file_lock():
+            data = self.load()
+            nodes = data.setdefault("nodes", {})
+
+            # 1. Update the parent node that provided the referral code
+            if used_code in nodes:
+                nodes[used_code]["invited"] = nodes[used_code].get("invited", 0) + 1
+                cur_invited = nodes[used_code]["invited"]
+                if cur_invited >= 10:
+                    nodes[used_code]["cap_reached"] = True
+                    print(f"[RefPool] 🎯 恭喜！母号 [{used_code}] 已成功吃满 10 个 AFF（额外 1 亿 tokens/天 永久封顶）！")
+                else:
+                    print(f"[RefPool] 📈 母号 [{used_code}] 进度: {cur_invited}/10")
+            else:
+                nodes[used_code] = {"invited": 1, "cap_reached": False}
+
+            # 2. Add the newly created account into the pool as a future parent node
+            if new_code and new_code not in nodes:
+                nodes[new_code] = {
+                    "email": new_email,
+                    "api_key": new_key,
+                    "invited": 0,
+                    "cap_reached": False
+                }
+                print(f"[RefPool] 🐣 新母号孵化入池: [{new_code}] ({new_email})")
+
+            # 3. Rotate active_code if current parent is capped
+            cur_active = data.get("active_code", used_code)
+            if cur_active in nodes and (nodes[cur_active].get("cap_reached") or nodes[cur_active].get("invited", 0) >= 10):
+                next_active = None
+                for code, node in nodes.items():
+                    if not node.get("cap_reached") and node.get("invited", 0) < 10:
+                        next_active = code
+                        break
+                data["active_code"] = next_active or used_code
+                if next_active and next_active != cur_active:
+                    print(f"[RefPool] 🔄 自动接力切换：下一任挂载母号 ➔ [{next_active}]")
+
+            self.save(data)
 
 
 def fetch_account_ref_code(api_key: str) -> Optional[str]:
