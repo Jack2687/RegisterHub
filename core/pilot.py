@@ -117,3 +117,71 @@ def smart_agree_tos(page: Page) -> bool:
         except Exception:
             continue
     return False
+
+
+def smart_create_key_flow(page: Page, default_name: str = "AutoKey", timeout: int = 10000) -> bool:
+    """
+    Anti-Abort Key Recovery Flow:
+    Automatically fills required Name/Description fields in 'Create API Key' modals
+    and checks necessary permission checkboxes before confirming, rescuing the asset.
+    """
+    print(f"[Pilot] Triggering smart_create_key_flow (default_name: {default_name})...")
+    name_selectors = [
+        'input[name*="name" i]',
+        'input[id*="name" i]',
+        'input[placeholder*="name" i]',
+        'input[placeholder*="Key Name" i]',
+        'input[placeholder*="Description" i]',
+        'div[role="dialog"] input[type="text"]',
+        '.modal input[type="text"]'
+    ]
+
+    # 1. Try filling key name
+    filled = False
+    for sel in name_selectors:
+        try:
+            loc = page.locator(sel).first
+            if loc.count() > 0 and loc.is_visible() and loc.is_enabled():
+                val = loc.input_value()
+                if not val.strip():
+                    loc.fill(default_name)
+                    print(f"    -> Filled API key name into {sel}: {default_name}")
+                    filled = True
+                    break
+        except Exception:
+            continue
+
+    # 2. Try checking permissions if any checkboxes exist inside dialog
+    try:
+        dialog_checkboxes = page.locator('div[role="dialog"] input[type="checkbox"], .modal input[type="checkbox"]')
+        for i in range(dialog_checkboxes.count()):
+            cb = dialog_checkboxes.nth(i)
+            if cb.is_visible() and not cb.is_checked():
+                cb.check(force=True)
+                time.sleep(0.1)
+    except Exception:
+        pass
+
+    # 3. Click confirmation / generate button
+    confirm_selectors = [
+        'button:has-text("Create Secret Key")',
+        'button:has-text("Create Key")',
+        'button:has-text("Create API Key")',
+        'button:has-text("Generate")',
+        'button:has-text("Generate Key")',
+        'button:has-text("Create")',
+        'button:has-text("Confirm")',
+        'button[type="submit"]'
+    ]
+    for btn_sel in confirm_selectors:
+        try:
+            btn = page.locator(btn_sel).first
+            if btn.count() > 0 and btn.is_visible() and btn.is_enabled():
+                print(f"    -> Clicking key generation button: {btn_sel}")
+                btn.click()
+                time.sleep(1.0)
+                return True
+        except Exception:
+            continue
+
+    return filled
