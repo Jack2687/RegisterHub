@@ -85,8 +85,10 @@ autoregister/
 │   └── solver.py          # Bezier curve track generator
 ├── sites/
 │   ├── __init__.py
-│   ├── demo_site.py       # Complete runnable demonstration adapter
-│   └── huggingface.py     # Hugging Face registration adapter
+│   ├── _template.py       # Production standard adapter development template
+│   ├── demo_site.py       # Complete runnable offline demonstration adapter
+│   ├── automation_exercise.py # Standard international benchmark (2-step wizard)
+│   └── huggingface.py     # Hugging Face registration adapter with WAF gate
 ├── config.json            # Global runtime configuration
 ├── main.py                # Command-line interface entrypoint
 ├── run.bat                # Windows interactive quick launcher

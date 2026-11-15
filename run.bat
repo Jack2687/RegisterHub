@@ -16,13 +16,14 @@ echo ======================================================
 echo.
 echo   [1] 运行开箱 Demo 演示 (本地离线靶场)
 echo   [2] 运行 Hugging Face 注册测试 (桌面有头窗口)
-echo   [3] 运行系统环境诊断 (Doctor)
-echo   [4] 输入目标网址直接探测 (--url)
-echo   [5] 一键生成新站适配器模板 (--scaffold)
+echo   [3] 运行全球通用注册靶场测试 (AutomationExercise 实战)
+echo   [4] 运行系统环境诊断 (Doctor)
+echo   [5] 输入目标网址直接探测 (--url)
+echo   [6] 一键生成新站适配器模板 (--scaffold)
 echo   [0] 退出
 echo.
 echo ======================================================
-set /p choice="请输入选项 [0-5]: "
+set /p choice="请输入选项 [0-6]: "
 
 if "%choice%"=="1" (
     echo.
@@ -40,24 +41,36 @@ if "%choice%"=="2" (
 )
 if "%choice%"=="3" (
     echo.
-    python main.py doctor
+    echo [*] 正在启动 AutomationExercise 实战靶场注册...
+    python main.py --run automation_exercise
     pause
     goto MENU
 )
 if "%choice%"=="4" (
+    echo.
+    python main.py doctor
+    pause
+    goto MENU
+)
+if "%choice%"=="5" (
     echo.
     set /p target_url="请输入目标注册网址: "
     python main.py --url %target_url%
     pause
     goto MENU
 )
-if "%choice%"=="5" (
+if "%choice%"=="6" (
     echo.
     set /p sname="请输入新站点名称 (例如 github / twitter): "
     set /p surl="请输入目标注册网址 (可选，直接回车跳过): "
     if "%surl%"=="" (
         python main.py --scaffold %sname%
     ) else (
+        python main.py --scaffold %sname% --url %surl%
+    )
+    pause
+    goto MENU
+)
         python main.py --scaffold %sname% --url %surl%
     )
     pause
