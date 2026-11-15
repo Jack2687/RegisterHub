@@ -9,7 +9,7 @@ from playwright.sync_api import BrowserContext, Browser, Playwright
 # JavaScript payload to mask automation traces and harmonize browser fingerprints
 STEALTH_JS_PAYLOAD = """
 (() => {
-    // 1. Mask navigator.webdriver
+    // 1. Ensure navigator.webdriver is boolean false
     Object.defineProperty(navigator, 'webdriver', {
         get: () => false,
         configurable: true
@@ -27,43 +27,7 @@ STEALTH_JS_PAYLOAD = """
         };
     }
 
-    // 3. Mask navigator.plugins
-    Object.defineProperty(navigator, 'plugins', {
-        get: () => {
-            const plugins = [
-                { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
-                { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
-                { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
-            ];
-            plugins.item = (i) => plugins[i] || null;
-            plugins.namedItem = (name) => plugins.find(p => p.name === name) || null;
-            plugins.refresh = () => {};
-            return plugins;
-        },
-        configurable: true
-    });
-
-    // 4. Mask navigator.languages
-    Object.defineProperty(navigator, 'languages', {
-        get: () => ['en-US', 'en'],
-        configurable: true
-    });
-
-    // 5. Harmonize WebGL vendor & renderer
-    const getParameter = WebGLRenderingContext.prototype.getParameter;
-    WebGLRenderingContext.prototype.getParameter = function(parameter) {
-        // UNMASKED_VENDOR_WEBGL
-        if (parameter === 37445) {
-            return 'Intel Inc.';
-        }
-        // UNMASKED_RENDERER_WEBGL
-        if (parameter === 37446) {
-            return 'Intel(R) UHD Graphics 630';
-        }
-        return getParameter.apply(this, arguments);
-    };
-
-    // 6. Harmonize notification permissions
+    // 3. Harmonize notification permissions
     if (window.Notification) {
         const originalQuery = window.navigator.permissions.query;
         window.navigator.permissions.query = (parameters) => (
