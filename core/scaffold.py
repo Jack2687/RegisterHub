@@ -142,7 +142,8 @@ def scaffold_site(site_name: str, target_url: Optional[str] = None, detected_fie
         submit_selector=submit_sel
     )
 
-    out_file = Path("sites") / f"{clean_name}.py"
+    root_dir = Path(__file__).resolve().parent.parent
+    out_file = root_dir / "sites" / f"{clean_name}.py"
     out_file.parent.mkdir(parents=True, exist_ok=True)
     out_file.write_text(code, encoding="utf-8")
     return out_file
