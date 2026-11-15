@@ -46,10 +46,13 @@ class DenoAdapter(BaseSiteAdapter):
             google_btn = 'button[name="provider"][value="google"]'
             
             self.page.wait_for_timeout(3000)
-            if self.page.locator(github_btn).count() > 0 or self.page.locator(google_btn).count() > 0:
+            has_github = self.page.locator(github_btn).count() > 0
+            has_google = self.page.locator(google_btn).count() > 0
+            if has_github or has_google:
                 print("[*] [deno] Detected third-party OAuth providers (GitHub / Google). No native password form available.")
                 return True
-            return True
+            print("[-] [deno] Could not locate OAuth provider buttons (GitHub or Google).")
+            return False
         except Exception as e:
             print(f"[-] [deno] Inspection error: {e}")
             return False

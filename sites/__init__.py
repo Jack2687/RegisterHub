@@ -30,7 +30,8 @@ def discover_adapters() -> Dict[str, Type[BaseSiteAdapter]]:
                         registry[stem[:-5]] = obj
                     break
         except Exception as e:
-            # Silent skip on syntax or import errors in unfinished draft adapters
-            pass
+            # Log warning on syntax or import errors instead of silent drop
+            import logging
+            logging.getLogger("autoregister").warning(f"Failed to load adapter {py_file.name}: {e}")
 
     return registry

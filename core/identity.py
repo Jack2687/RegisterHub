@@ -4,7 +4,7 @@ Generates multi-locale realistic personas, compliant passwords, and addresses.
 """
 import random
 import string
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 
 
 LOCALES = {
@@ -80,13 +80,14 @@ def generate_username(first: str, last: str) -> str:
     return random.choice(patterns)
 
 
-def generate_identity(email_domain: str = "example.com", locale: str = "US") -> Dict[str, Any]:
+def generate_identity(email_domain: Optional[str] = None, locale: str = "US") -> Dict[str, Any]:
     """Generate a cohesive, multi-field identity profile."""
     loc_data = LOCALES.get(locale.upper(), LOCALES["US"])
     first, last = generate_synthetic_name(locale)
     username = generate_username(first, last)
     password = generate_compliant_password()
-    email = f"{username}@{email_domain}"
+    domain = email_domain or random.choice(["tempmail.io", "mailtm.net", "guerrillamail.com"])
+    email = f"{username}@{domain}"
     
     city, state, postal = random.choice(loc_data["cities"])
     phone_suffix = "".join(random.choices(string.digits, k=10))
