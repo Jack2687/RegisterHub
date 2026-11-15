@@ -54,11 +54,20 @@ class HuggingFaceAdapter(BaseSiteAdapter):
 
     def check_waf_challenge(self) -> bool:
         """Check if AWS WAF / CloudFront bot challenge is currently displayed."""
-        title = self.page.title().lower()
-        if "确认您是人类" in title or "verify you are human" in title or "challenge" in title:
-            return True
-        if self.page.locator('iframe[src*="challenge"], div#challenge-running, #cf-challenge').count() > 0:
-            return True
+        for _ in range(3):
+            try:
+                title = self.page.title().lower()
+                if "确认您是人类" in title or "verify you are human" in title or "challenge" in title:
+                    return True
+                break
+            except Exception:
+                time.sleep(0.5)
+
+        try:
+            if self.page.locator('iframe[src*="challenge"], div#challenge-running, #cf-challenge').count() > 0:
+                return True
+        except Exception:
+            pass
         return False
 
     def wait_for_human_verification(self, target_selector: str, timeout_sec: int = 90) -> bool:
@@ -66,9 +75,6 @@ class HuggingFaceAdapter(BaseSiteAdapter):
         When bot challenge is detected, pause and guide the user to solve it in the visible UI.
         Once the target selector becomes visible, resumes automation.
         """
-        if not self.check_waf_challenge():
-            return True
-
         print(f"\n{'=' * 65}")
         print("  [HuggingFace] 【需人工交互】检测到 AWS WAF / 边缘人机验证挑战！")
         print(f"  请在当前弹出的桌面浏览器窗口中手动点击完成人机验证（等待上限：{timeout_sec} 秒）...")
@@ -79,19 +85,32 @@ class HuggingFaceAdapter(BaseSiteAdapter):
             target_loc.wait_for(state="visible", timeout=timeout_sec * 1000)
             print("[HuggingFace] 人机验证已完成，检测到目标表单就绪，恢复自动化执行。")
             return True
-        except Exception:
-            print(f"[HuggingFace] 等待超时（{timeout_sec}s），未检测到表单加载。")
+        except Exception as e:
+            print(f"[HuggingFace] 等待超时（{timeout_sec}s），未检测到表单加载：{e}")
             return False
 
     def fill_form(self, identity: Dict[str, Any]) -> bool:
         """Execute the two-step Hugging Face registration form with manual gate support."""
         print("[HuggingFace] Checking page security status...")
-        self.page.wait_for_load_state("domcontentloaded")
-        time.sleep(1)
+        try:
+            self.page.wait_for_load_state("domcontentloaded", timeout=15000)
+        except Exception:
+            pass
+        time.sleep(1.5)
 
-        # Handle initial WAF challenge if present
-        if not self.wait_for_human_verification('input[type="email"], input[name="email"]', timeout_sec=90):
-            return False
+        # Check if email input is already visible without needing manual interaction
+        email_ready = False
+        try:
+            email_check = self.page.locator('input[type="email"], input[name="email"]').first
+            if email_check.count() > 0 and email_check.is_visible():
+                email_ready = True
+        except Exception:
+            pass
+
+        # If not ready or WAF challenge is present, wait for human verification
+        if not email_ready or self.check_waf_challenge():
+            if not self.wait_for_human_verification('input[type="email"], input[name="email"]', timeout_sec=90):
+                return False
 
         # --- Step 1: Email & Password ---
         print("[HuggingFace] Filling Step 1: Email and Password...")
