@@ -111,9 +111,9 @@ def inspect_url(target_url: str, cdp_endpoint: str = None):
             except Exception:
                 browser = p.chromium.launch(**launch_kwargs)
 
+            # Let official Google Chrome use its native User-Agent and Client Hints to guarantee tri-consistency
             context = browser.new_context(
-                no_viewport=True,
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                no_viewport=True
             )
 
         apply_stealth_to_context(context)
@@ -168,12 +168,24 @@ def run_scaffold(site_name: str, target_url: str = None):
         print(f"[*] Pre-inspecting '{target_url}' to extract input selectors...")
         try:
             from playwright.sync_api import sync_playwright
+            from core.stealth import apply_stealth_to_context
             with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
+                launch_kwargs = {
+                    "headless": True,
+                    "args": ["--disable-blink-features=AutomationControlled", "--no-first-run"],
+                    "ignore_default_args": ["--enable-automation"]
+                }
+                try:
+                    browser = p.chromium.launch(channel="chrome", **launch_kwargs)
+                except Exception:
+                    browser = p.chromium.launch(**launch_kwargs)
+                context = browser.new_context()
+                apply_stealth_to_context(context)
+                page = context.new_page()
                 page.goto(target_url, timeout=25000, wait_until="domcontentloaded")
                 inspector = FormInspector(page)
                 detected = inspector.detect_inputs()
+                context.close()
                 browser.close()
             print("[+] Form fields successfully detected and pre-assembled into scaffold!")
         except Exception as e:

@@ -24,9 +24,10 @@ def discover_adapters() -> Dict[str, Type[BaseSiteAdapter]]:
             for _, obj in inspect.getmembers(mod, inspect.isclass):
                 if issubclass(obj, BaseSiteAdapter) and obj is not BaseSiteAdapter:
                     # Register by module stem name (e.g. demo_site -> demo_site, demo -> demo)
-                    key = py_file.stem.lower().replace("_site", "")
-                    registry[key] = obj
-                    registry[py_file.stem.lower()] = obj
+                    stem = py_file.stem.lower()
+                    registry[stem] = obj
+                    if stem.endswith("_site"):
+                        registry[stem[:-5]] = obj
                     break
         except Exception as e:
             # Silent skip on syntax or import errors in unfinished draft adapters

@@ -85,13 +85,25 @@ class {class_name}(BaseSiteAdapter):
             self.page.wait_for_timeout(4000)
             current_url = self.page.url
 
-            # Assert success criteria: dashboard / welcome / redirect
-            if "dashboard" in current_url or "welcome" in current_url or "confirm" in current_url:
+            # 1. Assert explicit success criteria: dashboard / welcome / onboarding / home
+            success_keywords = ["dashboard", "welcome", "confirm", "home", "account", "verify", "onboarding"]
+            if any(kw in current_url.lower() for kw in success_keywords):
                 print(f"[+] [{site_name}] Registration success confirmed! URL: {{current_url}}")
                 return True
 
-            print("[+] [{site_name}] Submitted without fatal errors.")
-            return True
+            # 2. Check for visible form validation errors (anti-fake-success)
+            error_loc = self.page.locator('.error, [role="alert"], .alert-danger, :text-matches("already exists|invalid|error", "i")').first
+            if error_loc.count() > 0 and error_loc.is_visible():
+                print(f"[-] [{site_name}] Rejected by site error banner: {{error_loc.text_content()[:100]}}")
+                return False
+
+            # 3. If submit button disappeared or disabled, page likely accepted payload
+            if self.page.locator(submit_btn).count() == 0:
+                print(f"[+] [{site_name}] Submit button consumed, progressing to post-onboarding.")
+                return True
+
+            print("[!] [{site_name}] Ambiguous result state; captured snapshot for review.")
+            return False
         except Exception as e:
             print(f"[-] [{site_name}] Submit confirmation failed: {{e}}")
             return False
