@@ -10,161 +10,165 @@
 </p>
 
 <p align="center">
-  <b>Modern Headless Account Lifecycle & Form Automation Framework</b><br>
+  <b>现代化无头账号生命周期测试与受控表单自动化框架</b><br>
   <i>A deterministic, anti-fingerprinting automation engine built for robust form orchestration and agentic workflows.</i>
+</p>
+
+<p align="center">
+  <a href="./README.md">简体中文</a> | <a href="./README_EN.md">English</a>
 </p>
 
 ---
 
-## Overview
+## 项目概述
 
-AutoRegister is an engineering-first automation framework designed to eliminate the fragility of traditional browser automation. Built on top of Playwright, OpenCV-based computer vision solvers, and Chrome DevTools Protocol (CDP), AutoRegister provides deterministic execution across modern single-page applications (SPAs), reactive state managers, and controlled DOM interfaces.
+AutoRegister 是一个面向工程研发的现代化 Web 自动化框架，旨在彻底解决传统无头脚本在复杂前端交互中的脆弱性问题。框架基于 Playwright 运行时、OpenCV 离线计算机视觉算子及 Chrome DevTools Protocol (CDP) 架构构建，为现代单页应用 (SPA)、响应式受控表单以及自动化测试提供确定性的交互与状态编排能力。
 
-### Engineering Core Pillars
+### 核心工程支柱
 
-- **Runtime Environment Parity**: Eliminates synthetic automation signatures via native Chrome runtime integration, strict prototype preservation (`[native code]`), and clean JavaScript execution context.
-- **Algorithmic Vision Solver**: Built-in computer vision pipeline featuring dual-pass Canny edge detection and human-kinetic Bezier curve trajectory generation, executing offline with zero cloud API dependencies.
-- **CDP Bridge Architecture**: Native integration with enterprise fingerprint browsers (AdsPower, BitBrowser) and local Chrome instances, allowing seamless reuse of clean residential IPs and persistent user sessions.
-- **Agentic Automation Protocol**: Natively integrated with `AGENTS.md`, enabling autonomous AI agents (Cursor, Claude Code, Windsurf, Gemini CLI) to probe DOM targets, generate adapters, and execute end-to-end verification.
+- **运行环境自洽性 (Runtime Environment Parity)**：通过原生 Chrome 二进制接入与底层自动化特征消除，保持 JavaScript 原型链纯净（`[native code]`），消除自动化标记对现代 Web 应用的异常干扰。
+- **离线视觉算法求解器 (Algorithmic Vision Solver)**：内置双通 Canny 边缘轮廓计算与三次贝塞尔拟人手部动力学模型，纯本地离线执行，零第三方付费 API 依赖。
+- **CDP 会话桥接架构 (CDP Bridge Architecture)**：深度支持外部指纹浏览器（AdsPower、比特浏览器等）与本地已登录 Chrome 会话无缝接入，复用既有干净住宅网络与登录状态。
+- **AI 代理原生集成规范 (Agentic Co-Pilot Protocol)**：仓库根目录内置工业级 `AGENTS.md` 交互契约，深度适配 Cursor、Claude Code、Windsurf 与 Gemini CLI，支持 AI 自主嗅探表单、装配适配器并完成闭环验证。
 
 ---
 
-## Architecture
+## 架构拓扑
 
 ```text
 register-community/
 ├── core/
-│   ├── adapter.py         # Abstract base adapter (BaseSiteAdapter) & lifecycle hooks
-│   ├── pilot.py           # Human-like keystroke dynamics & resilient interaction helpers
-│   ├── stealth.py         # Native Chrome consistency & CDP bridge engine
-│   ├── inspector.py       # Heuristic DOM form inspector (FormInspector)
-│   ├── solver.py          # OpenCV puzzle gap detector & Bezier trajectory planner
-│   ├── identity.py        # High-entropy synthetic persona & credential generator
-│   ├── mail_client.py     # Adaptive polling mailbox synchronization client
-│   ├── runner.py          # Deterministic task execution, snapshot logger & ledger writer
-│   ├── scaffold.py        # Automated adapter scaffolding & code generation engine
-│   └── exporter.py        # Bitwarden, 1Password, CSV & JSON credential exporter
-├── sites/                 # Production & reference adapters
-│   ├── _template.py       # Standard adapter implementation template
-│   ├── demo_site.py       # Self-contained offline Base64 reference target
-│   ├── quanticdata.py     # Slider puzzle & Bezier drag verification adapter
-│   ├── huggingface.py     # SvelteKit controlled component adapter
-│   ├── automation_exercise.py # Multi-step wizard workflow adapter
-│   ├── deno.py            # Modern cloud platform interaction adapter
-│   └── iteracompute.py    # Reactive SPA & modal handling adapter
-├── tests/                 # Unit & regression test suite
-├── config.json            # Global runtime configuration
-├── pytest.ini             # Test runner isolation rules
-├── main.py                # Unified CLI entry point
-├── run.bat                # Windows interactive execution bootstrap
-└── requirements.txt       # Core dependency manifest
+│   ├── adapter.py         # 抽象适配器基类 (BaseSiteAdapter) 与生命周期契约
+│   ├── pilot.py           # 拟人按键动力学 (human_type) 与智能交互守门员
+│   ├── stealth.py         # 原生环境自洽引擎与 CDP 会话桥接器
+│   ├── inspector.py       # 启发式 DOM 表单探测器 (FormInspector)
+│   ├── solver.py          # OpenCV 缺口匹配计算与贝塞尔轨迹规划器
+│   ├── identity.py        # 高熵多国身份与合规密码发生器
+│   ├── mail_client.py     # 毫秒级自适应退避邮箱轮询客户端
+│   ├── runner.py          # 调度引擎、黑匣子快照抓取与原子台账持久化
+│   ├── scaffold.py        # 适配器自动派生与预装配代码生成引擎
+│   └── exporter.py        # Bitwarden、1Password、CSV 及 JSON 资产导出器
+├── sites/                 # 业务与示范适配器池
+│   ├── _template.py       # 工业级标准适配器实现模板
+│   ├── demo_site.py       # 自包含离线 Base64 靶场适配器
+│   ├── quanticdata.py     # OpenCV 拼图滑块与贝塞尔拖拽验证适配器
+│   ├── huggingface.py     # SvelteKit 响应式受控表单适配器
+│   ├── automation_exercise.py # 两步式向导交互基准适配器
+│   ├── deno.py            # 现代云平台控制台交互适配器
+│   └── iteracompute.py    # 动态 SPA 与模态弹窗拦截治理适配器
+├── tests/                 # 单元与回归自动化测试套件
+├── config.json            # 全局浏览器运行配置
+├── pytest.ini             # Pytest 测试隔离规范
+├── main.py                # 统一命令行调度入口
+├── run.bat                # Windows 交互引导脚本 (CRLF 规范)
+└── requirements.txt       # 核心生产依赖清单
 ```
 
 ---
 
-## Showcase Adapters
+## 内置示范适配器矩阵
 
-AutoRegister includes six reference implementations covering diverse architectural paradigms:
+AutoRegister 开箱内置 6 个涵盖不同前端框架与交互范式的经典实战适配器：
 
-| Adapter Key | Target Environment | Technical Characteristics | Primary Evaluation Target |
+| 适配器标识 | 目标应用 | 技术实现特性 | 核心评测与验证重点 |
 | :--- | :--- | :--- | :--- |
-| `demo` | Embedded Base64 Target | Zero-configuration offline pipeline | Rapid runtime environment verification |
-| `quanticdata` | Quantic Data Service | OpenCV edge detection + Bezier kinematics | Slider puzzle resolution & reactive inputs |
-| `huggingface` | Hugging Face Community | SvelteKit controlled state management | Dynamic form validation & rate limit mitigation |
-| `automation_exercise` | Standard Benchmark Portal | Multi-stage registration wizard | Complex dropdown cascading & checkbox grids |
-| `deno` | Deno Console | Turnstile challenge & state probing | Modern cloud developer portal onboarding |
-| `iteracompute` | IteraCompute Engine | Asynchronous SPA & modal intervention | Blocking element clearance & explicit gate guards |
+| `demo` | 内置离线 Base64 靶场 | 零配置全离线管道 | 快速环境自洽性与测试生命周期验证 |
+| `quanticdata` | Quantic Data 服务 | OpenCV 缺口识别 + 贝塞尔动力学 | 拼图滑块挑战与现代响应式输入验证 |
+| `huggingface` | Hugging Face 社区 | SvelteKit 受控组件状态流转 | 动态校验规则与软频控熔断防护 |
+| `automation_exercise` | 标准测试基准靶场 | 多阶段向导向注册流 | 复杂下拉联动与多选框状态断言 |
+| `deno` | Deno Console 平台 | 现代平台交互与状态探测 | 云开发者平台接入与动态状态验证 |
+| `iteracompute` | IteraCompute 算力引擎 | 异步 SPA 与阻断弹窗自适应清理 | 显式条件等待 (Wait-for) 与视窗守门员 |
 
 ---
 
-## Quickstart
+## 快速上手
 
-### 1. Prerequisites and Installation
+### 1. 环境准备与依赖安装
 
 ```bash
-# Clone the repository
+# 克隆仓库
 git clone https://github.com/waw666waw666/register-community.git
 cd register-community
 
-# Install core dependencies
+# 安装 Python 生产依赖
 pip install -r requirements.txt
 
-# Install Playwright browser binaries
+# 安装 Playwright 浏览器内核
 playwright install chromium
 ```
 
-### 2. Runtime Environment Diagnostics
+### 2. 环境健康自检
 
-Verify host configuration, proxy availability, and dependency health:
+检测宿主机运行环境、代理可用性以及依赖完整性：
 
 ```bash
 python main.py doctor
 ```
 
-### 3. Baseline Verification
+### 3. 基线自测验证
 
-Execute the self-contained offline verification target (requires no network or proxy):
+执行内置离线靶场（无需外部网络或代理配置）：
 
 ```bash
 python main.py --run demo
 ```
 
-Resulting credentials and execution artifacts are written atomically to `results/accounts.txt`.
+生成的凭据记录将自动以原子写入模式持久化至 `results/accounts.txt`。
 
 ---
 
-## Command Line Interface (CLI)
+## 命令行接口 (CLI)
 
-### Adapter Discovery
-List all registered site adapters and their technical descriptors:
+### 查看已装载适配器
+列出所有已注册的适配器及其技术规格：
 ```bash
 python main.py --list
 ```
 
-### Automated Adapter Scaffolding
-Inspect a target registration page and generate a typed adapter skeleton pre-populated with discovered input selectors:
+### 自动化脚手架生成
+输入目标网页 URL，自动嗅探 DOM 输入字段并生成类型完整的适配器骨架代码：
 ```bash
-# Analyze target DOM and scaffold adapter skeleton
+# 智能探测目标网页并生成适配器代码
 python main.py --scaffold target_service --url https://target-service.com/signup
 
-# Execute scaffolded adapter
+# 执行生成的新适配器
 python main.py --run target_service
 ```
 
-### External CDP Session Attach
-Attach to an already running external browser instance (AdsPower, BitBrowser, or Chrome with `--remote-debugging-port`):
+### 外部指纹浏览器 CDP 桥接
+直接附加至已在运行的外部指纹浏览器（AdsPower、比特浏览器）或开启调试端口的 Chrome 实例：
 ```bash
 python main.py --run demo --cdp http://127.0.0.1:9222
 ```
 
-### Credential Vault Export
-Export verified account records into standardized credential management formats:
+### 密码库资产标准导出
+将测试产出的账号资产一键转换为标准格式：
 ```bash
-# Bitwarden / 1Password compatible JSON
+# 导出为 Bitwarden / 1Password 兼容 JSON
 python main.py export --export bitwarden
 
-# Standard CSV format
+# 导出为通用 CSV
 python main.py export --export csv
 
-# Raw JSON format
+# 导出为原始 JSON
 python main.py export --export json
 ```
 
 ---
 
-## AI Agent Integration (`AGENTS.md`)
+## AI 代理协作规范 (`AGENTS.md`)
 
-AutoRegister is architected for seamless collaboration with autonomous programming agents. The root `AGENTS.md` enforces strict engineering disciplines:
+AutoRegister 针对自主编程智能体进行了全流程规范定义。根目录的 `AGENTS.md` 约束以下核心纪律：
 
-- **Single Concurrency Default**: Enforces deterministic single-threaded execution by default to prevent desktop disruption and IP exhaustion; prompts for concurrency scaling only after sustained success.
-- **Stage-Gate Assertions**: Prohibits arbitrary timeout delays; mandates strict validation of URL mutations, DOM response states, and token persistence.
-- **Zero-Interference Process Lifecycle**: Manages child process trees explicitly via POSIX/Windows hooks, ensuring external user processes and personal browser sessions remain completely untouched.
+- **默认单并发纪律**：默认按单线程串行执行，避免无节制多开撕裂用户桌面；仅在单路稳定且等信占比超 50% 时主动提醒提速。
+- **阶段守门员断言**：严禁无目的的时间等待 (`time.sleep`)，必须通过 URL 状态、DOM 属性或凭据落盘事实进行强校验。
+- **宿主进程零干扰**：退出钩子严格基于明确的子进程树清理，严禁全局通杀系统进程，严禁全局抢占用户桌面焦点。
 
 ---
 
-## Verification & Testing
+## 测试套件执行
 
-Execute the test suite to validate core heuristics, OpenCV solvers, and code scaffolding:
+运行完整单元测试集以验证核心启发式探针、OpenCV 计算引擎与代码生成逻辑：
 
 ```bash
 pytest tests/
@@ -172,7 +176,7 @@ pytest tests/
 
 ---
 
-## Compliance & Security Notice
+## 开源协议与合规声明
 
-1. **License**: This project is licensed under the [Apache License 2.0](LICENSE).
-2. **Authorized Use Only**: AutoRegister is strictly intended for authorized security audits, integration testing, quality assurance automation, and academic research on web standards. Users are required to adhere to applicable laws and the Terms of Service of target endpoints. The authors assume no liability for unauthorized usage or policy violations.
+1. **开源协议**：本项目基于 [Apache License 2.0](LICENSE) 许可协议开源。
+2. **合规安全声明**：本项目定位为**授权环境下的自动化流程验证、测试账号生命周期管理与 Web 技术工程研究工具**。使用者须严格遵守相关法律法规及目标站点的服务条款 (Terms of Service)。严禁将本项目用于未经授权的渗透探测、欺诈或破坏性活动。滥用后果由使用者自行承担，与项目作者无关。
