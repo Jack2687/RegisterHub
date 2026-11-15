@@ -95,34 +95,27 @@ autoregister/
 
 ---
 
-## 📖 How to Add a New Site Adapter
+## 📖 How to Scaffold a New Site Adapter
 
-Create a new file in `sites/my_site.py` and inherit from `BaseSiteAdapter`:
+You don't need to write boilerplate code from scratch. AutoRegister provides an automated scaffolding tool that can inspect your target registration page and generate a production-ready adapter instantly:
 
-```python
-from core.adapter import BaseSiteAdapter
-from core.identity import generate_identity
+```bash
+# 1. Scaffold adapter with automatic form field pre-assembly
+python main.py --scaffold mysite --url https://target-service.com/signup
 
-class MySiteAdapter(BaseSiteAdapter):
-    def target_url(self) -> str:
-        return "https://target-service.com/register"
-
-    def prepare_identity(self):
-        self.account_data = generate_identity()
-        return self.account_data
-
-    def fill_form(self, identity):
-        self.page.fill('input[name="email"]', identity["email"])
-        self.page.fill('input[name="password"]', identity["password"])
-        return True
-
-    def submit_and_confirm(self):
-        self.page.click('button[type="submit"]')
-        self.page.wait_for_url("**/dashboard", timeout=15000)
-        return True
+# Or scaffold a clean standard template directly:
+python main.py --scaffold mysite
 ```
 
-Register your adapter in `main.py` or run it via the runner.
+This generates `sites/mysite.py` pre-equipped with humanized typing (`human_type`), smart clicking (`smart_click`), and automated TOS agreements (`smart_agree_tos`).
+
+### Run Your New Adapter Instantly
+
+Thanks to automatic dynamic adapter discovery, you can execute your newly created adapter immediately without manually modifying any registry:
+
+```bash
+python main.py --run mysite
+```
 
 ---
 

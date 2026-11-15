@@ -11,13 +11,8 @@ from core.runner import StandardRunner
 from core.inspector import FormInspector
 from core.identity import generate_identity
 from core.pilot import human_type, smart_agree_tos
-from sites.demo_site import DemoSiteAdapter
-from sites.huggingface import HuggingFaceAdapter
-
-ADAPTER_REGISTRY = {
-    "demo": DemoSiteAdapter,
-    "huggingface": HuggingFaceAdapter,
-}
+from core.scaffold import scaffold_site
+from sites import discover_adapters
 
 
 def load_config() -> dict:
@@ -165,11 +160,36 @@ def inspect_url(target_url: str, cdp_endpoint: str = None):
             browser.close()
 
 
+def run_scaffold(site_name: str, target_url: str = None):
+    print(f"[*] Scaffolding new adapter for '{site_name}'...")
+    detected = {}
+    if target_url:
+        print(f"[*] Pre-inspecting '{target_url}' to extract input selectors...")
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                page = browser.new_page()
+                page.goto(target_url, timeout=25000, wait_until="domcontentloaded")
+                inspector = FormInspector(page)
+                detected = inspector.detect_inputs()
+                browser.close()
+            print("[+] Form fields successfully detected and pre-assembled into scaffold!")
+        except Exception as e:
+            print(f"[!] Warning: Pre-inspection timed out or failed ({e}), generating standard template instead.")
+
+    out_path = scaffold_site(site_name, target_url, detected)
+    print(f"\n[+] Production scaffold successfully created at: {out_path.resolve()}")
+    print(f"[*] You can now test and run it immediately:")
+    print(f"    python main.py --run {site_name.lower()}\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description="AutoRegister Automation Engine")
-    parser.add_argument("--run", type=str, default=None, help="Target site adapter name (e.g. demo)")
+    parser.add_argument("--run", type=str, default=None, help="Target site adapter name (e.g. demo, huggingface)")
+    parser.add_argument("--scaffold", type=str, default=None, help="Scaffold a new site adapter template (e.g. twitter, github)")
     parser.add_argument("--count", type=int, default=1, help="Number of accounts to generate")
-    parser.add_argument("--url", type=str, default=None, help="Inspect and test autofill on a URL directly")
+    parser.add_argument("--url", type=str, default=None, help="Inspect URL or target URL for scaffolding")
     parser.add_argument("--cdp", type=str, default=None, help="Connect to an external Fingerprint/Anti-Detect browser CDP (e.g. http://127.0.0.1:9222)")
     parser.add_argument("command", nargs="?", default=None, help="Subcommand like 'doctor'")
 
@@ -179,19 +199,25 @@ def main():
         run_doctor()
         return
 
-    if args.url:
+    if args.scaffold:
+        run_scaffold(args.scaffold, target_url=args.url)
+        return
+
+    if args.url and not args.run:
         inspect_url(args.url, cdp_endpoint=args.cdp)
         return
 
     cfg = load_config()
     runner = StandardRunner(cfg, cdp_endpoint=args.cdp)
 
+    adapters = discover_adapters()
     adapter_name = (args.run or "demo").lower()
-    if adapter_name in ADAPTER_REGISTRY:
-        runner.execute_adapter(ADAPTER_REGISTRY[adapter_name], count=args.count)
+    
+    if adapter_name in adapters:
+        runner.execute_adapter(adapters[adapter_name], count=args.count)
     else:
-        available = ", ".join(ADAPTER_REGISTRY.keys())
-        print(f"[-] Unknown adapter '{adapter_name}'. Available: {available}")
+        available = ", ".join(sorted(adapters.keys()))
+        print(f"[-] Unknown adapter '{adapter_name}'. Available discovered adapters: {available}")
 
 
 if __name__ == "__main__":
