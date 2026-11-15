@@ -85,7 +85,7 @@ class QuanticdataAdapter(BaseSiteAdapter):
 
     def prepare_identity(self) -> Dict[str, Any]:
         """Generate synthetic credentials matching target requirements."""
-        use_disposable = self.config.get("use_disposable_mail", False)
+        use_disposable = self.config.get("use_disposable_mail", True)
         ident = generate_identity(locale="US")
 
         if use_disposable:

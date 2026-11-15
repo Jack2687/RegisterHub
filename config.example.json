@@ -1,0 +1,17 @@
+{
+  "browser": {
+    "headless": false,
+    "slow_mo": 50,
+    "timeout": 30000,
+    "enable_stealth": true,
+    "use_chrome_channel": true,
+    "proxy": null,
+    "cdp_endpoint": null
+  },
+  "output_dir": "./results",
+  "defaults": {
+    "country": "US",
+    "password_length": 14,
+    "use_disposable_mail": true
+  }
+}

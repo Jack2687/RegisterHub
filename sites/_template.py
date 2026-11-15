@@ -31,7 +31,7 @@ class SiteTemplateAdapter(BaseSiteAdapter):
         [TODO]: Customize synthetic identity generation.
         Supports locale switching: generate_identity(locale='US'|'UK'|'DE')
         """
-        use_disposable = self.config.get("use_disposable_mail", False)
+        use_disposable = self.config.get("use_disposable_mail", True)
         
         # 1. Generate realistic multi-field credentials
         ident = generate_identity(locale="US")

@@ -55,7 +55,8 @@ register-community/
 │   ├── huggingface.py     # SvelteKit 响应式受控表单适配器
 │   ├── automation_exercise.py # 两步式向导交互基准适配器
 │   ├── deno.py            # 现代云平台控制台交互适配器
-│   └── iteracompute.py    # 动态 SPA 与模态弹窗拦截治理适配器
+│   ├── iteracompute.py    # 动态 SPA 与模态弹窗拦截治理适配器
+│   └── milionseek.py      # 100milionseek 裂变母号接力与 Turnstile 过盾适配器
 ├── tests/                 # 单元与回归自动化测试套件
 ├── config.json            # 全局浏览器运行配置
 ├── pytest.ini             # Pytest 测试隔离规范
@@ -68,7 +69,7 @@ register-community/
 
 ## 内置示范适配器矩阵
 
-AutoRegister 开箱内置 6 个涵盖不同前端框架与交互范式的经典实战适配器：
+AutoRegister 开箱内置 7 个涵盖不同前端框架与交互范式的经典实战适配器：
 
 | 适配器标识 | 目标应用 | 技术实现特性 | 核心评测与验证重点 |
 | :--- | :--- | :--- | :--- |
@@ -78,6 +79,7 @@ AutoRegister 开箱内置 6 个涵盖不同前端框架与交互范式的经典�
 | `automation_exercise` | 标准测试基准靶场 | 多阶段向导向注册流 | 复杂下拉联动与多选框状态断言 |
 | `deno` | Deno Console 平台 | 现代平台交互与状态探测 | 云开发者平台接入与动态状态验证 |
 | `iteracompute` | IteraCompute 算力引擎 | 异步 SPA 与阻断弹窗自适应清理 | 显式条件等待 (Wait-for) 与视窗守门员 |
+| `milionseek` | 100milionseek 平台 | 真实 Chrome 环境 + Turnstile 识别 + 母号接力池 | 邀请裂变自主轮换与 API Key 毫秒提取 |
 
 ---
 

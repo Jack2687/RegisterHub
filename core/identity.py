@@ -80,23 +80,43 @@ def generate_username(first: str, last: str) -> str:
     return random.choice(patterns)
 
 
-def generate_identity(email_domain: Optional[str] = None, locale: str = "US") -> Dict[str, Any]:
-    """Generate a cohesive, multi-field identity profile."""
+def generate_identity(
+    email_domain: Optional[str] = None,
+    locale: str = "US",
+    use_disposable: bool = False,
+) -> Dict[str, Any]:
+    """Generate a cohesive, multi-field identity profile.
+
+    If use_disposable is True, dynamically allocates a real mailbox via DisposableMailClient.
+    If email_domain is given, constructs an address on that domain.
+    Otherwise uses an explicit mock domain (@local.dev) to avoid fabricating unowned mail domains.
+    """
     loc_data = LOCALES.get(locale.upper(), LOCALES["US"])
     first, last = generate_synthetic_name(locale)
     username = generate_username(first, last)
     password = generate_compliant_password()
-    domain = email_domain or random.choice(["tempmail.io", "mailtm.net", "guerrillamail.com"])
-    email = f"{username}@{domain}"
-    
+
+    if use_disposable:
+        try:
+            from core.mail_client import DisposableMailClient
+            client = DisposableMailClient()
+            email = client.create_mailbox()
+        except Exception:
+            domain = email_domain or "local.dev"
+            email = f"{username}@{domain}"
+    elif email_domain:
+        email = f"{username}@{email_domain}"
+    else:
+        email = f"{username}@local.dev"
+
     city, state, postal = random.choice(loc_data["cities"])
     phone_suffix = "".join(random.choices(string.digits, k=10))
     phone = f"{loc_data['phone_prefix']}{phone_suffix}"
-    
+
     birth_year = random.randint(1988, 2004)
     birth_month = random.randint(1, 12)
     birth_day = random.randint(1, 28)
-    
+
     return {
         "locale": locale.upper(),
         "first_name": first,

@@ -29,7 +29,7 @@ class HuggingFaceAdapter(BaseSiteAdapter):
 
     def prepare_identity(self) -> Dict[str, Any]:
         """Generate credentials for Hugging Face."""
-        use_disposable = self.config.get("use_disposable_mail", False)
+        use_disposable = self.config.get("use_disposable_mail", True)
         
         first, last = generate_synthetic_name()
         fullname = f"{first} {last}"
