@@ -9,8 +9,10 @@
 
 - **🕵️ Built-in Stealth & Fingerprint Engine**: Auto-injects anti-fingerprint masking scripts (overriding `navigator.webdriver=false`, WebGL renderer harmonization, plugin emulation).
 - **🌐 Fingerprint Browser Bridge (CDP)**: Natively connects to external anti-detect/fingerprint browsers (AdsPower, BitBrowser, Hubstudio, MoreLogin) via a single `--cdp` flag.
-- **🚀 Heuristic Form Inspection**: Pass any target registration URL with `--url`, and AutoRegister automatically identifies username, email, password, and submission controls.
-- **👤 Synthetic Identity Engine**: Generates coherent, believable multi-locale usernames, compliant high-entropy passwords, and realistic personas.
+- **🤖 Pilot Humanized Cadence**: Natural keystroke typing jitter (`human_type`), viewport scrolling, smart clicking, and automated Terms of Service (`smart_agree_tos`) agreement.
+- **📸 Blackbox Visual Snapshots**: Automatically captures full visual PNG snapshots on failure/exception under `results/snapshots/` for instant post-mortem debugging.
+- **🚀 Heuristic Form Inspection Pro**: Scans any live URL with `--url`, detecting username, email, password, confirm password, fullname, verification codes, and wizard buttons.
+- **👤 Multi-Locale Identity Engine**: Generates believable personas (US, UK, DE), phone numbers, street addresses, and strictly compliant high-entropy passwords.
 - **📬 Disposable Email Integration**: Built-in support for free disposable mailboxes to receive verification codes without paid third-party APIs.
 - **🧩 Local Slider & Track Simulator**: CPU-based puzzle calculation and non-linear bezier track generator mimicking human hand inertia.
 - **📦 Clean Architecture**: Extensible `BaseSiteAdapter` lifecycle design (`probe` -> `fill_form` -> `submit_and_confirm`).
@@ -74,9 +76,11 @@ python main.py --run demo --cdp http://127.0.0.1:9222
 autoregister/
 ├── core/
 │   ├── adapter.py         # BaseSiteAdapter abstract class
-│   ├── runner.py          # Execution scheduler & ledger recorder
-│   ├── inspector.py       # Heuristic DOM form inspector
+│   ├── runner.py          # Execution scheduler, snapshot capture & ledger recorder
+│   ├── pilot.py           # Humanized keystroke typing, smart click & TOS agree
+│   ├── inspector.py       # Heuristic DOM form inspector pro
 │   ├── identity.py        # Multi-locale synthetic identity generator
+│   ├── stealth.py         # Client-side anti-fingerprint masking & CDP bridge
 │   ├── mail_client.py     # Public disposable email polling client
 │   └── solver.py          # Bezier curve track generator
 ├── sites/
@@ -85,7 +89,7 @@ autoregister/
 │   └── huggingface.py     # Hugging Face registration adapter
 ├── config.json            # Global runtime configuration
 ├── main.py                # Command-line interface entrypoint
-├── run.bat                # Windows quick launcher
+├── run.bat                # Windows interactive quick launcher
 └── requirements.txt       # Project dependencies
 ```
 

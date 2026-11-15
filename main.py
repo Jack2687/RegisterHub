@@ -10,6 +10,7 @@ from pathlib import Path
 from core.runner import StandardRunner
 from core.inspector import FormInspector
 from core.identity import generate_identity
+from core.pilot import human_type, smart_agree_tos
 from sites.demo_site import DemoSiteAdapter
 from sites.huggingface import HuggingFaceAdapter
 
@@ -129,18 +130,32 @@ def inspect_url(target_url: str, cdp_endpoint: str = None):
             print("\n[+] Heuristic Detection Results:")
             for k, v in fields.items():
                 status = v if v else "Not found / Not visible"
-                print(f"    - {k:10s}: {status}")
+                print(f"    - {k:18s}: {status}")
 
             if any(fields.values()):
-                print("\n[*] Generating synthetic identity and testing autofill...")
+                print("\n[*] Generating synthetic multi-field identity and testing autofill...")
                 ident = generate_identity()
-                if fields["username"]:
-                    page.fill(fields["username"], ident["username"])
                 if fields["email"]:
-                    page.fill(fields["email"], ident["email"])
+                    print(f"    -> Typing Email: {ident['email']}")
+                    human_type(page, fields["email"], ident["email"])
                 if fields["password"]:
-                    page.fill(fields["password"], ident["password"])
-                print("[+] Form auto-filled. Browser will remain open for 10 seconds for review.")
+                    print(f"    -> Typing Password: {ident['password']}")
+                    human_type(page, fields["password"], ident["password"])
+                if fields["confirm_password"]:
+                    print(f"    -> Typing Confirm Password: {ident['password']}")
+                    human_type(page, fields["confirm_password"], ident["password"])
+                if fields["username"]:
+                    print(f"    -> Typing Username: {ident['username']}")
+                    human_type(page, fields["username"], ident["username"])
+                if fields["fullname"]:
+                    print(f"    -> Typing Fullname: {ident['full_name']}")
+                    human_type(page, fields["fullname"], ident["full_name"])
+
+                # Auto agree terms if checkbox found
+                smart_agree_tos(page)
+                
+                print("\n[+] Form autofill finished with humanized typing rhythms.")
+                print("[*] Browser will remain open for 10 seconds for visual inspection.")
                 page.wait_for_timeout(10000)
             else:
                 print("[-] Could not detect standard input selectors heuristically.")

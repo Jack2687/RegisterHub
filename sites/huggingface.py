@@ -1,20 +1,21 @@
 """
-Hugging Face Site Adapter.
-Automates account registration workflow for Hugging Face (https://huggingface.co/join).
-Supports human-in-the-loop manual verification when AWS WAF challenges are triggered.
+Hugging Face Site Adapter Pro.
+Automates account registration workflow for Hugging Face (https://huggingface.co/join)
+with humanized keystrokes, smart clicking, and manual verification gate.
 """
 import time
 from typing import Dict, Any, Optional
 from core.adapter import BaseSiteAdapter
 from core.identity import generate_identity, generate_synthetic_name, generate_compliant_password
 from core.mail_client import DisposableMailClient
+from core.pilot import human_type, smart_click, smart_agree_tos
 
 
 class HuggingFaceAdapter(BaseSiteAdapter):
     """
     Adapter for Hugging Face registration flow:
-    1. Step 1: Input email & password, proceed to Next
-    2. Step 2: Input username & full name, agree to Terms of Service, submit
+    1. Step 1: Input email & password with natural cadence, proceed to Next
+    2. Step 2: Input username & full name, agree to TOS, submit
     3. Step 3: Handle post-submission verification notice
     * Includes Human-in-the-loop pause for AWS WAF / CloudFront bot challenges.
     """
@@ -81,15 +82,15 @@ class HuggingFaceAdapter(BaseSiteAdapter):
         """
         print(f"\n{'=' * 65}")
         print("  [HuggingFace] 【需人工交互】检测到 AWS WAF / 边缘人机验证挑战！")
-        print(f"  请在当前弹出的全屏桌面浏览器窗口中手动点击完成人机验证（等待上限：{timeout_sec} 秒）...")
+        print(f"  请在当前全屏桌面浏览器窗口中手动点击人机验证按钮（等待上限：{timeout_sec} 秒）...")
         print(f"{'=' * 65}\n")
 
-        # Try auto-clicking standard "Start / 开始" button if present
+        # Try clicking standard "Start / 开始" button if directly visible
         try:
             start_btn = self.page.locator('button:has-text("开始"), button:has-text("Start")').first
             if start_btn.count() > 0 and start_btn.is_visible():
-                print("[HuggingFace] 尝试自动点击人机验证 [开始] 按钮...")
-                start_btn.click()
+                print("[HuggingFace] 尝试自动激活人机验证 [开始] 按钮...")
+                smart_click(self.page, start_btn)
         except Exception:
             pass
 
@@ -108,7 +109,7 @@ class HuggingFaceAdapter(BaseSiteAdapter):
         return False
 
     def fill_form(self, identity: Dict[str, Any]) -> bool:
-        """Execute the two-step Hugging Face registration form with manual gate support."""
+        """Execute the two-step Hugging Face registration form with natural typing."""
         print("[HuggingFace] Checking page security status...")
         time.sleep(1.5)
 
@@ -126,20 +127,16 @@ class HuggingFaceAdapter(BaseSiteAdapter):
             if not self.wait_for_human_verification('input[type="email"], input[name="email"]', timeout_sec=90):
                 return False
 
-        # --- Step 1: Email & Password ---
-        print(f"[HuggingFace] Filling Step 1: Email ({identity['email']}) and Password...")
+        # --- Step 1: Email & Password (Human typing) ---
+        print(f"[HuggingFace] Typing Step 1: Email ({identity['email']}) & Password...")
         try:
-            email_input = self.page.locator('input[type="email"], input[name="email"]').first
-            email_input.wait_for(state="visible", timeout=15000)
-            email_input.fill(identity["email"])
+            human_type(self.page, 'input[type="email"], input[name="email"]', identity["email"])
+            human_type(self.page, 'input[type="password"], input[name="password"]', identity["password"])
 
-            pwd_input = self.page.locator('input[type="password"], input[name="password"]').first
-            pwd_input.wait_for(state="visible", timeout=5000)
-            pwd_input.fill(identity["password"])
-
-            # Click Next / Submit button
-            next_btn = self.page.locator('button[type="submit"], button:has-text("Next")').first
-            next_btn.click()
+            # Click Next button
+            print("[HuggingFace] Clicking Next button...")
+            if not smart_click(self.page, 'button[type="submit"], button:has-text("Next")'):
+                return False
             time.sleep(2.0)
         except Exception as e:
             print(f"[HuggingFace] Step 1 failed: {e}")
@@ -151,22 +148,17 @@ class HuggingFaceAdapter(BaseSiteAdapter):
                 return False
 
         # --- Step 2: Username, Full Name, TOS ---
-        print(f"[HuggingFace] Filling Step 2: Username ({identity['username']}), Full Name & TOS...")
+        print(f"[HuggingFace] Typing Step 2: Username ({identity['username']}), Full Name & TOS...")
         try:
-            username_input = self.page.locator('input[name="username"], input#username').first
-            username_input.wait_for(state="visible", timeout=15000)
-            username_input.fill(identity["username"])
+            human_type(self.page, 'input[name="username"], input#username', identity["username"])
 
             # Full name (if present)
-            fullname_input = self.page.locator('input[name="fullname"], input#fullname')
-            if fullname_input.count() > 0 and fullname_input.first.is_visible():
-                fullname_input.first.fill(identity["fullname"])
+            fullname_loc = self.page.locator('input[name="fullname"], input#fullname')
+            if fullname_loc.count() > 0 and fullname_loc.first.is_visible():
+                human_type(self.page, fullname_loc.first, identity["fullname"])
 
-            # Terms of service checkbox
-            tos_checkbox = self.page.locator('input[type="checkbox"]').first
-            if tos_checkbox.count() > 0 and not tos_checkbox.is_checked():
-                tos_checkbox.check()
-
+            # Automatically agree to terms of service
+            smart_agree_tos(self.page)
             time.sleep(1.0)
             return True
         except Exception as e:
@@ -177,14 +169,14 @@ class HuggingFaceAdapter(BaseSiteAdapter):
         """Submit the finalized form and verify registration status."""
         print("[HuggingFace] Submitting final registration form...")
         try:
-            submit_btn = self.page.locator('button[type="submit"], button:has-text("Create Account")').first
-            submit_btn.click()
+            if not smart_click(self.page, 'button[type="submit"], button:has-text("Create Account")'):
+                return False
             
             # Wait for confirmation redirect or success message
             self.page.wait_for_timeout(4000)
             current_url = self.page.url
 
-            # Successful registration either routes to confirmation page, onboarding, or dashboard
+            # Successful registration routes to confirmation page, onboarding, or dashboard
             if "confirm" in current_url or "welcome" in current_url or "join" not in current_url:
                 print(f"[HuggingFace] Registration submitted successfully. URL: {current_url}")
                 return True
