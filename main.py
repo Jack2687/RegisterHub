@@ -11,6 +11,12 @@ from core.runner import StandardRunner
 from core.inspector import FormInspector
 from core.identity import generate_identity
 from sites.demo_site import DemoSiteAdapter
+from sites.huggingface import HuggingFaceAdapter
+
+ADAPTER_REGISTRY = {
+    "demo": DemoSiteAdapter,
+    "huggingface": HuggingFaceAdapter,
+}
 
 
 def load_config() -> dict:
@@ -130,12 +136,12 @@ def main():
     cfg = load_config()
     runner = StandardRunner(cfg)
 
-    # Default to demo site
-    adapter_name = args.run or "demo"
-    if adapter_name.lower() == "demo":
-        runner.execute_adapter(DemoSiteAdapter, count=args.count)
+    adapter_name = (args.run or "demo").lower()
+    if adapter_name in ADAPTER_REGISTRY:
+        runner.execute_adapter(ADAPTER_REGISTRY[adapter_name], count=args.count)
     else:
-        print(f"[-] Unknown adapter '{adapter_name}'. Available: demo")
+        available = ", ".join(ADAPTER_REGISTRY.keys())
+        print(f"[-] Unknown adapter '{adapter_name}'. Available: {available}")
 
 
 if __name__ == "__main__":
