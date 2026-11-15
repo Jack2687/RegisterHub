@@ -1,19 +1,17 @@
 """
 AutoRegister CLI Main Entrypoint.
 The Modern Headless Account & Form Automation Framework.
+
+Import policy: heavyweight modules that pull in Playwright are imported lazily,
+inside the functions that actually need a browser. This keeps dependency-free
+commands -- most importantly `doctor` -- runnable on a machine where Playwright
+has not been installed yet. A diagnostic tool that crashes before it can report
+what is missing is useless.
 """
 import sys
 import json
 import argparse
 from pathlib import Path
-
-from core.runner import StandardRunner
-from core.inspector import FormInspector
-from core.identity import generate_identity
-from core.pilot import human_type, smart_agree_tos
-from core.scaffold import scaffold_site
-from core.exporter import run_export
-from sites import discover_adapters
 
 
 def load_config() -> dict:
@@ -28,58 +26,24 @@ def load_config() -> dict:
 
 
 def run_doctor():
-    print("=" * 50)
-    print("  AutoRegister Diagnostics (Doctor)")
-    print("=" * 50)
-    
-    # 1. Python version
-    py_ver = sys.version.split()[0]
-    print(f"[+] Python Version: {py_ver} (Requirement: >= 3.10) ... OK")
+    """Run the environment diagnostic suite.
 
-    # 2. Playwright import
-    try:
-        import importlib.metadata
-        pw_ver = importlib.metadata.version("playwright")
-        print(f"[+] Playwright Library: v{pw_ver} ... OK")
-    except Exception:
-        try:
-            import playwright
-            print("[+] Playwright Library: Installed ... OK")
-        except ImportError:
-            print("[-] Playwright Library: NOT FOUND. Run 'pip install playwright' ... FAILED")
-
-    # 3. Pillow import
-    try:
-        import importlib.metadata
-        pil_ver = importlib.metadata.version("pillow")
-        print(f"[+] Pillow Library: v{pil_ver} ... OK")
-    except Exception:
-        try:
-            import PIL
-            print("[+] Pillow Library: Installed ... OK")
-        except ImportError:
-            print("[-] Pillow Library: NOT FOUND. Run 'pip install pillow' ... FAILED")
-
-    # 4. Requests import
-    try:
-        import importlib.metadata
-        req_ver = importlib.metadata.version("requests")
-        print(f"[+] Requests Library: v{req_ver} ... OK")
-    except Exception:
-        try:
-            import requests
-            print("[+] Requests Library: Installed ... OK")
-        except ImportError:
-            print("[-] Requests Library: NOT FOUND. Run 'pip install requests' ... FAILED")
-
-    print("=" * 50)
-    print("  All core checks evaluated. Environment ready.")
-    print("=" * 50)
+    Delegates to core.doctor, which performs real executable verification
+    (browser launch, OpenCV native call, filesystem write, network probe)
+    rather than merely confirming that modules import.
+    """
+    from core.doctor import run_doctor as _doctor
+    cfg = load_config()
+    output_dir = cfg.get("output_dir", "./results")
+    return _doctor(output_dir=output_dir)
 
 
 def inspect_url(target_url: str, cdp_endpoint: str = None):
     from playwright.sync_api import sync_playwright
     from core.stealth import apply_stealth_to_context, connect_fingerprint_browser
+    from core.inspector import FormInspector
+    from core.identity import generate_identity
+    from core.pilot import human_type, smart_agree_tos
     import os
     print(f"[*] Navigating to {target_url} for heuristic form inspection...")
     
@@ -162,6 +126,7 @@ def inspect_url(target_url: str, cdp_endpoint: str = None):
 
 
 def run_scaffold(site_name: str, target_url: str = None):
+    from core.scaffold import scaffold_site
     print(f"[*] Scaffolding new adapter for '{site_name}'...")
     detected = {}
     if target_url:
@@ -169,6 +134,7 @@ def run_scaffold(site_name: str, target_url: str = None):
         try:
             from playwright.sync_api import sync_playwright
             from core.stealth import apply_stealth_to_context
+            from core.inspector import FormInspector
             with sync_playwright() as p:
                 launch_kwargs = {
                     "headless": True,
@@ -211,10 +177,15 @@ def main():
     args = parser.parse_args()
 
     if args.command == "doctor":
-        run_doctor()
+        # Exit non-zero when blocking issues are found, so CI and wrapper
+        # scripts can gate on the real environment state.
+        ok = run_doctor()
+        if not ok:
+            sys.exit(1)
         return
 
     if args.command == "list" or args.list:
+        from sites import discover_adapters
         adapters = discover_adapters()
         print("=" * 65)
         print("  AutoRegister Community - Discovered Site Adapters")
@@ -238,6 +209,7 @@ def main():
         return
 
     if args.command == "export" or args.export:
+        from core.exporter import run_export
         fmt = args.export or "csv"
         try:
             exported_path = run_export(fmt=fmt)
@@ -255,8 +227,10 @@ def main():
         return
 
     cfg = load_config()
+    from core.runner import StandardRunner
     runner = StandardRunner(cfg, cdp_endpoint=args.cdp)
 
+    from sites import discover_adapters
     adapters = discover_adapters()
     adapter_name = (args.run or "demo").lower()
     
