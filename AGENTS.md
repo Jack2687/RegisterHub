@@ -153,22 +153,36 @@
 2. **严禁按进程名通杀**：退出或清理僵尸进程时，**严禁**执行 `taskkill /F /IM chrome.exe` 或 `killall chrome`！这会瞬间杀死用户日常个人浏览器与未保存文档。
 3. **精准作用于自身子进程**：任何窗口操作、CDP 连入或清理操作，**必须且只能**作用于当前脚本自身创建纳管的子进程 PID 或特定 Playwright `page` 对象。
 
-### 3.2 官方真机 Chrome 环境自洽三件套
-裸调未经脱敏的 Playwright 默认打包 Chromium 会自带 `--enable-automation` 标志且 `navigator.webdriver=true`，极易被识别并触发死循环验证。必须严格做到：
-1. **真机二进制**：通过 `channel="chrome"` 挂载系统已安装的官方 Google Chrome；
-2. **消除自动化特征**：启动参数强制配置 `ignore_default_args=["--enable-automation"]`、`--disable-blink-features=AutomationControlled`、`--no-first-run`；
-3. **指纹抹除细节**：CDP 注入必须将 `navigator.webdriver` 设为 **`false` (boolean)**，**严禁设为 `undefined`**（因为 `typeof !== 'boolean'` 会被检测脚本直接抓包现形）。
+### 3.2 官方真机 Chrome 环境自洽与指纹三一致性铁律 (Genuine Chrome Consistency)
+裸调未经脱敏的 Playwright 默认 Chromium 会自带 `--enable-automation` 且 `navigator.webdriver=true`，极易被 Cloudflare / Turnstile 识别并触发死循环验证（即便真人点击也无法放行）。必须严格遵守以下自洽铁律：
+1. **真机官方二进制**：必须通过 `channel="chrome"` 挂载系统官方 Google Chrome，享有原生编译特征与底层系统级组件；
+2. **剥离自动化标记**：启动参数强制配置 `ignore_default_args=["--enable-automation"]`、`--disable-blink-features=AutomationControlled`、`--no-first-run`、`--no-default-browser-check`；
+3. **指纹三一致性防线（UA ↔ Sec-CH-UA ↔ TLS 握手）**：
+   - **严禁硬编码外部版本号**：严禁在代码中写死类似 `Chrome/131.0.0.0` 的固定 User-Agent 常量！当宿主机 Chrome 内核为更高版本（如 157+）时，硬编码会导致 HTTP 头里的 UA 与底层发出的 `Sec-CH-UA` 及 TLS/JA4 握手特征直接矛盾，被 Cloudflare 判定为伪造指纹并永久卡死人机验证；
+   - 必须让真实官方 Chrome 使用其**原生自洽 User-Agent**，确保三者内核版本 100% 吻合。
+4. **严禁破坏 JavaScript 原生原型链（Monkey-Patching 禁令）**：
+   - 官方真机 Chrome 原生的 `navigator.plugins`、`languages`、`WebGLRenderingContext` 是完全合法的原生对象；
+   - **严禁使用 `Object.defineProperty` 粗暴篡改 `plugins` 或 `WebGL.getParameter`**！Cloudflare Turnstile 探针会检查 `Function.prototype.toString` 是否含有 `[native code]` 以及检测原型链槽位。一旦发现被外部脚本篡改，立即标记为 Bot 注入，导致真人点击验证码无限转圈失败；
+   - 抹除 webdriver 时必须将 `navigator.webdriver` 设为 **`false` (boolean)**，**严禁设为 `undefined`**（因为 `typeof !== 'boolean'` 会被检测脚本直接抓包现形）。
 
-### 3.3 数据完整性与防假成功防线（质量生命线）
+### 3.3 外部指纹浏览器 CDP 降维打击接入 (Anti-Detect Browser CDP Bridge)
+面对最高等级的企业级频控、住宅代理绑定或极度严苛的人机防护时，无需在 Python 层硬抗复杂的硬件级对抗，直接降维接入专业指纹浏览器：
+1. **支持平台**：AdsPower、比特浏览器 (BitBrowser)、Hubstudio，或用户日常已登录常用账号的个人 Chrome；
+2. **启动与接入规范**：
+   - 外部指纹浏览器开启远程调试端口（如 `9222` 或 AdsPower 动态端口）；
+   - 运行适配器时追加 `--cdp <endpoint>` 参数（或在 `config.json` 中配置 `"cdp_endpoint": "http://127.0.0.1:9222"`）；
+   - 框架自动转为 CDP 远程连入模式，完全复用外部浏览器已配置好的干净静态住宅 IP、独立 Canvas/WebGL 硬件指纹与真实 Cookie 历史。
+
+### 3.4 数据完整性与防假成功防线（质量生命线）
 1. **假成功零容忍 (No Fake Success)**：任何“注册成功”的宣称，必须有**二次独立硬性校验**佐证（如断言登录态 Cookie、断言专属控制台 URL 跳转、断言提纯 API Key）。没有二次确认严禁返回成功，不把“代码未报错”等同于“注册成功”。
 2. **空产出即失败 (Empty Output Is Failure)**：函数声称提取或生成了账号、密码或 Token，若字段为空（空字符串/空字典），必须判定为失败并抛出异常，绝不静默写入假数据污染台账。
 3. **阶段守门员断言 (Stage Gate Assertions)**：严禁在页面交互中无脑 `time.sleep(5)` 等待！必须使用带显式超时的条件等待（如 `wait_for_selector`、`expect(page).to_have_url`），条件未满足立即拦截并留下快照。
 
-### 3.4 Windows CRLF 换行符与终端编码铁律
+### 3.5 Windows CRLF 换行符与终端编码铁律
 1. **CRLF 强制**：所有 Windows 批处理脚本（`.bat` / `.cmd`）必须且只能使用 **Windows CRLF (`\r\n`)** 换行符！cmd.exe 解析无 CRLF 的 LF 文件会产生多行粘连断裂崩溃；
 2. **极简引导器**：`.bat` 仅作为启动引导器（`@echo off`、`chcp 65001 >nul`、拉起 Python），不堆砌长篇中文；
 3. **输出统一由 Python 纳管**：所有业务输出由 Python 纳管，并在脚本入口显式配置 `sys.stdout.reconfigure(encoding='utf-8')`，彻底消除终端乱码。
 
-### 3.5 工作区整洁与现场隔离纪律
+### 3.6 工作区整洁与现场隔离纪律
 1. **生产入口保持极简**：项目根目录仅允许存在 `run.bat`、`main.py`、`config.json` 和 `sites/`；
 2. **临时探针严格隔离**：所有探索性探测脚本、中间调试测试全部收拢至 `scratch/` 目录（已加入 `.gitignore`），严禁在根目录堆砌临时碎片文件。

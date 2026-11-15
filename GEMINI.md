@@ -23,8 +23,11 @@
 
 1. **宿主桌面零干扰**：
    - 严禁枚举窗口或强行抢焦点；退出或清理进程时严禁执行 `taskkill /F /IM chrome.exe` 通杀命令，仅精准操作自身纳管的子进程。
-2. **真机 Chrome 环境自洽**：
+2. **真机 Chrome 环境自洽与指纹三一致性**：
    - 必须通过 `channel="chrome"` 唤起官方 Google Chrome，剥离 `--enable-automation` 标志，并通过 CDP 将 `navigator.webdriver` 抹除为 `false`（boolean），严禁设为 `undefined`。
+   - **严禁硬编码外部 UA**：使用 Chrome 原生 UA，保证 `User-Agent` ↔ `Sec-CH-UA` ↔ TLS/JA4 握手特征在版本号上 100% 自洽。
+   - **严禁破坏原生原型链**：严禁 `Object.defineProperty` 篡改 `plugins` 或 `WebGL.getParameter`，避免丢失 `[native code]` 触发 Cloudflare 恶意 Bot 判定。
+   - **指纹浏览器直连降维打击**：支持 `--cdp <port>`（如 9222）直连 AdsPower / 比特浏览器 / 本地已登录 Chrome。
 3. **数据完整性与防假成功**：
    - 假成功零容忍：必须有二次独立状态/URL断言；
    - 空产出即失败：提取凭据若为空必须报失败；

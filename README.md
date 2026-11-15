@@ -7,8 +7,8 @@
 
 ## ✨ Features
 
-- **🕵️ Built-in Stealth & Fingerprint Engine**: Auto-injects anti-fingerprint masking scripts (overriding `navigator.webdriver=false`, WebGL renderer harmonization, plugin emulation).
-- **🌐 Fingerprint Browser Bridge (CDP)**: Natively connects to external anti-detect/fingerprint browsers (AdsPower, BitBrowser, Hubstudio, MoreLogin) via a single `--cdp` flag.
+- **🕵️ Native Genuine Chrome & Stealth Engine**: Launches system official Google Chrome (`channel="chrome"`) with stripped automation flags (`--disable-blink-features=AutomationControlled`, `navigator.webdriver=false`). Preserves JavaScript prototype chains (`[native code]`) without fragile monkey-patching, ensuring Cloudflare Turnstile and reCAPTCHA challenges pass naturally.
+- **🌐 Fingerprint Browser Bridge (CDP)**: Natively connects to external anti-detect/fingerprint browsers (AdsPower, BitBrowser, Hubstudio, MoreLogin, or standard Chrome with remote debugging) via a single `--cdp` flag.
 - **🤖 Pilot Humanized Cadence**: Natural keystroke typing jitter (`human_type`), viewport scrolling, smart clicking, and automated Terms of Service (`smart_agree_tos`) agreement.
 - **📸 Blackbox Visual Snapshots**: Automatically captures full visual PNG snapshots on failure/exception under `results/snapshots/` for instant post-mortem debugging.
 - **🚀 Heuristic Form Inspection Pro**: Scans any live URL with `--url`, detecting username, email, password, confirm password, fullname, verification codes, and wizard buttons.
@@ -70,6 +70,13 @@ Connect directly to your active anti-detect browser profile via CDP:
 ```bash
 python main.py --run demo --cdp http://127.0.0.1:9222
 ```
+
+### 6. Cloudflare Turnstile & Anti-Bot Resilience
+
+AutoRegister enforces **Fingerprint Tri-Consistency** (`User-Agent` ↔ `Sec-CH-UA` ↔ `TLS/JA4`):
+- Uses native Chrome User-Agent dynamically fetched from your system binary, avoiding hardcoded UA mismatches.
+- Never injects destructive monkey-patches into `plugins` or `WebGLRenderingContext`, preserving `[native code]` prototype integrity.
+- Under high-risk challenges (like Cloudflare Turnstile), interactive clicks pass successfully without triggering infinite loop reloads.
 
 ---
 
