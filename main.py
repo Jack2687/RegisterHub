@@ -200,6 +200,7 @@ def run_scaffold(site_name: str, target_url: str = None):
 def main():
     parser = argparse.ArgumentParser(description="AutoRegister Automation Engine")
     parser.add_argument("--run", type=str, default=None, help="Target site adapter name (e.g. demo, huggingface)")
+    parser.add_argument("--list", action="store_true", help="List all available site adapters")
     parser.add_argument("--scaffold", type=str, default=None, help="Scaffold a new site adapter template (e.g. twitter, github)")
     parser.add_argument("--count", type=int, default=1, help="Number of accounts to generate")
     parser.add_argument("--url", type=str, default=None, help="Inspect URL or target URL for scaffolding")
@@ -211,6 +212,29 @@ def main():
 
     if args.command == "doctor":
         run_doctor()
+        return
+
+    if args.command == "list" or args.list:
+        adapters = discover_adapters()
+        print("=" * 65)
+        print("  AutoRegister Community - Discovered Site Adapters")
+        print("=" * 65)
+        for name, cls in sorted(adapters.items()):
+            try:
+                url_attr = getattr(cls, "target_url", None)
+                if callable(url_attr):
+                    url = url_attr(None)
+                elif isinstance(url_attr, property):
+                    url = url_attr.fget(None)
+                else:
+                    url = str(url_attr) if url_attr else "N/A"
+            except Exception:
+                url = "N/A"
+            display_url = url if len(url) <= 60 else (url[:45] + "... [embedded html]")
+            print(f"  * {name:<22} -> {display_url}")
+        print("=" * 65)
+        print(f"  Total: {len(adapters)} adapters ready to run with 'python main.py --run <name>'")
+        print("=" * 65)
         return
 
     if args.command == "export" or args.export:

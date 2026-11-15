@@ -98,7 +98,10 @@ autoregister/
 │   ├── _template.py       # Production standard adapter development template
 │   ├── demo_site.py       # Complete runnable offline demonstration adapter
 │   ├── automation_exercise.py # Standard international benchmark (2-step wizard)
-│   └── huggingface.py     # Hugging Face registration adapter with WAF gate
+│   ├── huggingface.py     # Hugging Face registration adapter with WAF gate
+│   ├── deno.py            # Deno Deploy auth & Turnstile state detector
+│   ├── iteracompute.py    # Dynamic SPA form with cookie banner cleaner
+│   └── quanticdata.py     # OpenCV gap edge detection & accessible slider solver
 ├── config.json            # Global runtime configuration
 ├── main.py                # Command-line interface entrypoint
 ├── run.bat                # Windows interactive quick launcher
