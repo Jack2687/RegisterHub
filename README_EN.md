@@ -2,6 +2,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-22272e.svg?style=flat-square" alt="License"></a>
+  <a href="DISCLAIMER.md"><img src="https://img.shields.io/badge/Disclaimer-Legal%20Terms-red.svg?style=flat-square" alt="Disclaimer"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-3776ab.svg?style=flat-square&logo=python&logoColor=white" alt="Python Version"></a>
   <a href="https://playwright.dev/"><img src="https://img.shields.io/badge/Playwright-Engine-2EAD33.svg?style=flat-square&logo=playwright&logoColor=white" alt="Playwright"></a>
   <a href="https://opencv.org/"><img src="https://img.shields.io/badge/OpenCV-CV%20Engine-5C3EE8.svg?style=flat-square&logo=opencv&logoColor=white" alt="OpenCV"></a>
@@ -176,7 +177,12 @@ pytest tests/
 
 ---
 
-## Compliance & Security Notice
+## Disclaimer & Legal Notice
 
 1. **License**: This project is licensed under the [Apache License 2.0](LICENSE).
-2. **Authorized Use Only**: AutoRegister is strictly intended for authorized security audits, integration testing, quality assurance automation, and academic research on web standards. Users are required to adhere to applicable laws and the Terms of Service of target endpoints. The authors assume no liability for unauthorized usage or policy violations.
+2. **Legal Disclaimer**: AutoRegister is strictly intended for **authorized security audits, regression test automation, and web standards research**.
+   - **Accessing, downloading, or running this code constitutes unconditional agreement to be bound by the full Legal Disclaimer**;
+   - Mass registration abuse, credential stuffing, scraping protected assets, or circumventing commercial defenses is strictly prohibited;
+   - Users assume all legal risks and responsibilities. The authors accept zero liability for any damages or violations arising from misuse.
+
+> 📄 **Full Legal Disclaimer**: [DISCLAIMER.md](DISCLAIMER.md) · [简体中文免责声明](DISCLAIMER.zh.md)

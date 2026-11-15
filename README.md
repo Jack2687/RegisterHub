@@ -2,6 +2,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-22272e.svg?style=flat-square" alt="License"></a>
+  <a href="DISCLAIMER.zh.md"><img src="https://img.shields.io/badge/Disclaimer-Legal%20Terms-red.svg?style=flat-square" alt="Disclaimer"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-3776ab.svg?style=flat-square&logo=python&logoColor=white" alt="Python Version"></a>
   <a href="https://playwright.dev/"><img src="https://img.shields.io/badge/Playwright-Engine-2EAD33.svg?style=flat-square&logo=playwright&logoColor=white" alt="Playwright"></a>
   <a href="https://opencv.org/"><img src="https://img.shields.io/badge/OpenCV-CV%20Engine-5C3EE8.svg?style=flat-square&logo=opencv&logoColor=white" alt="OpenCV"></a>
@@ -178,7 +179,12 @@ pytest tests/
 
 ---
 
-## 开源协议与合规声明
+## 免责声明与开源协议
 
-1. **开源协议**：本项目基于 [Apache License 2.0](LICENSE) 许可协议开源。
-2. **合规安全声明**：本项目定位为**授权环境下的自动化流程验证、测试账号生命周期管理与 Web 技术工程研究工具**。使用者须严格遵守相关法律法规及目标站点的服务条款 (Terms of Service)。严禁将本项目用于未经授权的渗透探测、欺诈或破坏性活动。滥用后果由使用者自行承担，与项目作者无关。
+1. **开源许可证**：本项目基于 [Apache License 2.0](LICENSE) 许可协议发布。
+2. **法律免责声明**：本项目定位为**授权环境下的自动化流程走查、测试账号生命周期管理与 Web 工程研究工具**。
+   - **访问、克隆、下载或运行本项目即代表无条件受完整免责声明的法律约束**；
+   - 严禁将本项目用于未经授权的渗透探测、欺诈、黑灰产、高频批量操作或破坏性活动；
+   - 使用者承担运行本项目的全部法律风险与责任，滥用后果由使用者全权自负，与项目作者及贡献者无涉。
+
+> 📄 **完整法律免责声明**：[DISCLAIMER.zh.md](DISCLAIMER.zh.md) · [English Disclaimer](DISCLAIMER.md)
