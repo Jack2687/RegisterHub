@@ -31,12 +31,13 @@ class IteracomputeAdapter(BaseSiteAdapter):
     def prepare_identity(self) -> Dict[str, Any]:
         """Generate high-entropy synthetic credentials matching IteraCompute password policy."""
         use_disposable = self.config.get("use_disposable_mail", True)
-        ident = generate_identity(locale="US")
-        ident["password"] = generate_compliant_password(14)
-
         if use_disposable:
             self.mail_client = DisposableMailClient()
-            ident["email"] = self.mail_client.create_mailbox()
+            ident = generate_identity(locale="US", mail_client=self.mail_client)
+        else:
+            ident = generate_identity(locale="US")
+
+        ident["password"] = generate_compliant_password(14)
 
         self.account_data = ident
         return self.account_data

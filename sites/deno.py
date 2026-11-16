@@ -26,11 +26,11 @@ class DenoAdapter(BaseSiteAdapter):
     def prepare_identity(self) -> Dict[str, Any]:
         """Generate synthetic credentials matching target requirements."""
         use_disposable = self.config.get("use_disposable_mail", True)
-        ident = generate_identity(locale="US")
-        
         if use_disposable:
             self.mail_client = DisposableMailClient()
-            ident["email"] = self.mail_client.create_mailbox()
+            ident = generate_identity(locale="US", mail_client=self.mail_client)
+        else:
+            ident = generate_identity(locale="US")
 
         self.account_data = ident
         return self.account_data

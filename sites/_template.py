@@ -33,13 +33,12 @@ class SiteTemplateAdapter(BaseSiteAdapter):
         """
         use_disposable = self.config.get("use_disposable_mail", True)
         
-        # 1. Generate realistic multi-field credentials
-        ident = generate_identity(locale="US")
-        
-        # 2. Optionally hook up public disposable mailbox if email verification is enforced
+        # 1. Optionally hook up public disposable mailbox if email verification is enforced
         if use_disposable:
             self.mail_client = DisposableMailClient()
-            ident["email"] = self.mail_client.create_mailbox()
+            ident = generate_identity(locale="US", mail_client=self.mail_client)
+        else:
+            ident = generate_identity(locale="US")
 
         self.account_data = ident
         return self.account_data

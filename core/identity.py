@@ -84,10 +84,12 @@ def generate_identity(
     email_domain: Optional[str] = None,
     locale: str = "US",
     use_disposable: bool = False,
+    mail_client: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Generate a cohesive, multi-field identity profile.
 
-    If use_disposable is True, dynamically allocates a real mailbox via DisposableMailClient.
+    If mail_client is provided, delegates mailbox creation to it.
+    Else if use_disposable is True, dynamically allocates a real mailbox via DisposableMailClient.
     If email_domain is given, constructs an address on that domain.
     Otherwise uses an explicit mock domain (@local.dev) to avoid fabricating unowned mail domains.
     """
@@ -96,7 +98,13 @@ def generate_identity(
     username = generate_username(first, last)
     password = generate_compliant_password()
 
-    if use_disposable:
+    if mail_client is not None:
+        try:
+            email = mail_client.create_mailbox()
+        except Exception:
+            domain = email_domain or "local.dev"
+            email = f"{username}@{domain}"
+    elif use_disposable:
         try:
             from core.mail_client import DisposableMailClient
             client = DisposableMailClient()

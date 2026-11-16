@@ -35,14 +35,14 @@ class HuggingFaceAdapter(BaseSiteAdapter):
         fullname = f"{first} {last}"
         password = generate_compliant_password(14)
         
-        raw_ident = generate_identity()
-        username = raw_ident["username"].replace(".", "-").lower()
-
         if use_disposable:
             self.mail_client = DisposableMailClient()
-            email = self.mail_client.create_mailbox()
+            raw_ident = generate_identity(mail_client=self.mail_client)
         else:
-            email = raw_ident["email"]
+            raw_ident = generate_identity()
+
+        username = raw_ident["username"].replace(".", "-").lower()
+        email = raw_ident["email"]
 
         self.account_data = {
             "username": username,
