@@ -56,6 +56,7 @@ register-community/
 │   ├── deepgram.py        # Deepgram $200 USD allowance & key harvesting adapter
 │   ├── amd.py             # AMD AI Developer Program onboarding adapter
 │   ├── coarena.py         # Post-Google OAuth pure protocol registration & API key minting
+│   ├── milionseek.py      # 100milionseek 100M tokens/day key harvester & Turnstile solver
 │   └── automation_exercise.py # Multi-step wizard workflow adapter
 ├── tests/                 # Unit & regression test suite
 ├── config.json            # Global runtime configuration
@@ -78,6 +79,7 @@ AutoRegister includes reference implementations covering diverse architectural p
 | `deepgram` | Deepgram Voice AI | Google reCAPTCHA v2 active penetration | $200 USD free credit allowance & API key extraction |
 | `amd` | AMD AI Developer Program | Akamai telemetry parity + OneTrust clearance | Big Tech AI developer registration & token acquisition |
 | `coarena` | Coarena AI Platform | **Post-Google OAuth Protocol Registration & Key Minting** | Demonstrates OAuth session capture, pure REST terms acceptance & instant API key minting |
+| `milionseek` | 100milionseek Platform | **100M Tokens/day Free Compute** + Turnstile Clearance | Instant on-page key generation (no mail verification needed) + referral cascade pool |
 | `automation_exercise` | Standard Benchmark Portal | Multi-stage registration wizard | Complex dropdown cascading & checkbox grids |
 
 ---
