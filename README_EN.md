@@ -1,4 +1,4 @@
-# AutoRegister
+# RegisterHub
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-22272e.svg?style=flat-square" alt="License"></a>
@@ -21,7 +21,7 @@
 
 --- ## Overview
 
-AutoRegister is an engineering-first automation framework designed to eliminate the fragility of traditional browser automation. Built on top of Playwright, OpenCV-based computer vision solvers, and Chrome DevTools Protocol (CDP), AutoRegister provides deterministic execution across modern single-page applications (SPAs), reactive state managers, and controlled DOM interfaces.
+RegisterHub is an engineering-first automation framework designed to eliminate the fragility of traditional browser automation. Built on top of Playwright, OpenCV-based computer vision solvers, and Chrome DevTools Protocol (CDP), RegisterHub provides deterministic execution across modern single-page applications (SPAs), reactive state managers, and controlled DOM interfaces.
 
 ### Engineering Core Pillars
 
@@ -64,7 +64,7 @@ register-community/
 
 --- ## Showcase Adapters
 
-AutoRegister includes reference implementations covering diverse architectural paradigms:
+RegisterHub includes reference implementations covering diverse architectural paradigms:
 
 | Adapter Key | Target Environment | Technical Characteristics | Primary Evaluation Target |
 | :--- | :--- | :--- | :--- |
@@ -84,10 +84,10 @@ AutoRegister includes reference implementations covering diverse architectural p
 
 | Standalone Project | Key Features & Free Benefits | Repository Direct Link |
 | :--- | :--- | :--- |
-| **[Deepgram AutoRegister](https://github.com/waw666waw666/deepgram-register)** | Official **$200 USD Free Credit Allowance** + reCAPTCHA v2 Penetration + Pure REST Protocol Key Extraction | [GitHub Repo](https://github.com/waw666waw666/deepgram-register) |
-| **[100MilionSeek AutoRegister](https://github.com/waw666waw666/100milionseek-register)** | **100M Tokens/day Free Allowance** + Turnstile Clearance + Instant Card Key Harvester + Referral Pool | [GitHub Repo](https://github.com/waw666waw666/100milionseek-register) |
-| **[AMD AI Dev AutoRegister](https://github.com/waw666waw666/amd-register)** | Official AMD AI Developer Program + Akamai Telemetry Parity + OneTrust Modal Penetration | [GitHub Repo](https://github.com/waw666waw666/amd-register) |
-| **[Coarena AutoRegister](https://github.com/waw666waw666/coarena-register)** | **Post-OAuth Pure REST Protocol Key Minting** + Session Capture + Terms Acceptance & Quota Validation | [GitHub Repo](https://github.com/waw666waw666/coarena-register) |
+| **[Deepgram Register](https://github.com/waw666waw666/deepgram-register)** | Official **$200 USD Free Credit Allowance** + reCAPTCHA v2 Penetration + Pure REST Protocol Key Extraction | [GitHub Repo](https://github.com/waw666waw666/deepgram-register) |
+| **[100MilionSeek Register](https://github.com/waw666waw666/100milionseek-register)** | **100M Tokens/day Free Allowance** + Turnstile Clearance + Instant Card Key Harvester + Referral Pool | [GitHub Repo](https://github.com/waw666waw666/100milionseek-register) |
+| **[AMD AI Dev Register](https://github.com/waw666waw666/amd-register)** | Official AMD AI Developer Program + Akamai Telemetry Parity + OneTrust Modal Penetration | [GitHub Repo](https://github.com/waw666waw666/amd-register) |
+| **[Coarena Register](https://github.com/waw666waw666/coarena-register)** | **Post-OAuth Pure REST Protocol Key Minting** + Session Capture + Terms Acceptance & Quota Validation | [GitHub Repo](https://github.com/waw666waw666/coarena-register) |
 
 --- ## Quickstart
 
@@ -125,7 +125,7 @@ Resulting credentials and execution artifacts are written atomically to `results
 
 --- ## Email Verification & Mailbox Strategies
 
-Target platforms maintain diverse risk-control rules for signup mailboxes. AutoRegister provides three flexible tiers:
+Target platforms maintain diverse risk-control rules for signup mailboxes. RegisterHub provides three flexible tiers:
 
 1. **Zero-Email-Verification Targets (Instant Minting)**:
    - Showcase Target: `100milionseek`
@@ -182,7 +182,7 @@ python main.py export --export json
 
 --- ## AI Agent Integration (`AGENTS.md`)
 
-AutoRegister is architected for seamless collaboration with autonomous programming agents. The root `AGENTS.md` enforces strict engineering disciplines:
+RegisterHub is architected for seamless collaboration with autonomous programming agents. The root `AGENTS.md` enforces strict engineering disciplines:
 
 - **Single Concurrency Default**: Enforces deterministic single-threaded execution by default to prevent desktop disruption and IP exhaustion; prompts for concurrency scaling only after sustained success.
 - **Stage-Gate Assertions**: Prohibits arbitrary timeout delays; mandates strict validation of URL mutations, DOM response states, and token persistence.
@@ -199,7 +199,7 @@ pytest tests/
 --- ## Disclaimer & Legal Notice
 
 1. **License**: This project is licensed under the [Apache License 2.0](LICENSE).
-2. **Legal Disclaimer**: AutoRegister is strictly intended for **authorized security audits, regression test automation, and web standards research**.
+2. **Legal Disclaimer**: RegisterHub is strictly intended for **authorized security audits, regression test automation, and web standards research**.
    - **Accessing, downloading, or running this code constitutes unconditional agreement to be bound by the full Legal Disclaimer**;
    - Mass registration abuse, credential stuffing, scraping protected assets, or circumventing commercial defenses is strictly prohibited;
    - Users assume all legal risks and responsibilities. The authors accept zero liability for any damages or violations arising from misuse.

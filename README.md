@@ -1,4 +1,4 @@
-# AutoRegister
+# RegisterHub
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-22272e.svg?style=flat-square" alt="License"></a>
@@ -21,7 +21,7 @@
 
 --- ## 项目概述
 
-AutoRegister 是一个面向工程研发的现代化 Web 自动化框架，旨在彻底解决传统无头脚本在复杂前端交互中的脆弱性问题。框架基于 Playwright 运行时、OpenCV 离线计算机视觉算子及 Chrome DevTools Protocol (CDP) 架构构建，为现代单页应用 (SPA)、响应式受控表单以及自动化测试提供确定性的交互与状态编排能力。
+RegisterHub 是一个面向工程研发的现代化 Web 自动化框架，旨在彻底解决传统无头脚本在复杂前端交互中的脆弱性问题。框架基于 Playwright 运行时、OpenCV 离线计算机视觉算子及 Chrome DevTools Protocol (CDP) 架构构建，为现代单页应用 (SPA)、响应式受控表单以及自动化测试提供确定性的交互与状态编排能力。
 
 ### 核心工程支柱
 
@@ -64,7 +64,7 @@ register-community/
 
 --- ## 内置示范适配器矩阵
 
-AutoRegister 开箱内置涵盖不同前端技术栈与复杂交互范式的经典实战适配器：
+RegisterHub 开箱内置涵盖不同前端技术栈与复杂交互范式的经典实战适配器：
 
 | 适配器标识 | 目标应用 | 技术实现特性 | 核心评测与验证重点 |
 | :--- | :--- | :--- | :--- |
@@ -84,10 +84,10 @@ AutoRegister 开箱内置涵盖不同前端技术栈与复杂交互范式的经�
 
 | 独立开源项目 | 核心福利与架构亮点 | 独立工程直达 |
 | :--- | :--- | :--- |
-| **[Deepgram AutoRegister](https://github.com/waw666waw666/deepgram-register)** | 官方赠送 **$200 美元真金使用额度** + 谷歌 reCAPTCHA v2 主动穿透 + 纯 REST 协议秒级提 Key | [GitHub 仓库](https://github.com/waw666waw666/deepgram-register) |
-| **[100MilionSeek AutoRegister](https://github.com/waw666waw666/100milionseek-register)** | **每天免费 1 亿 Tokens** + Turnstile 穿透 + 免收信页面卡片秒出 Key + 母号裂变接力 | [GitHub 仓库](https://github.com/waw666waw666/100milionseek-register) |
-| **[AMD AI Dev AutoRegister](https://github.com/waw666waw666/amd-register)** | AMD 官方 AI 开发者计划注册 + Akamai 遥测自洽 + OneTrust 模态弹窗穿透 | [GitHub 仓库](https://github.com/waw666waw666/amd-register) |
-| **[Coarena AutoRegister](https://github.com/waw666waw666/coarena-register)** | **谷歌登录后 100% 协议提 Key** + OAuth 会话捕获 + 条款签署与每日额度秒验 | [GitHub 仓库](https://github.com/waw666waw666/coarena-register) |
+| **[Deepgram Register](https://github.com/waw666waw666/deepgram-register)** | 官方赠送 **$200 美元真金使用额度** + 谷歌 reCAPTCHA v2 主动穿透 + 纯 REST 协议秒级提 Key | [GitHub 仓库](https://github.com/waw666waw666/deepgram-register) |
+| **[100MilionSeek Register](https://github.com/waw666waw666/100milionseek-register)** | **每天免费 1 亿 Tokens** + Turnstile 穿透 + 免收信页面卡片秒出 Key + 母号裂变接力 | [GitHub 仓库](https://github.com/waw666waw666/100milionseek-register) |
+| **[AMD AI Dev Register](https://github.com/waw666waw666/amd-register)** | AMD 官方 AI 开发者计划注册 + Akamai 遥测自洽 + OneTrust 模态弹窗穿透 | [GitHub 仓库](https://github.com/waw666waw666/amd-register) |
+| **[Coarena Register](https://github.com/waw666waw666/coarena-register)** | **谷歌登录后 100% 协议提 Key** + OAuth 会话捕获 + 条款签署与每日额度秒验 | [GitHub 仓库](https://github.com/waw666waw666/coarena-register) |
 
 --- ## 快速上手
 
@@ -125,7 +125,7 @@ python main.py --run demo
 
 --- ## 关于邮箱与验证码接收策略 (Email Strategies)
 
-不同目标平台对注册邮箱的风控规则各异，AutoRegister 为开发者提供了三级透明收信策略：
+不同目标平台对注册邮箱的风控规则各异，RegisterHub 为开发者提供了三级透明收信策略：
 
 1. **零收信门槛站点（即时秒出，新手首选）**：
    - 示范项目：`100milionseek`
@@ -182,7 +182,7 @@ python main.py export --export json
 
 --- ## AI 代理协作规范 (`AGENTS.md`)
 
-AutoRegister 针对自主编程智能体进行了全流程规范定义。根目录的 `AGENTS.md` 约束以下核心纪律：
+RegisterHub 针对自主编程智能体进行了全流程规范定义。根目录的 `AGENTS.md` 约束以下核心纪律：
 
 - **默认单并发纪律**：默认按单线程串行执行，避免无节制多开撕裂用户桌面；仅在单路稳定且等信占比超 50% 时主动提醒提速。
 - **阶段守门员断言**：严禁无目的的时间等待 (`time.sleep`)，必须通过 URL 状态、DOM 属性或凭据落盘事实进行强校验。

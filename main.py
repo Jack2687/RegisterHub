@@ -1,5 +1,5 @@
 """
-AutoRegister CLI Main Entrypoint.
+RegisterHub CLI Main Entrypoint.
 The Modern Headless Account & Form Automation Framework.
 
 Import policy: heavyweight modules that pull in Playwright are imported lazily,
@@ -164,7 +164,7 @@ def run_scaffold(site_name: str, target_url: str = None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="AutoRegister Automation Engine")
+    parser = argparse.ArgumentParser(description="RegisterHub Automation Engine")
     parser.add_argument("--run", type=str, default=None, help="Target site adapter name (e.g. demo, huggingface)")
     parser.add_argument("--list", action="store_true", help="List all available site adapters")
     parser.add_argument("--scaffold", type=str, default=None, help="Scaffold a new site adapter template (e.g. twitter, github)")
@@ -188,7 +188,7 @@ def main():
         from sites import discover_adapters
         adapters = discover_adapters()
         print("=" * 65)
-        print("  AutoRegister Community - Discovered Site Adapters")
+        print("  RegisterHub - Discovered Site Adapters")
         print("=" * 65)
         for name, cls in sorted(adapters.items()):
             try:

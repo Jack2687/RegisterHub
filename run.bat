@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-title AutoRegister Community Runner
+title RegisterHub Runner
 
 if not "%1"=="" (
     python main.py %*
@@ -11,7 +11,7 @@ if not "%1"=="" (
 :MENU
 cls
 echo ======================================================
-echo           AutoRegister Community CLI Runner
+echo           RegisterHub CLI Runner
 echo ======================================================
 echo.
 echo   [1] 运行开箱 Demo 演示 (本地离线靶场)

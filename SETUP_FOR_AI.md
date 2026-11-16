@@ -1,4 +1,4 @@
-# AutoRegister Community - AI 全自动环境装配与接管协议 (SETUP_FOR_AI.md)
+# RegisterHub Community - AI 全自动环境装配与接管协议 (SETUP_FOR_AI.md)
 
 > **面向对象**：在宿主机上运行的 AI 编程助手（Cursor / Claude Code / Windsurf / GitHub Copilot / Gemini 等）。  
 > **核心使命**：自主完成开源社区版的新环境探测、依赖补齐、配置自适应装配与闭环验收，**实现使用者“一句话全自动交付，零手动折腾”**。
@@ -72,7 +72,7 @@ python main.py demo
 测试全绿且 Demo 运行通过后，向使用者输出**高信号交付汇报**：
 
 ```text
-【AutoRegister Community 部署完成】
+【RegisterHub Community 部署完成】
 
 1. 当前环境配置：
    - 运行环境：Python 3.x / Playwright Chromium 已就绪
