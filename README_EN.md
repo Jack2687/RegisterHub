@@ -84,6 +84,22 @@ AutoRegister includes reference implementations covering diverse architectural p
 
 ---
 
+## 🌟 Standalone Showcase Ecosystem
+
+> 💡 **Standalone Decoupling & Reciprocal Funnel Notice**:  
+> For developers interested in automating a **single specific service**, we have decoupled our primary production workflows into **100% self-contained standalone GitHub repositories**.  
+> Each independent repository includes its own Windows `run.bat` launcher, dedicated `main.py` entry point, and embedded runtime engine without requiring the full framework. You can also run them within this unified engine via `python main.py --run <site>`:
+
+| Standalone Project | Key Features & Free Benefits | Repository Direct Link |
+| :--- | :--- | :--- |
+| **[Deepgram AutoRegister](https://github.com/waw666waw666/deepgram-register)** | 🎁 Official **$200 USD Free Credit Allowance** + reCAPTCHA v2 Penetration + Pure REST Protocol Key Extraction | [👉 GitHub Repo](https://github.com/waw666waw666/deepgram-register) |
+| **[100MilionSeek AutoRegister](https://github.com/waw666waw666/100milionseek-register)** | ⚡ **100M Tokens/day Free Allowance** + Turnstile Clearance + Instant Card Key Harvester + Referral Pool | [👉 GitHub Repo](https://github.com/waw666waw666/100milionseek-register) |
+| **[AMD AI Dev AutoRegister](https://github.com/waw666waw666/amd-register)** | 🏢 Official AMD AI Developer Program + Akamai Telemetry Parity + OneTrust Modal Penetration | [👉 GitHub Repo](https://github.com/waw666waw666/amd-register) |
+| **[Coarena AutoRegister](https://github.com/waw666waw666/coarena-register)** | 🔄 **Post-OAuth Pure REST Protocol Key Minting** + Session Capture + Terms Acceptance & Quota Validation | [👉 GitHub Repo](https://github.com/waw666waw666/coarena-register) |
+| **[QuanticData AutoRegister](https://github.com/waw666waw666/quanticdata-register)** | 🧩 Local OpenCV Edge Detection + Bezier Dynamic Drag (Zero 3rd-Party Paid Captcha Resolution Needed) | [👉 GitHub Repo](https://github.com/waw666waw666/quanticdata-register) |
+
+---
+
 ## Quickstart
 
 ### 1. Prerequisites and Installation

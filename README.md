@@ -84,6 +84,22 @@ AutoRegister 开箱内置涵盖不同前端技术栈与复杂交互范式的经�
 
 ---
 
+## 🌟 官方独立开箱即用衍生工程 (Standalone Showcase Ecosystem)
+
+> 💡 **矩阵互联与互相引流说明**：  
+> 为了方便仅需针对**单一特定平台**进行自动化落地的开发者，本项目特将核心高频实战案例**全量解耦为 100% 自包含的独立 GitHub 开源工程**。  
+> 每个独立工程均自带 Windows 一键启动引导 `run.bat`、专属 `main.py` 调度入口与自包含运行底座，无需配置母港即可独立运行。你也可以直接在本主框架中通过 `python main.py --run <site>` 统一调度：
+
+| 独立开源项目 | 核心福利与架构亮点 | 独立工程直达 |
+| :--- | :--- | :--- |
+| **[Deepgram AutoRegister](https://github.com/waw666waw666/deepgram-register)** | 🎁 官方赠送 **$200 美元真金使用额度** + 谷歌 reCAPTCHA v2 主动穿透 + 纯 REST 协议秒级提 Key | [👉 GitHub 仓库](https://github.com/waw666waw666/deepgram-register) |
+| **[100MilionSeek AutoRegister](https://github.com/waw666waw666/100milionseek-register)** | ⚡ **每天免费 1 亿 Tokens** + Turnstile 穿透 + 免收信页面卡片秒出 Key + 母号裂变接力 | [👉 GitHub 仓库](https://github.com/waw666waw666/100milionseek-register) |
+| **[AMD AI Dev AutoRegister](https://github.com/waw666waw666/amd-register)** | 🏢 AMD 官方 AI 开发者计划注册 + Akamai 遥测自洽 + OneTrust 模态弹窗穿透 | [👉 GitHub 仓库](https://github.com/waw666waw666/amd-register) |
+| **[Coarena AutoRegister](https://github.com/waw666waw666/coarena-register)** | 🔄 **谷歌登录后 100% 协议提 Key** + OAuth 会话捕获 + 条款签署与每日额度秒验 | [👉 GitHub 仓库](https://github.com/waw666waw666/coarena-register) |
+| **[QuanticData AutoRegister](https://github.com/waw666waw666/quanticdata-register)** | 🧩 纯本地 OpenCV 缺口计算 + 贝塞尔拟真拖拽，零第三方打码依赖秒破拼图滑块 | [👉 GitHub 仓库](https://github.com/waw666waw666/quanticdata-register) |
+
+---
+
 ## 快速上手
 
 ### 1. 环境准备与依赖安装
