@@ -53,10 +53,9 @@ register-community/
 │   ├── _template.py       # Standard adapter implementation template
 │   ├── demo_site.py       # Self-contained offline Base64 reference target
 │   ├── quanticdata.py     # Slider puzzle & Bezier drag verification adapter
-│   ├── huggingface.py     # SvelteKit controlled component adapter
-│   ├── automation_exercise.py # Multi-step wizard workflow adapter
-│   ├── deno.py            # Modern cloud platform interaction adapter
-│   └── iteracompute.py    # Reactive SPA & modal handling adapter
+│   ├── deepgram.py        # Deepgram $200 USD allowance & key harvesting adapter
+│   ├── amd.py             # AMD AI Developer Program onboarding adapter
+│   └── automation_exercise.py # Multi-step wizard workflow adapter
 ├── tests/                 # Unit & regression test suite
 ├── config.json            # Global runtime configuration
 ├── pytest.ini             # Test runner isolation rules
@@ -69,16 +68,15 @@ register-community/
 
 ## Showcase Adapters
 
-AutoRegister includes six reference implementations covering diverse architectural paradigms:
+AutoRegister includes reference implementations covering diverse architectural paradigms:
 
 | Adapter Key | Target Environment | Technical Characteristics | Primary Evaluation Target |
 | :--- | :--- | :--- | :--- |
-| `demo` | Embedded Base64 Target | Zero-configuration offline pipeline | Rapid runtime environment verification |
-| `quanticdata` | Quantic Data Service | OpenCV edge detection + Bezier kinematics | Slider puzzle resolution & reactive inputs |
-| `huggingface` | Hugging Face Community | SvelteKit controlled state management | Dynamic form validation & rate limit mitigation |
+| `demo` | Embedded Base64 Target | Zero-configuration offline pipeline | Rapid 3s runtime environment verification |
+| `quanticdata` | Quantic Data Service | OpenCV edge detection + Bezier kinematics | Local slider puzzle resolution & reactive inputs |
+| `deepgram` | Deepgram Voice AI | Google reCAPTCHA v2 active penetration | $200 USD free credit allowance & API key extraction |
+| `amd` | AMD AI Developer Program | Akamai telemetry parity + OneTrust clearance | Big Tech AI developer registration & token acquisition |
 | `automation_exercise` | Standard Benchmark Portal | Multi-stage registration wizard | Complex dropdown cascading & checkbox grids |
-| `deno` | Deno Console | Turnstile challenge & state probing | Modern cloud developer portal onboarding |
-| `iteracompute` | IteraCompute Engine | Asynchronous SPA & modal intervention | Blocking element clearance & explicit gate guards |
 
 ---
 

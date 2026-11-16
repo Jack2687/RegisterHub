@@ -53,11 +53,9 @@ register-community/
 │   ├── _template.py       # 工业级标准适配器实现模板
 │   ├── demo_site.py       # 自包含离线 Base64 靶场适配器
 │   ├── quanticdata.py     # OpenCV 拼图滑块与贝塞尔拖拽验证适配器
-│   ├── huggingface.py     # SvelteKit 响应式受控表单适配器
-│   ├── automation_exercise.py # 两步式向导交互基准适配器
-│   ├── deno.py            # 现代云平台控制台交互适配器
-│   ├── iteracompute.py    # 动态 SPA 与模态弹窗拦截治理适配器
-│   └── milionseek.py      # 100milionseek 裂变母号接力与 Turnstile 过盾适配器
+│   ├── deepgram.py        # Deepgram $200 免费额度与 API Key 直出适配器
+│   ├── amd.py             # AMD AI 开发者计划官方注册适配器
+│   └── automation_exercise.py # 国际两步式向导交互基准适配器
 ├── tests/                 # 单元与回归自动化测试套件
 ├── config.json            # 全局浏览器运行配置
 ├── pytest.ini             # Pytest 测试隔离规范
@@ -70,17 +68,15 @@ register-community/
 
 ## 内置示范适配器矩阵
 
-AutoRegister 开箱内置 7 个涵盖不同前端框架与交互范式的经典实战适配器：
+AutoRegister 开箱内置涵盖不同前端技术栈与复杂交互范式的经典实战适配器：
 
 | 适配器标识 | 目标应用 | 技术实现特性 | 核心评测与验证重点 |
 | :--- | :--- | :--- | :--- |
-| `demo` | 内置离线 Base64 靶场 | 零配置全离线管道 | 快速环境自洽性与测试生命周期验证 |
-| `quanticdata` | Quantic Data 服务 | OpenCV 缺口识别 + 贝塞尔动力学 | 拼图滑块挑战与现代响应式输入验证 |
-| `huggingface` | Hugging Face 社区 | SvelteKit 受控组件状态流转 | 动态校验规则与软频控熔断防护 |
-| `automation_exercise` | 标准测试基准靶场 | 多阶段向导向注册流 | 复杂下拉联动与多选框状态断言 |
-| `deno` | Deno Console 平台 | 现代平台交互与状态探测 | 云开发者平台接入与动态状态验证 |
-| `iteracompute` | IteraCompute 算力引擎 | 异步 SPA 与阻断弹窗自适应清理 | 显式条件等待 (Wait-for) 与视窗守门员 |
-| `milionseek` | 100milionseek 平台 | 真实 Chrome 环境 + Turnstile 识别 + 母号接力池 | 邀请裂变自主轮换与 API Key 毫秒提取 |
+| `demo` | 内置离线 Base64 靶场 | 零配置全离线管道 | 3 秒快速环境自洽性与生命周期端到端自检 |
+| `quanticdata` | Quantic Data 服务 | OpenCV 缺口识别 + 贝塞尔动力学 | 纯本地算子秒破拼图滑块挑战，零第三方打码依赖 |
+| `deepgram` | Deepgram 语音 AI 平台 | 谷歌人机主动穿透 + REST 协议闭环 | 官方赠送 $200 免费额度，100ms 原子直出 40 位 API Key |
+| `amd` | AMD AI 开发者计划 | Akamai 遥测自洽 + OneTrust 穿透 | 顶级大厂官方 AI 算力开发者计划注册与凭据获取 |
+| `automation_exercise` | 标准测试基准靶场 | 多阶段向导向注册流 | 复杂下拉联动与多选框状态硬断言 |
 
 ---
 
