@@ -84,18 +84,18 @@ AutoRegister includes reference implementations covering diverse architectural p
 
 ---
 
-## 🌟 Standalone Showcase Ecosystem
+## Standalone Showcase Ecosystem
 
-> 💡 **Standalone Decoupling & Reciprocal Funnel Notice**:  
+> **Standalone Decoupling & Reciprocal Funnel Notice**:  
 > For developers interested in automating a **single specific service**, we have decoupled our primary production workflows into **100% self-contained standalone GitHub repositories**.  
 > Each independent repository includes its own Windows `run.bat` launcher, dedicated `main.py` entry point, and embedded runtime engine without requiring the full framework. You can also run them within this unified engine via `python main.py --run <site>`:
 
 | Standalone Project | Key Features & Free Benefits | Repository Direct Link |
 | :--- | :--- | :--- |
-| **[Deepgram AutoRegister](https://github.com/waw666waw666/deepgram-register)** | 🎁 Official **$200 USD Free Credit Allowance** + reCAPTCHA v2 Penetration + Pure REST Protocol Key Extraction | [👉 GitHub Repo](https://github.com/waw666waw666/deepgram-register) |
-| **[100MilionSeek AutoRegister](https://github.com/waw666waw666/100milionseek-register)** | ⚡ **100M Tokens/day Free Allowance** + Turnstile Clearance + Instant Card Key Harvester + Referral Pool | [👉 GitHub Repo](https://github.com/waw666waw666/100milionseek-register) |
-| **[AMD AI Dev AutoRegister](https://github.com/waw666waw666/amd-register)** | 🏢 Official AMD AI Developer Program + Akamai Telemetry Parity + OneTrust Modal Penetration | [👉 GitHub Repo](https://github.com/waw666waw666/amd-register) |
-| **[Coarena AutoRegister](https://github.com/waw666waw666/coarena-register)** | 🔄 **Post-OAuth Pure REST Protocol Key Minting** + Session Capture + Terms Acceptance & Quota Validation | [👉 GitHub Repo](https://github.com/waw666waw666/coarena-register) |
+| **[Deepgram AutoRegister](https://github.com/waw666waw666/deepgram-register)** | Official **$200 USD Free Credit Allowance** + reCAPTCHA v2 Penetration + Pure REST Protocol Key Extraction | [GitHub Repo](https://github.com/waw666waw666/deepgram-register) |
+| **[100MilionSeek AutoRegister](https://github.com/waw666waw666/100milionseek-register)** | **100M Tokens/day Free Allowance** + Turnstile Clearance + Instant Card Key Harvester + Referral Pool | [GitHub Repo](https://github.com/waw666waw666/100milionseek-register) |
+| **[AMD AI Dev AutoRegister](https://github.com/waw666waw666/amd-register)** | Official AMD AI Developer Program + Akamai Telemetry Parity + OneTrust Modal Penetration | [GitHub Repo](https://github.com/waw666waw666/amd-register) |
+| **[Coarena AutoRegister](https://github.com/waw666waw666/coarena-register)** | **Post-OAuth Pure REST Protocol Key Minting** + Session Capture + Terms Acceptance & Quota Validation | [GitHub Repo](https://github.com/waw666waw666/coarena-register) |
 
 ---
 
@@ -135,7 +135,7 @@ Resulting credentials and execution artifacts are written atomically to `results
 
 ---
 
-## 📬 Email Verification & Mailbox Strategies
+## Email Verification & Mailbox Strategies
 
 Target platforms maintain diverse risk-control rules for signup mailboxes. AutoRegister provides three flexible tiers:
 
@@ -150,7 +150,7 @@ Target platforms maintain diverse risk-control rules for signup mailboxes. AutoR
 3. **High-Value / Strict Risk Targets (e.g. Deepgram $200 USD Allowance, AMD)**:
    - **Default Mode (Public Disposable Email, Automated)**:
      With `use_disposable_mail: true`, the engine automatically polls tri-channel public APIs (mail.tm, etc.) for 6-digit codes.
-   - **Custom Mailbox Mode (🌟 Recommended, 100% Success Guarantee)**:
+   - **Custom Mailbox Mode (Recommended, 100% Success Guarantee)**:
      Platforms like Deepgram and AMD dynamically blacklist public temporary email domains. **We strongly recommend supplying your own Outlook, Hotmail, Gmail, or custom domain address** in `config.json` (`"email": "your_email@outlook.com"`). The script automatically completes form submission and reCAPTCHA penetration, prompts for the 6-digit code in the terminal, and guarantees minting of your **$200 USD API key**!
    - **Enterprise MailHub Hub (Advanced)**:
      Easily integrates with self-hosted MailHub Docker containers, Cloudflare Catch-all Email Routing, or IMAP protocols for multi-worker headless automation.
@@ -224,4 +224,4 @@ pytest tests/
    - Mass registration abuse, credential stuffing, scraping protected assets, or circumventing commercial defenses is strictly prohibited;
    - Users assume all legal risks and responsibilities. The authors accept zero liability for any damages or violations arising from misuse.
 
-> 📄 **Full Legal Disclaimer**: [DISCLAIMER.md](DISCLAIMER.md) · [简体中文免责声明](DISCLAIMER.zh.md)
+> **Full Legal Disclaimer**: [DISCLAIMER.md](DISCLAIMER.md) · [简体中文免责声明](DISCLAIMER.zh.md)

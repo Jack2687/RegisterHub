@@ -84,18 +84,18 @@ AutoRegister 开箱内置涵盖不同前端技术栈与复杂交互范式的经�
 
 ---
 
-## 🌟 官方独立开箱即用衍生工程 (Standalone Showcase Ecosystem)
+## 官方独立开箱即用衍生工程 (Standalone Showcase Ecosystem)
 
-> 💡 **矩阵互联与互相引流说明**：  
+> **矩阵互联与互相引流说明**：  
 > 为了方便仅需针对**单一特定平台**进行自动化落地的开发者，本项目特将核心高频实战案例**全量解耦为 100% 自包含的独立 GitHub 开源工程**。  
 > 每个独立工程均自带 Windows 一键启动引导 `run.bat`、专属 `main.py` 调度入口与自包含运行底座，无需配置母港即可独立运行。你也可以直接在本主框架中通过 `python main.py --run <site>` 统一调度：
 
 | 独立开源项目 | 核心福利与架构亮点 | 独立工程直达 |
 | :--- | :--- | :--- |
-| **[Deepgram AutoRegister](https://github.com/waw666waw666/deepgram-register)** | 🎁 官方赠送 **$200 美元真金使用额度** + 谷歌 reCAPTCHA v2 主动穿透 + 纯 REST 协议秒级提 Key | [👉 GitHub 仓库](https://github.com/waw666waw666/deepgram-register) |
-| **[100MilionSeek AutoRegister](https://github.com/waw666waw666/100milionseek-register)** | ⚡ **每天免费 1 亿 Tokens** + Turnstile 穿透 + 免收信页面卡片秒出 Key + 母号裂变接力 | [👉 GitHub 仓库](https://github.com/waw666waw666/100milionseek-register) |
-| **[AMD AI Dev AutoRegister](https://github.com/waw666waw666/amd-register)** | 🏢 AMD 官方 AI 开发者计划注册 + Akamai 遥测自洽 + OneTrust 模态弹窗穿透 | [👉 GitHub 仓库](https://github.com/waw666waw666/amd-register) |
-| **[Coarena AutoRegister](https://github.com/waw666waw666/coarena-register)** | 🔄 **谷歌登录后 100% 协议提 Key** + OAuth 会话捕获 + 条款签署与每日额度秒验 | [👉 GitHub 仓库](https://github.com/waw666waw666/coarena-register) |
+| **[Deepgram AutoRegister](https://github.com/waw666waw666/deepgram-register)** | 官方赠送 **$200 美元真金使用额度** + 谷歌 reCAPTCHA v2 主动穿透 + 纯 REST 协议秒级提 Key | [GitHub 仓库](https://github.com/waw666waw666/deepgram-register) |
+| **[100MilionSeek AutoRegister](https://github.com/waw666waw666/100milionseek-register)** | **每天免费 1 亿 Tokens** + Turnstile 穿透 + 免收信页面卡片秒出 Key + 母号裂变接力 | [GitHub 仓库](https://github.com/waw666waw666/100milionseek-register) |
+| **[AMD AI Dev AutoRegister](https://github.com/waw666waw666/amd-register)** | AMD 官方 AI 开发者计划注册 + Akamai 遥测自洽 + OneTrust 模态弹窗穿透 | [GitHub 仓库](https://github.com/waw666waw666/amd-register) |
+| **[Coarena AutoRegister](https://github.com/waw666waw666/coarena-register)** | **谷歌登录后 100% 协议提 Key** + OAuth 会话捕获 + 条款签署与每日额度秒验 | [GitHub 仓库](https://github.com/waw666waw666/coarena-register) |
 
 ---
 
@@ -135,7 +135,7 @@ python main.py --run demo
 
 ---
 
-## 📬 关于邮箱与验证码接收策略 (Email Strategies)
+## 关于邮箱与验证码接收策略 (Email Strategies)
 
 不同目标平台对注册邮箱的风控规则各异，AutoRegister 为开发者提供了三级透明收信策略：
 
@@ -150,7 +150,7 @@ python main.py --run demo
 3. **需收码 / 高风控大额站点（如 Deepgram $200 美元真金赠金、AMD 开发者计划）**：
    - **默认方式（公网免费临时邮箱，全自动）**：
      默认 `use_disposable_mail: true`，框架通过三通道公网接口（mail.tm 等）全自动接收 6 位验证码。适合轻量功能验证。
-   - **自备真实邮箱模式（🌟 强烈推荐，100% 成功保底）**：
+   - **自备真实邮箱模式（强烈推荐，100% 成功保底）**：
      Deepgram、AMD 等官方大厂具备反欺诈黑名单库，公网部分免费临时域名可能被拦截。**强烈建议在 `config.json` 中填入自备的 Outlook / Hotmail / Gmail 个人邮箱**。脚本自动完成表单装配与人机穿透，并在终端提示输入验证码，回车即可 **100% 稳稳领走 $200 满额 API Key**！
    - **工业级自建中枢（高级扩展）**：
      支持开发者挂载自建 MailHub 容器池、Cloudflare Email Routing (Catch-all) 或 IMAP 协议，实现多通道批量无人值守收信。
@@ -220,5 +220,5 @@ pytest tests/
 
 1. **开源许可证**：本项目基于标准的 [Apache License 2.0](LICENSE) 许可协议发布。
 2. **免责与合规说明**：本项目定位为**授权环境下的自动化流程走查与 Web 工程研究工具**。所有代码仅供技术交流与学术验证参考，完整法律声明与技术中立性说明请参阅：
-   - 📄 [DISCLAIMER.zh.md](DISCLAIMER.zh.md) (中文版)
-   - 📄 [DISCLAIMER.md](DISCLAIMER.md) (English)
+   - [DISCLAIMER.zh.md](DISCLAIMER.zh.md) (中文版)
+   - [DISCLAIMER.md](DISCLAIMER.md) (English)
