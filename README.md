@@ -55,6 +55,7 @@ register-community/
 │   ├── quanticdata.py     # OpenCV 拼图滑块与贝塞尔拖拽验证适配器
 │   ├── deepgram.py        # Deepgram $200 免费额度与 API Key 直出适配器
 │   ├── amd.py             # AMD AI 开发者计划官方注册适配器
+│   ├── coarena.py         # 谷歌登录后纯协议注册与提 Key 适配器
 │   └── automation_exercise.py # 国际两步式向导交互基准适配器
 ├── tests/                 # 单元与回归自动化测试套件
 ├── config.json            # 全局浏览器运行配置
@@ -76,6 +77,7 @@ AutoRegister 开箱内置涵盖不同前端技术栈与复杂交互范式的经�
 | `quanticdata` | Quantic Data 服务 | OpenCV 缺口识别 + 贝塞尔动力学 | 纯本地算子秒破拼图滑块挑战，零第三方打码依赖 |
 | `deepgram` | Deepgram 语音 AI 平台 | 谷歌人机主动穿透 + REST 协议闭环 | 官方赠送 $200 免费额度，100ms 原子直出 40 位 API Key |
 | `amd` | AMD AI 开发者计划 | Akamai 遥测自洽 + OneTrust 穿透 | 顶级大厂官方 AI 算力开发者计划注册与凭据获取 |
+| `coarena` | Coarena AI 平台 | **谷歌登录后纯协议注册与提 Key** | 示范 Google OAuth 会话捕获后 100% 协议确认条款并秒级直出 Key |
 | `automation_exercise` | 标准测试基准靶场 | 多阶段向导向注册流 | 复杂下拉联动与多选框状态硬断言 |
 
 ---

@@ -94,7 +94,7 @@ python main.py demo
    - 单元测试覆盖：6/6 项测试全部通过
    - 离线靶场验证：通过 (Task [1/1] finished successfully)
 3. 立即启动使用：
-   - 运行指定适配器：python main.py <site_name>（可选: demo, quanticdata, deepgram, amd, automation_exercise）
+   - 运行指定适配器：python main.py <site_name>（可选: demo, quanticdata, deepgram, amd, coarena, automation_exercise）
    - 交互式运行菜单：双击运行 run.bat
 ```
 
