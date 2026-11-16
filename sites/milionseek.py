@@ -338,10 +338,11 @@ class MilionseekAdapter(BaseSiteAdapter):
                     if key_loc.count() > 0:
                         api_key = key_loc.inner_text().strip()
                         if api_key:
+                            masked_key = (api_key[:8] + "***" + api_key[-4:]) if len(api_key) > 14 else (api_key[:6] + "***")
                             print(f"\n{'=' * 65}")
                             print(f"  [+] [100milionseek] 账号创建成功！API Key 提取成功！")
                             print(f"  Email    : {self.account_data.get('email')}")
-                            print(f"  API Key  : {api_key}")
+                            print(f"  API Key  : {masked_key}")
                             print(f"  挂载 AFF : {self.ref_code}")
                             print(f"  Base URL : https://100milionseek.top/v1")
                             print(f"  Model    : deepseek-v4.1-flash-free (100M tokens/day)")
