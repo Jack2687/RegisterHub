@@ -225,3 +225,11 @@ pytest tests/
    - Users assume all legal risks and responsibilities. The authors accept zero liability for any damages or violations arising from misuse.
 
 > **Full Legal Disclaimer**: [DISCLAIMER.md](DISCLAIMER.md) · [简体中文免责声明](DISCLAIMER.zh.md)
+---
+
+## Community & Support
+
+Join our developer community for technical discussions, custom adapter requests, and browser automation best practices:
+
+- **Discord Community**: [Join Discord](https://discord.gg/USnVJ9YQX)
+- **QQ Group**: 1130324020
