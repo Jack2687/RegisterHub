@@ -15,7 +15,7 @@ echo           RegisterHub CLI Runner
 echo ======================================================
 echo.
 echo   [1] 运行开箱 Demo 演示 (本地离线靶场)
-echo   [2] 运行 Hugging Face 注册测试 (桌面有头窗口)
+echo   [2] 运行 QuanticData 滑块验证测试 (OpenCV 视觉与贝塞尔拟人拖拽)
 echo   [3] 运行全球通用注册靶场测试 (AutomationExercise 实战)
 echo   [4] 运行系统环境诊断 (Doctor)
 echo   [5] 输入目标网址直接探测 (--url)
@@ -36,8 +36,8 @@ if "%choice%"=="1" (
 )
 if "%choice%"=="2" (
     echo.
-    echo [*] 正在启动 Hugging Face 注册适配器...
-    python main.py --run huggingface
+    echo [*] 正在启动 QuanticData 滑块视觉求解测试...
+    python main.py --run quanticdata
     pause
     goto MENU
 )

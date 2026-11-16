@@ -165,7 +165,7 @@ def run_scaffold(site_name: str, target_url: str = None):
 
 def main():
     parser = argparse.ArgumentParser(description="RegisterHub Automation Engine")
-    parser.add_argument("--run", type=str, default=None, help="Target site adapter name (e.g. demo, huggingface)")
+    parser.add_argument("--run", type=str, default=None, help="Target site adapter name (e.g. demo, quanticdata, deepgram)")
     parser.add_argument("--list", action="store_true", help="List all available site adapters")
     parser.add_argument("--scaffold", type=str, default=None, help="Scaffold a new site adapter template (e.g. twitter, github)")
     parser.add_argument("--count", type=int, default=1, help="Number of accounts to generate")
@@ -232,7 +232,8 @@ def main():
 
     from sites import discover_adapters
     adapters = discover_adapters()
-    adapter_name = (args.run or "demo").lower()
+    target_name = args.run or (args.command if args.command and args.command.lower() in adapters else None) or "demo"
+    adapter_name = target_name.lower()
     
     if adapter_name in adapters:
         runner.execute_adapter(adapters[adapter_name], count=args.count)

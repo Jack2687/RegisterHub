@@ -258,6 +258,7 @@ pytest tests/
    - Users assume all legal risks and responsibilities. The authors accept zero liability for any damages or violations arising from misuse.
 
 > **Full Legal Disclaimer**: [DISCLAIMER.md](DISCLAIMER.md) · [简体中文免责声明](DISCLAIMER.zh.md)
+
 ---
 
 ## Community & Support

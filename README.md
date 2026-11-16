@@ -255,6 +255,7 @@ pytest tests/
 2. **免责与合规说明**：本项目定位为**授权环境下的自动化流程走查与 Web 工程研究工具**。所有代码仅供技术交流与学术验证参考，完整法律声明与技术中立性说明请参阅：
    - [DISCLAIMER.zh.md](DISCLAIMER.zh.md) (中文版)
    - [DISCLAIMER.md](DISCLAIMER.md) (English)
+
 ---
 
 ## 开发者社区与交流
