@@ -144,7 +144,7 @@ Once loaded into the workspace, you can instruct your AI using either of the two
 #### Method 1: Direct Prompting (Fast & Lightweight)
 Drop the target URL directly into your AI chat:
 ```text
-Follow the workspace conventions and AGENTS.md to generate an automated registration adapter for: https://target-site.com/signup
+Follow the workspace conventions and AGENTS.md to generate an automated registration adapter for: https://example.com/signup
 ```
 The AI reads the root rules, probes DOM elements, scaffolds the adapter, and runs baseline tests automatically.
 
@@ -153,7 +153,7 @@ For modern multi-step SPAs, onboarding wizards, or sites with interactive challe
 Provide your recorded walkthrough—including URLs, clicked buttons, form inputs, OTP steps, and UI screenshots—directly to the AI:
 ```text
 Please follow RegisterHub standards and AGENTS.md to build an automated adapter matching my verified manual workflow:
-Target URL: https://target-site.com/signup
+Target URL: https://example.com/signup
 
 My manual walkthrough (screenshots attached):
 1. Navigate to signup page, fill in email and password, and click "Create Account";
@@ -162,7 +162,7 @@ My manual walkthrough (screenshots attached):
 4. Lands on the dashboard, navigate to "API Keys" in the top-right menu, and click "Create New Key";
 5. Copy the displayed sk-xxxx key.
 
-Please assemble sites/target_site.py according to this exact walkthrough and run a local verification test!
+Please assemble sites/example_site.py according to this exact walkthrough and run a local verification test!
 ```
 The AI will precisely map and automate your verified human interaction chain, eliminating guesswork and ensuring production-grade reliability on the first attempt!
 
