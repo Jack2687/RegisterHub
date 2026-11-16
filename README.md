@@ -1,8 +1,8 @@
 <h1 align="center">RegisterHub</h1>
 
 <p align="center">
-  <b>现代化无头账号生命周期测试与受控表单自动化框架</b><br>
-  <i>A deterministic, anti-fingerprinting automation engine built for robust form orchestration and agentic workflows.</i>
+  <b>工业级万能账号自动化注册框架与生命周期测试引擎</b><br>
+  <i>A deterministic, stealth automation framework for universal account registration and agentic workflows.</i>
 </p>
 
 <p align="center">

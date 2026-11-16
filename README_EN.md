@@ -1,8 +1,8 @@
 <h1 align="center">RegisterHub</h1>
 
 <p align="center">
-  <b>Modern Headless Account Lifecycle & Form Automation Framework</b><br>
-  <i>A deterministic, anti-fingerprinting automation engine built for robust form orchestration and agentic workflows.</i>
+  <b>Industrial-Grade Universal Account Registration & Lifecycle Testing Engine</b><br>
+  <i>A deterministic, stealth automation framework for universal account registration and agentic workflows.</i>
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="./README_EN.md">English</a> | <a href="./README.md">简体中文</a>
+  <a href="./README.md">简体中文</a> | <a href="./README_EN.md">English</a>
 </p>
 
 ---
