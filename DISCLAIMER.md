@@ -27,8 +27,8 @@ The exclusive objective of this release is to investigate reactive state-machine
 
 ### 2. Scope & Constructive Knowledge
 
-2.1 **Binding Retrospectively and Prospectively**:  
-Accessing, downloading, cloning, compiling, or executing any part of this project constitutes immediate, irrevocable, and unconditional agreement to all provisions herein. Any party dissenting must permanently delete all copies immediately.
+2.1 **Informed Use & Assumption of Risk**:  
+This project is distributed under the terms of the Apache License 2.0. Users acknowledge the dual-use nature of automation tooling and agree to operate it solely within legitimate, authorized parameters in accordance with applicable laws.
 
 2.2 **Anti-Tampering & Mandatory Retention**:  
 No downstream distributor, fork maintainer, or repackager may remove, obscure, truncate, or alter this disclaimer.
