@@ -33,7 +33,7 @@ RegisterHub 是一个面向工程研发的现代化 Web 自动化框架，旨在
 --- ## 架构拓扑
 
 ```text
-register-community/
+RegisterHub/
 ├── core/
 │   ├── adapter.py         # 抽象适配器基类 (BaseSiteAdapter) 与生命周期契约
 │   ├── pilot.py           # 拟人按键动力学 (human_type) 与智能交互守门员
@@ -95,8 +95,8 @@ RegisterHub 开箱内置涵盖不同前端技术栈与复杂交互范式的经�
 
 ```bash
 # 克隆仓库
-git clone https://github.com/waw666waw666/register-community.git
-cd register-community
+git clone https://github.com/waw666waw666/RegisterHub.git
+cd RegisterHub
 
 # 安装 Python 生产依赖
 pip install -r requirements.txt

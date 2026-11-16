@@ -33,7 +33,7 @@ RegisterHub is an engineering-first automation framework designed to eliminate t
 --- ## Architecture
 
 ```text
-register-community/
+RegisterHub/
 ├── core/
 │   ├── adapter.py         # Abstract base adapter (BaseSiteAdapter) & lifecycle hooks
 │   ├── pilot.py           # Human-like keystroke dynamics & resilient interaction helpers
@@ -95,8 +95,8 @@ RegisterHub includes reference implementations covering diverse architectural pa
 
 ```bash
 # Clone the repository
-git clone https://github.com/waw666waw666/register-community.git
-cd register-community
+git clone https://github.com/waw666waw666/RegisterHub.git
+cd RegisterHub
 
 # Install core dependencies
 pip install -r requirements.txt
