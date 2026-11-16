@@ -148,17 +148,23 @@ Follow the workspace conventions and AGENTS.md to generate an automated registra
 ```
 The AI reads the root rules, probes DOM elements, scaffolds the adapter, and runs baseline tests automatically.
 
-#### Method 2: Step-by-Step Directives (Recommended for 100% Reliability)
-For complex portals involving anti-bot challenges or multi-step flows, guide the AI through the battle-tested 4-step pipeline:
+#### Method 2: Provide Human-Walkthrough Steps (Strongly Recommended & Highest Success Rate)
+For modern multi-step SPAs, onboarding wizards, or sites with interactive challenges, **the most reliable approach is to manually register one account yourself first in your regular browser**.  
+Provide your recorded walkthrough—including URLs, clicked buttons, form inputs, OTP steps, and UI screenshots—directly to the AI:
 ```text
-Follow the RegisterHub 4-step standardized pipeline to integrate: https://target-site.com/signup
+Please follow RegisterHub standards and AGENTS.md to build an automated adapter matching my verified manual workflow:
+Target URL: https://target-site.com/signup
 
-1. Probe & Scaffold: Run `python main.py --scaffold <site_name> --url <url>` to detect form inputs;
-2. Logic Implementation: Code form population, human-in-the-loop triggers, and credential harvesting in sites/<site_name>.py;
-3. Stealth Consistency: Configure genuine Chrome binaries and proxies to pass fingerprinting checks;
-4. Closed-Loop Verification: Execute a test run, assert onboarding status, and persist keys to results/accounts.txt.
+My manual walkthrough (screenshots attached):
+1. Navigate to signup page, fill in email and password, and click "Create Account";
+2. A Cloudflare Turnstile box appears; click the checkbox to clear;
+3. Check inbox for the 6-digit OTP code and input it into the verification field;
+4. Lands on the dashboard, navigate to "API Keys" in the top-right menu, and click "Create New Key";
+5. Copy the displayed sk-xxxx key.
+
+Please assemble sites/target_site.py according to this exact walkthrough and run a local verification test!
 ```
-The AI strictly executes each stage with stage-gate assertions, preventing hallucinations or incomplete adapters.
+The AI will precisely map and automate your verified human interaction chain, eliminating guesswork and ensuring production-grade reliability on the first attempt!
 
 ---
 
