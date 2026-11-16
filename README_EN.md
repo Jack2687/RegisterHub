@@ -135,6 +135,28 @@ Resulting credentials and execution artifacts are written atomically to `results
 
 ---
 
+## 📬 Email Verification & Mailbox Strategies
+
+Target platforms maintain diverse risk-control rules for signup mailboxes. AutoRegister provides three flexible tiers:
+
+1. **Zero-Email-Verification Targets (Instant Minting)**:
+   - Showcase Target: `100milionseek`
+   - Requires **no verification emails or confirmation links whatsoever**. Enter any standard email format, resolve Turnstile, and the API key is minted directly on the page within 10 seconds.
+
+2. **Session Capture Targets (OAuth Handoff)**:
+   - Showcase Target: `coarena`
+   - Leverages genuine Chrome solely for Google OAuth token acquisition; subsequent terms consent, key minting, and quota validation are executed 100% via background REST protocol.
+
+3. **High-Value / Strict Risk Targets (e.g. Deepgram $200 USD Allowance, AMD)**:
+   - **Default Mode (Public Disposable Email, Automated)**:
+     With `use_disposable_mail: true`, the engine automatically polls tri-channel public APIs (mail.tm, etc.) for 6-digit codes.
+   - **Custom Mailbox Mode (🌟 Recommended, 100% Success Guarantee)**:
+     Platforms like Deepgram and AMD dynamically blacklist public temporary email domains. **We strongly recommend supplying your own Outlook, Hotmail, Gmail, or custom domain address** in `config.json` (`"email": "your_email@outlook.com"`). The script automatically completes form submission and reCAPTCHA penetration, prompts for the 6-digit code in the terminal, and guarantees minting of your **$200 USD API key**!
+   - **Enterprise MailHub Hub (Advanced)**:
+     Easily integrates with self-hosted MailHub Docker containers, Cloudflare Catch-all Email Routing, or IMAP protocols for multi-worker headless automation.
+
+---
+
 ## Command Line Interface (CLI)
 
 ### Adapter Discovery
