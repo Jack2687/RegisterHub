@@ -137,7 +137,7 @@ class QuanticdataAdapter(BaseSiteAdapter):
         # Confirm slider passed
         slider_text = slider.text_content() or ""
         box_text = self.page.locator("#f-captcha").text_content() or ""
-        if "✓" in slider_text or "place" in box_text.lower() or "done" in box_text.lower():
+        if "\u2713" in slider_text or "place" in box_text.lower() or "done" in box_text.lower():
             print("[+] [quanticdata] Slider puzzle solved successfully!")
             return True
 
