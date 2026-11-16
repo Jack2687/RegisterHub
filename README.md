@@ -96,7 +96,6 @@ AutoRegister 开箱内置涵盖不同前端技术栈与复杂交互范式的经�
 | **[100MilionSeek AutoRegister](https://github.com/waw666waw666/100milionseek-register)** | ⚡ **每天免费 1 亿 Tokens** + Turnstile 穿透 + 免收信页面卡片秒出 Key + 母号裂变接力 | [👉 GitHub 仓库](https://github.com/waw666waw666/100milionseek-register) |
 | **[AMD AI Dev AutoRegister](https://github.com/waw666waw666/amd-register)** | 🏢 AMD 官方 AI 开发者计划注册 + Akamai 遥测自洽 + OneTrust 模态弹窗穿透 | [👉 GitHub 仓库](https://github.com/waw666waw666/amd-register) |
 | **[Coarena AutoRegister](https://github.com/waw666waw666/coarena-register)** | 🔄 **谷歌登录后 100% 协议提 Key** + OAuth 会话捕获 + 条款签署与每日额度秒验 | [👉 GitHub 仓库](https://github.com/waw666waw666/coarena-register) |
-| **[QuanticData AutoRegister](https://github.com/waw666waw666/quanticdata-register)** | 🧩 纯本地 OpenCV 缺口计算 + 贝塞尔拟真拖拽，零第三方打码依赖秒破拼图滑块 | [👉 GitHub 仓库](https://github.com/waw666waw666/quanticdata-register) |
 
 ---
 

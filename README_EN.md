@@ -96,7 +96,6 @@ AutoRegister includes reference implementations covering diverse architectural p
 | **[100MilionSeek AutoRegister](https://github.com/waw666waw666/100milionseek-register)** | ⚡ **100M Tokens/day Free Allowance** + Turnstile Clearance + Instant Card Key Harvester + Referral Pool | [👉 GitHub Repo](https://github.com/waw666waw666/100milionseek-register) |
 | **[AMD AI Dev AutoRegister](https://github.com/waw666waw666/amd-register)** | 🏢 Official AMD AI Developer Program + Akamai Telemetry Parity + OneTrust Modal Penetration | [👉 GitHub Repo](https://github.com/waw666waw666/amd-register) |
 | **[Coarena AutoRegister](https://github.com/waw666waw666/coarena-register)** | 🔄 **Post-OAuth Pure REST Protocol Key Minting** + Session Capture + Terms Acceptance & Quota Validation | [👉 GitHub Repo](https://github.com/waw666waw666/coarena-register) |
-| **[QuanticData AutoRegister](https://github.com/waw666waw666/quanticdata-register)** | 🧩 Local OpenCV Edge Detection + Bezier Dynamic Drag (Zero 3rd-Party Paid Captcha Resolution Needed) | [👉 GitHub Repo](https://github.com/waw666waw666/quanticdata-register) |
 
 ---
 
