@@ -19,9 +19,7 @@
   <a href="./README.md">简体中文</a> | <a href="./README_EN.md">English</a>
 </p>
 
----
-
-## 项目概述
+--- ## 项目概述
 
 AutoRegister 是一个面向工程研发的现代化 Web 自动化框架，旨在彻底解决传统无头脚本在复杂前端交互中的脆弱性问题。框架基于 Playwright 运行时、OpenCV 离线计算机视觉算子及 Chrome DevTools Protocol (CDP) 架构构建，为现代单页应用 (SPA)、响应式受控表单以及自动化测试提供确定性的交互与状态编排能力。
 
@@ -32,9 +30,7 @@ AutoRegister 是一个面向工程研发的现代化 Web 自动化框架，旨�
 - **CDP 会话桥接架构 (CDP Bridge Architecture)**：深度支持外部指纹浏览器（AdsPower、比特浏览器等）与本地已登录 Chrome 会话无缝接入，复用既有干净住宅网络与登录状态。
 - **AI 代理原生集成规范 (Agentic Co-Pilot Protocol)**：仓库根目录内置工业级 `AGENTS.md` 交互契约，深度适配 Cursor、Claude Code、Windsurf 与 Gemini CLI，支持 AI 自主嗅探表单、装配适配器并完成闭环验证。
 
----
-
-## 架构拓扑
+--- ## 架构拓扑
 
 ```text
 register-community/
@@ -66,9 +62,7 @@ register-community/
 └── requirements.txt       # 核心生产依赖清单
 ```
 
----
-
-## 内置示范适配器矩阵
+--- ## 内置示范适配器矩阵
 
 AutoRegister 开箱内置涵盖不同前端技术栈与复杂交互范式的经典实战适配器：
 
@@ -82,9 +76,7 @@ AutoRegister 开箱内置涵盖不同前端技术栈与复杂交互范式的经�
 | `milionseek` | 100milionseek 平台 | **每日 1 亿 Token 免费算力** + Turnstile 穿透 | 填邮箱秒级直出 Key（免收激活信），内置母号裂变接力管理 |
 | `automation_exercise` | 标准测试基准靶场 | 多阶段向导向注册流 | 复杂下拉联动与多选框状态硬断言 |
 
----
-
-## 官方独立开箱即用衍生工程 (Standalone Showcase Ecosystem)
+--- ## 官方独立开箱即用衍生工程 (Standalone Showcase Ecosystem)
 
 > **矩阵互联与互相引流说明**：  
 > 为了方便仅需针对**单一特定平台**进行自动化落地的开发者，本项目特将核心高频实战案例**全量解耦为 100% 自包含的独立 GitHub 开源工程**。  
@@ -97,9 +89,7 @@ AutoRegister 开箱内置涵盖不同前端技术栈与复杂交互范式的经�
 | **[AMD AI Dev AutoRegister](https://github.com/waw666waw666/amd-register)** | AMD 官方 AI 开发者计划注册 + Akamai 遥测自洽 + OneTrust 模态弹窗穿透 | [GitHub 仓库](https://github.com/waw666waw666/amd-register) |
 | **[Coarena AutoRegister](https://github.com/waw666waw666/coarena-register)** | **谷歌登录后 100% 协议提 Key** + OAuth 会话捕获 + 条款签署与每日额度秒验 | [GitHub 仓库](https://github.com/waw666waw666/coarena-register) |
 
----
-
-## 快速上手
+--- ## 快速上手
 
 ### 1. 环境准备与依赖安装
 
@@ -133,9 +123,7 @@ python main.py --run demo
 
 生成的凭据记录将自动以原子写入模式持久化至 `results/accounts.txt`。
 
----
-
-## 关于邮箱与验证码接收策略 (Email Strategies)
+--- ## 关于邮箱与验证码接收策略 (Email Strategies)
 
 不同目标平台对注册邮箱的风控规则各异，AutoRegister 为开发者提供了三级透明收信策略：
 
@@ -155,9 +143,7 @@ python main.py --run demo
    - **工业级自建中枢（高级扩展）**：
      支持开发者挂载自建 MailHub 容器池、Cloudflare Email Routing (Catch-all) 或 IMAP 协议，实现多通道批量无人值守收信。
 
----
-
-## 命令行接口 (CLI)
+--- ## 命令行接口 (CLI)
 
 ### 查看已装载适配器
 列出所有已注册的适配器及其技术规格：
@@ -194,9 +180,7 @@ python main.py export --export csv
 python main.py export --export json
 ```
 
----
-
-## AI 代理协作规范 (`AGENTS.md`)
+--- ## AI 代理协作规范 (`AGENTS.md`)
 
 AutoRegister 针对自主编程智能体进行了全流程规范定义。根目录的 `AGENTS.md` 约束以下核心纪律：
 
@@ -204,9 +188,7 @@ AutoRegister 针对自主编程智能体进行了全流程规范定义。根目�
 - **阶段守门员断言**：严禁无目的的时间等待 (`time.sleep`)，必须通过 URL 状态、DOM 属性或凭据落盘事实进行强校验。
 - **宿主进程零干扰**：退出钩子严格基于明确的子进程树清理，严禁全局通杀系统进程，严禁全局抢占用户桌面焦点。
 
----
-
-## 测试套件执行
+--- ## 测试套件执行
 
 运行完整单元测试集以验证核心启发式探针、OpenCV 计算引擎与代码生成逻辑：
 
@@ -214,9 +196,7 @@ AutoRegister 针对自主编程智能体进行了全流程规范定义。根目�
 pytest tests/
 ```
 
----
-
-## 免责声明与开源协议
+--- ## 免责声明与开源协议
 
 1. **开源许可证**：本项目基于标准的 [Apache License 2.0](LICENSE) 许可协议发布。
 2. **免责与合规说明**：本项目定位为**授权环境下的自动化流程走查与 Web 工程研究工具**。所有代码仅供技术交流与学术验证参考，完整法律声明与技术中立性说明请参阅：

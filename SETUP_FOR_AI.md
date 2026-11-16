@@ -3,9 +3,7 @@
 > **面向对象**：在宿主机上运行的 AI 编程助手（Cursor / Claude Code / Windsurf / GitHub Copilot / Gemini 等）。  
 > **核心使命**：自主完成开源社区版的新环境探测、依赖补齐、配置自适应装配与闭环验收，**实现使用者“一句话全自动交付，零手动折腾”**。
 
----
-
-## 0. 给使用者的极简用法
+--- ## 0. 给使用者的极简用法
 
 如果你是收到或克隆本项目的使用者，无需手动敲打繁琐命令。直接在你的 AI 客户端输入框中发送以下**一句话**，AI 将自动执行本协议：
 
@@ -13,9 +11,7 @@
 @SETUP_FOR_AI.md 请阅读此文档，全自动为我完成当前机器的环境探测、配置装配与健康验收。
 ```
 
----
-
-## 1. AI 代理自主接管准则 (Directives for AI Agents)
+--- ## 1. AI 代理自主接管准则 (Directives for AI Agents)
 
 当你（AI）接收到上述指令后，必须严格遵循**先探测、再装配、后自检、静默闭环**的四步流水线：
 
@@ -25,9 +21,7 @@
 └─────────────────┘     └──────────────────┘     └──────────────────┘     └──────────────────┘
 ```
 
----
-
-## 2. 四步自主装配流水线
+--- ## 2. 四步自主装配流水线
 
 ### 第一步：宿主环境基线探测 (Host Recon)
 
@@ -40,9 +34,7 @@
 3. **网络与临时邮箱连通性**：
    - 内置 `core.mail_client.DisposableMailClient` 会自动调度 `mail.tm` / `tempmail.io` / `guerrillamail` 三大公网临时邮箱服务，无需本地 Docker，无需任何密钥。
 
----
-
-### 第二步：依赖全自动补齐 (Auto Dependencies)
+--- ### 第二步：依赖全自动补齐 (Auto Dependencies)
 
 在当前项目根目录下执行安装与内核拉取：
 
@@ -54,9 +46,7 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
----
-
-### 第三步：自适应生产配置装配 (Config Auto-Provisioning)
+--- ### 第三步：自适应生产配置装配 (Config Auto-Provisioning)
 
 若项目根目录下不存在 `config.json`：
 
@@ -67,9 +57,7 @@ playwright install chromium
 3. **确保临时邮箱默认启用**：
    - 确认 `defaults.use_disposable_mail` 为 `true`，开箱即用。
 
----
-
-### 第四步：全自动化验收与交付汇报 (Verification & Handover)
+--- ### 第四步：全自动化验收与交付汇报 (Verification & Handover)
 
 在终端运行体检与单元测试，断言系统 100% 具备运行能力：
 
@@ -98,9 +86,7 @@ python main.py demo
    - 交互式运行菜单：双击运行 run.bat
 ```
 
----
-
-## 3. 常见异常自愈指南 (Self-Healing Directives)
+--- ## 3. 常见异常自愈指南 (Self-Healing Directives)
 
 - **遇到境外站点无法访问**：提示用户启动其本机的网络代理工具（如 Clash），并自动将代理地址写入 `config.json`；
 - **遇到临时邮箱限速 (HTTP 429)**：客户端内置三后端自动轮换，无需人工干预，会自动切换至下一个可用节点；
