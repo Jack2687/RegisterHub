@@ -133,6 +133,33 @@ python main.py --run demo
 
 生成的凭据记录将自动以原子写入模式持久化至 `results/accounts.txt`。
 
+### 4. AI 助手协同使用指南 (Cursor / Claude Code / Windsurf / Gemini)
+
+本项目为 AI 编程助手深度优化，仓库根目录自带专属 [AGENTS.md](AGENTS.md) 行为约束与 [SETUP_FOR_AI.md](SETUP_FOR_AI.md) 环境协议。
+
+**前置操作**：使用你的 AI 编程客户端（如 Cursor、Windsurf、VS Code 搭配 Claude Code / Gemini CLI），将 **`RegisterHub` 项目文件夹作为工作区根目录打开**。
+
+工作区载入后，支持通过以下两种方式让 AI 协助开发新站点的注册适配器：
+
+#### 方法一：极简直接丢（快捷交互模式）
+直接在 AI 对话框中把目标网站注册地址发给 AI：
+```text
+请参考本项目规范与 AGENTS.md，为我编写该网站的自动化注册适配器：https://target-site.com/signup
+```
+AI 会自动读取根目录规则与模板，自主嗅探表单字段、生成代码骨架并尝试本地实测。
+
+#### 方法二：给步骤引导（强烈推荐，成号最稳健）
+如需高成功率攻克复杂前端、交互式验证码或多步风控站点，建议向 AI 发送标准 4 步流程指令：
+```text
+请按照 RegisterHub 的 4 步标准流水线，帮我接入新目标站点：https://target-site.com/signup
+
+1. 智能探测：运行 python main.py --scaffold <site_name> --url <url> 嗅探输入框与验证码类型；
+2. 逻辑装配：在 sites/<site_name>.py 中编写表单装配、人机协同与凭据提取逻辑；
+3. 环境自洽：配置真实 Chrome 二进制与本地海外代理，抹除自动化检测特征；
+4. 闭环落盘：实跑注册流程，断言可用状态并将 API Key / 凭据原子写入 results/accounts.txt。
+```
+AI 将严格遵循流水线与阶段守门员断言推进，每步给出明确事实反馈，杜绝产生幻觉或未经验证的半截脚本。
+
 ---
 
 ## 关于邮箱与验证码接收策略 (Email Strategies)

@@ -133,6 +133,33 @@ python main.py --run demo
 
 Resulting credentials and execution artifacts are written atomically to `results/accounts.txt`.
 
+### 4. AI Agent Collaborative Development (Cursor / Claude Code / Windsurf / Gemini)
+
+RegisterHub is engineered from the ground up for seamless co-development with autonomous AI programming agents. The workspace root includes strictly audited [AGENTS.md](AGENTS.md) and [SETUP_FOR_AI.md](SETUP_FOR_AI.md) agent contracts.
+
+**Prerequisite**: Open the **`RegisterHub`** project folder as the root active workspace in your AI IDE (Cursor, Windsurf, VS Code with Claude Code, or Gemini CLI).
+
+Once loaded into the workspace, you can instruct your AI using either of the two approaches:
+
+#### Method 1: Direct Prompting (Fast & Lightweight)
+Drop the target URL directly into your AI chat:
+```text
+Follow the workspace conventions and AGENTS.md to generate an automated registration adapter for: https://target-site.com/signup
+```
+The AI reads the root rules, probes DOM elements, scaffolds the adapter, and runs baseline tests automatically.
+
+#### Method 2: Step-by-Step Directives (Recommended for 100% Reliability)
+For complex portals involving anti-bot challenges or multi-step flows, guide the AI through the battle-tested 4-step pipeline:
+```text
+Follow the RegisterHub 4-step standardized pipeline to integrate: https://target-site.com/signup
+
+1. Probe & Scaffold: Run `python main.py --scaffold <site_name> --url <url>` to detect form inputs;
+2. Logic Implementation: Code form population, human-in-the-loop triggers, and credential harvesting in sites/<site_name>.py;
+3. Stealth Consistency: Configure genuine Chrome binaries and proxies to pass fingerprinting checks;
+4. Closed-Loop Verification: Execute a test run, assert onboarding status, and persist keys to results/accounts.txt.
+```
+The AI strictly executes each stage with stage-gate assertions, preventing hallucinations or incomplete adapters.
+
 ---
 
 ## Email Verification & Mailbox Strategies
