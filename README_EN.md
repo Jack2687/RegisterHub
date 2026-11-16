@@ -1,4 +1,9 @@
-# RegisterHub
+<h1 align="center">RegisterHub</h1>
+
+<p align="center">
+  <b>Modern Headless Account Lifecycle & Form Automation Framework</b><br>
+  <i>A deterministic, anti-fingerprinting automation engine built for robust form orchestration and agentic workflows.</i>
+</p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-22272e.svg?style=flat-square" alt="License"></a>
@@ -11,15 +16,12 @@
 </p>
 
 <p align="center">
-  <b>Modern Headless Account Lifecycle & Form Automation Framework</b><br>
-  <i>A deterministic, anti-fingerprinting automation engine built for robust form orchestration and agentic workflows.</i>
-</p>
-
-<p align="center">
   <a href="./README_EN.md">English</a> | <a href="./README.md">简体中文</a>
 </p>
 
---- ## Overview
+---
+
+## Overview
 
 RegisterHub is an engineering-first automation framework designed to eliminate the fragility of traditional browser automation. Built on top of Playwright, OpenCV-based computer vision solvers, and Chrome DevTools Protocol (CDP), RegisterHub provides deterministic execution across modern single-page applications (SPAs), reactive state managers, and controlled DOM interfaces.
 
@@ -30,7 +32,9 @@ RegisterHub is an engineering-first automation framework designed to eliminate t
 - **CDP Bridge Architecture**: Native integration with enterprise fingerprint browsers (AdsPower, BitBrowser) and local Chrome instances, allowing seamless reuse of clean residential IPs and persistent user sessions.
 - **Agentic Automation Protocol**: Natively integrated with `AGENTS.md`, enabling autonomous AI agents (Cursor, Claude Code, Windsurf, Gemini CLI) to probe DOM targets, generate adapters, and execute end-to-end verification.
 
---- ## Architecture
+---
+
+## Architecture
 
 ```text
 RegisterHub/
@@ -62,7 +66,9 @@ RegisterHub/
 └── requirements.txt       # Core dependency manifest
 ```
 
---- ## Showcase Adapters
+---
+
+## Showcase Adapters
 
 RegisterHub includes reference implementations covering diverse architectural paradigms:
 
@@ -76,7 +82,9 @@ RegisterHub includes reference implementations covering diverse architectural pa
 | `milionseek` | 100milionseek Platform | **100M Tokens/day Free Compute** + Turnstile Clearance | Instant on-page key generation (no mail verification needed) + referral cascade pool |
 | `automation_exercise` | Standard Benchmark Portal | Multi-stage registration wizard | Complex dropdown cascading & checkbox grids |
 
---- ## Standalone Showcase Ecosystem
+---
+
+## Standalone Showcase Ecosystem
 
 > **Standalone Decoupling & Reciprocal Funnel Notice**:  
 > For developers interested in automating a **single specific service**, we have decoupled our primary production workflows into **100% self-contained standalone GitHub repositories**.  
@@ -89,7 +97,9 @@ RegisterHub includes reference implementations covering diverse architectural pa
 | **[AMD AI Dev Register](https://github.com/waw666waw666/amd-register)** | Official AMD AI Developer Program + Akamai Telemetry Parity + OneTrust Modal Penetration | [GitHub Repo](https://github.com/waw666waw666/amd-register) |
 | **[Coarena Register](https://github.com/waw666waw666/coarena-register)** | **Post-OAuth Pure REST Protocol Key Minting** + Session Capture + Terms Acceptance & Quota Validation | [GitHub Repo](https://github.com/waw666waw666/coarena-register) |
 
---- ## Quickstart
+---
+
+## Quickstart
 
 ### 1. Prerequisites and Installation
 
@@ -123,7 +133,9 @@ python main.py --run demo
 
 Resulting credentials and execution artifacts are written atomically to `results/accounts.txt`.
 
---- ## Email Verification & Mailbox Strategies
+---
+
+## Email Verification & Mailbox Strategies
 
 Target platforms maintain diverse risk-control rules for signup mailboxes. RegisterHub provides three flexible tiers:
 
@@ -143,7 +155,9 @@ Target platforms maintain diverse risk-control rules for signup mailboxes. Regis
    - **Enterprise MailHub Hub (Advanced)**:
      Easily integrates with self-hosted MailHub Docker containers, Cloudflare Catch-all Email Routing, or IMAP protocols for multi-worker headless automation.
 
---- ## Command Line Interface (CLI)
+---
+
+## Command Line Interface (CLI)
 
 ### Adapter Discovery
 List all registered site adapters and their technical descriptors:
@@ -180,7 +194,9 @@ python main.py export --export csv
 python main.py export --export json
 ```
 
---- ## AI Agent Integration (`AGENTS.md`)
+---
+
+## AI Agent Integration (`AGENTS.md`)
 
 RegisterHub is architected for seamless collaboration with autonomous programming agents. The root `AGENTS.md` enforces strict engineering disciplines:
 
@@ -188,7 +204,9 @@ RegisterHub is architected for seamless collaboration with autonomous programmin
 - **Stage-Gate Assertions**: Prohibits arbitrary timeout delays; mandates strict validation of URL mutations, DOM response states, and token persistence.
 - **Zero-Interference Process Lifecycle**: Manages child process trees explicitly via POSIX/Windows hooks, ensuring external user processes and personal browser sessions remain completely untouched.
 
---- ## Verification & Testing
+---
+
+## Verification & Testing
 
 Execute the test suite to validate core heuristics, OpenCV solvers, and code scaffolding:
 
@@ -196,7 +214,9 @@ Execute the test suite to validate core heuristics, OpenCV solvers, and code sca
 pytest tests/
 ```
 
---- ## Disclaimer & Legal Notice
+---
+
+## Disclaimer & Legal Notice
 
 1. **License**: This project is licensed under the [Apache License 2.0](LICENSE).
 2. **Legal Disclaimer**: RegisterHub is strictly intended for **authorized security audits, regression test automation, and web standards research**.
