@@ -25,16 +25,13 @@ The exclusive objective of this release is to investigate reactive state-machine
 
 ---
 
-### 2. Scope & Constructive Knowledge
+### 2. Scope & Open Source Guidelines
 
 2.1 **Informed Use & Assumption of Risk**:  
 This project is distributed under the terms of the Apache License 2.0. Users acknowledge the dual-use nature of automation tooling and agree to operate it solely within legitimate, authorized parameters in accordance with applicable laws.
 
-2.2 **Anti-Tampering & Mandatory Retention**:  
-No downstream distributor, fork maintainer, or repackager may remove, obscure, truncate, or alter this disclaimer.
-
-2.3 **Constructive Knowledge Doctrine**:  
-The legal force of this disclaimer **transcends any specific distribution medium and does not depend on its physical presence in any downstream copy**. Even if removed by an intermediary, this agreement continues to bind every downstream recipient with full legal effect. Lack of physical presence in a third-party archive constitutes no defense.
+2.2 **Open Source Recommendations**:  
+In accordance with the Apache License 2.0, downstream distributors and fork maintainers are advised to retain the original copyright notice and disclaimer to ensure technical attribution and clear boundaries of liability.
 
 ---
 
