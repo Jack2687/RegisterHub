@@ -842,13 +842,17 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         if root not in resolved.parents or not resolved.is_file():
             self.send_error(HTTPStatus.NOT_FOUND, "Not Found")
             return
-        ctype, _ = mimetypes.guess_type(str(resolved))
-        ctype = ctype or "application/octet-stream"
+        if resolved.suffix.lower() == ".ico":
+            ctype = "image/x-icon"
+        else:
+            ctype, _ = mimetypes.guess_type(str(resolved))
+            ctype = ctype or "application/octet-stream"
         is_text = ctype.startswith("text/") or ctype in ("application/javascript", "application/json", "image/svg+xml")
         data = resolved.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", f"{ctype}; charset=utf-8" if is_text else ctype)
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(data)
@@ -1061,7 +1065,10 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/favicon.ico":
-            self._serve_static("logo.svg")
+            if (STATIC_DIR / "favicon.ico").exists():
+                self._serve_static("favicon.ico")
+            else:
+                self._serve_static("logo.svg")
             return
 
         if path == "/" or path == "/index.html":
