@@ -27,11 +27,14 @@ class StandardRunner:
 
     def __init__(self, config: Dict[str, Any], cdp_endpoint: Optional[str] = None):
         self.config = config
-        self.headless = config.get("browser", {}).get("headless", False)
-        self.enable_stealth = config.get("browser", {}).get("enable_stealth", True)
-        self.use_chrome_channel = config.get("browser", {}).get("use_chrome_channel", True)
-        self.proxy_server = config.get("browser", {}).get("proxy") or os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
-        self.cdp_endpoint = cdp_endpoint or config.get("browser", {}).get("cdp_endpoint")
+        browser_cfg = config.get("browser", {}) or {}
+        self.headless = browser_cfg.get("headless", False)
+        self.slow_mo = max(0, int(browser_cfg.get("slow_mo", 0) or 0))
+        self.timeout_ms = max(5000, int(browser_cfg.get("timeout", 30000) or 30000))
+        self.enable_stealth = browser_cfg.get("enable_stealth", True)
+        self.use_chrome_channel = browser_cfg.get("use_chrome_channel", True)
+        self.proxy_server = browser_cfg.get("proxy") or os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
+        self.cdp_endpoint = cdp_endpoint or browser_cfg.get("cdp_endpoint")
         self.output_dir = Path(config.get("output_dir", "./results"))
         self.snapshot_dir = self.output_dir / "snapshots"
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -106,6 +109,7 @@ class StandardRunner:
         
         launch_kwargs = {
             "headless": self.headless,
+            "slow_mo": self.slow_mo,
             "args": launch_args,
             "ignore_default_args": ["--enable-automation"]
         }
@@ -154,6 +158,7 @@ class StandardRunner:
             for idx in range(1, count + 1):
                 self.log("info", f"=== Processing task [{idx}/{count}] ===")
                 page = context.new_page()
+                page.set_default_timeout(self.timeout_ms)
                 adapter = adapter_cls(page, context, self.config)
                 task_start = time.time()
                 

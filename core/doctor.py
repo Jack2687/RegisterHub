@@ -251,7 +251,7 @@ def _check_write_permission(output_dir: str = "./results") -> CheckResult:
 
 def _check_config() -> CheckResult:
     """Verify config.json exists and parses; warn if falling back to defaults."""
-    cfg_path = Path("config.json")
+    cfg_path = Path(__file__).resolve().parent.parent / "config.json"
     if not cfg_path.exists():
         return CheckResult(
             "Configuration File",
@@ -275,16 +275,31 @@ def _check_config() -> CheckResult:
 
 
 def _check_network(timeout: float = 6.0) -> CheckResult:
-    """Verify outbound HTTPS works -- required by every real adapter."""
+    """Verify outbound HTTPS works (honoring browser.proxy in config.json if set)."""
+    proxies = None
+    try:
+        import json
+        cfg_path = Path(__file__).resolve().parent.parent / "config.json"
+        if cfg_path.exists():
+            px = (json.loads(cfg_path.read_text(encoding="utf-8")).get("browser") or {}).get("proxy")
+            if px:
+                proxies = {"http": str(px), "https": str(px)}
+    except Exception:
+        pass
     try:
         import requests
-        r = requests.get("https://www.google.com/generate_204",
-                         timeout=timeout, allow_redirects=False)
+        r = requests.get(
+            "https://www.google.com/generate_204",
+            timeout=timeout,
+            allow_redirects=False,
+            proxies=proxies,
+        )
+        via = f" via {proxies['https']}" if proxies else ""
         if r.status_code in (204, 200, 301, 302):
-            return CheckResult("Network Connectivity", True, f"HTTPS reachable ({r.status_code})")
+            return CheckResult("Network Connectivity", True, f"HTTPS reachable ({r.status_code}){via}")
         return CheckResult(
             "Network Connectivity", True,
-            f"HTTPS reachable (unexpected {r.status_code})", warn_only=True,
+            f"HTTPS reachable (unexpected {r.status_code}){via}", warn_only=True,
         )
     except Exception as e:
         return CheckResult(

@@ -13,15 +13,17 @@
         <div class="brand-mark" aria-hidden="true">RH</div>
         <div>
           <div class="brand-name">RegisterHub <span class="badge-oss">Lite · 开源社区版</span></div>
-          <div class="brand-sub">零依赖轻量自动化工具台 · 单线程安全演练</div>
+          <div class="brand-sub">零依赖轻量自动化工具台 · 单线程安全闭环</div>
         </div>
       </div>
 
       <nav class="tabbar" role="tablist">
         <button class="tab active" data-view="doctor">环境诊断</button>
+        <button class="tab" data-view="config">运行配置</button>
         <button class="tab" data-view="runner">单站试跑</button>
+        <button class="tab" data-view="accounts">账号与 Key</button>
+        <button class="tab" data-view="snapshots">失败快照</button>
         <button class="tab" data-view="scaffold">新建适配器</button>
-        <button class="tab" data-view="accounts">账号导出</button>
         <button class="tab" data-view="layout">单窗标定</button>
       </nav>
     </div>
@@ -33,7 +35,7 @@
       <div class="section-head">
         <div>
           <h1>环境真执行诊断 (Doctor)</h1>
-          <p>逐项执行真实探针：Python、Playwright、Chrome 渠道、OpenCV 模板匹配、目录写权限与网络。</p>
+          <p>逐项执行真实探针：Python、Playwright、Chrome 渠道、OpenCV 模板匹配、目录写权限与配置代理网络。</p>
         </div>
         <button id="btn-run-doctor" class="btn btn-primary">重新体检</button>
       </div>
@@ -41,14 +43,55 @@
       <div id="doctor-grid" class="check-grid"></div>
     </section>
 
-    <!-- 2. 单站试跑 Runner -->
+    <!-- 2. 运行配置 Config -->
+    <section id="view-config" class="view">
+      <div class="section-head">
+        <div>
+          <h1>运行配置 (config.json)</h1>
+          <p>直接在线读写本地 <code>config.json</code>（原子落盘），修改代理、无头模式、指纹浏览器 CDP 与默认参数立即生效。</p>
+        </div>
+        <button id="btn-save-config" class="btn btn-primary">保存配置</button>
+      </div>
+      <div class="card form-grid">
+        <div class="form-group">
+          <label for="cfg-proxy">HTTP / SOCKS5 代理地址（留空直连）</label>
+          <input id="cfg-proxy" type="text" placeholder="例如 http://127.0.0.1:7897" />
+        </div>
+        <div class="form-group">
+          <label for="cfg-cdp">外部指纹浏览器 CDP 地址（可选）</label>
+          <input id="cfg-cdp" type="text" placeholder="例如 http://127.0.0.1:9222" />
+        </div>
+        <div class="form-group">
+          <label for="cfg-slowmo">拟人步进延迟 slow_mo (ms)</label>
+          <input id="cfg-slowmo" type="number" min="0" max="2000" value="50" />
+        </div>
+        <div class="form-group">
+          <label for="cfg-timeout">默认操作超时 timeout (ms)</label>
+          <input id="cfg-timeout" type="number" min="5000" max="120000" value="30000" />
+        </div>
+        <div class="form-group">
+          <label for="cfg-country">默认生成人设地区 (US / UK / DE)</label>
+          <input id="cfg-country" type="text" placeholder="US" maxlength="2" />
+        </div>
+        <div class="form-group">
+          <label for="cfg-pwlen">默认密码长度 (10–32)</label>
+          <input id="cfg-pwlen" type="number" min="10" max="32" value="14" />
+        </div>
+        <label class="check-row"><input id="cfg-headless" type="checkbox" /> <span>启用无头模式运行 (browser.headless)</span></label>
+        <label class="check-row"><input id="cfg-stealth" type="checkbox" /> <span>注入反指纹拟真脚本 (enable_stealth)</span></label>
+        <label class="check-row"><input id="cfg-chrome" type="checkbox" /> <span>优先启动本机真实 Chrome (use_chrome_channel)</span></label>
+        <label class="check-row"><input id="cfg-disposable" type="checkbox" /> <span>默认启用临时邮箱自动接码 (use_disposable_mail)</span></label>
+      </div>
+    </section>
+
+    <!-- 3. 单站试跑 Runner -->
     <section id="view-runner" class="view">
       <div class="section-head">
         <div>
           <h1>单线程适配器试跑</h1>
-          <p>社区版专注单线程学习与开发验证：选择已发现的适配器并实时观察运行输出。</p>
+          <p>严格单任务互斥、自动剥离 ANSI 乱码、进程树级彻底停止，刷新页面自动重连运行中任务并保留历史日志。</p>
         </div>
-        <span class="pill-note">单线程模式 · Safe Mode</span>
+        <span class="pill-note">单线程安全互斥 · Safe Mode</span>
       </div>
 
       <div class="split-2">
@@ -64,6 +107,9 @@
             <button id="btn-start-run" class="btn btn-primary">启动单线程试跑</button>
             <button id="btn-stop-run" class="btn btn-danger" disabled>停止任务</button>
           </div>
+
+          <h3 class="sub-title">最近运行记录（已持久化落盘）</h3>
+          <div id="job-history" class="history-list"></div>
         </div>
 
         <div class="card console-card">
@@ -76,39 +122,15 @@
       </div>
     </section>
 
-    <!-- 3. 新建适配器 Scaffold -->
-    <section id="view-scaffold" class="view">
-      <div class="section-head">
-        <div>
-          <h1>新建站点适配器脚手架</h1>
-          <p>按标准基类在 <code>sites/</code> 下生成可运行的社区版适配器骨架，写完即可自动出现在试跑列表。</p>
-        </div>
-      </div>
-
-      <div class="card narrow">
-        <div class="form-group">
-          <label for="sc-name">适配器名称（英文/数字/下划线）</label>
-          <input id="sc-name" type="text" placeholder="例如 mysite" />
-        </div>
-        <div class="form-group">
-          <label for="sc-url">目标注册页 URL（可选）</label>
-          <input id="sc-url" type="url" placeholder="https://example.com/signup" />
-        </div>
-        <div class="actions">
-          <button id="btn-scaffold" class="btn btn-primary">一键生成适配器</button>
-        </div>
-        <div id="scaffold-msg" class="feedback hidden"></div>
-      </div>
-    </section>
-
-    <!-- 4. 账号导出 Accounts & Export -->
+    <!-- 4. 账号与 Key 导出 -->
     <section id="view-accounts" class="view">
       <div class="section-head">
         <div>
-          <h1>本地账号台账与标准导出</h1>
-          <p>读取 <code>results/accounts.txt</code>，一键导出标准 CSV、JSON 或 Bitwarden / 1Password 密码库。</p>
+          <h1>本地账号与 API Key 台账</h1>
+          <p>完整保留 4 列数据（含 API Key），支持明文显隐、单字段一键复制与无损 CSV / JSON / Bitwarden 导出。</p>
         </div>
         <div class="actions">
+          <button id="btn-toggle-secrets" class="btn btn-secondary">显示明文</button>
           <button class="btn btn-secondary" data-export="csv">导出 CSV</button>
           <button class="btn btn-secondary" data-export="json">导出 JSON</button>
           <button class="btn btn-primary" data-export="bitwarden">导出 Bitwarden</button>
@@ -125,6 +147,8 @@
               <th>邮箱</th>
               <th>密码</th>
               <th>用户名</th>
+              <th>API Key / 产物</th>
+              <th style="text-align:right">复制</th>
             </tr>
           </thead>
           <tbody id="accounts-tbody"></tbody>
@@ -132,7 +156,47 @@
       </div>
     </section>
 
-    <!-- 5. 单窗标定 Layout -->
+    <!-- 5. 失败快照 Snapshots -->
+    <section id="view-snapshots" class="view">
+      <div class="section-head">
+        <div>
+          <h1>本地失败现场快照 (Snapshots)</h1>
+          <p>自动读取 <code>results/snapshots/</code> 中留存的异常截图，点击可放大排查失败环节。</p>
+        </div>
+        <button id="btn-refresh-snaps" class="btn btn-secondary">刷新快照</button>
+      </div>
+      <div id="snapshots-empty" class="card empty-box hidden">当前暂无失败现场截图，运行出现异常时将自动归档至此。</div>
+      <div id="snapshots-grid" class="snap-grid"></div>
+    </section>
+
+    <!-- 6. 新建适配器 Scaffold -->
+    <section id="view-scaffold" class="view">
+      <div class="section-head">
+        <div>
+          <h1>新建站点适配器脚手架</h1>
+          <p>在 <code>sites/</code> 下生成可运行的社区版适配器骨架，可选启用真浏览器 DOM 表单选择器自动嗅探。</p>
+        </div>
+      </div>
+
+      <div class="card narrow">
+        <div class="form-group">
+          <label for="sc-name">适配器名称（英文/数字/下划线）</label>
+          <input id="sc-name" type="text" placeholder="例如 mysite" />
+        </div>
+        <div class="form-group">
+          <label for="sc-url">目标注册页 URL（可选）</label>
+          <input id="sc-url" type="url" placeholder="https://example.com/signup" />
+        </div>
+        <label class="check-row"><input id="sc-probe" type="checkbox" checked /> <span>填写 URL 时自动启动无头浏览器探测表单选择器 (FormInspector)</span></label>
+        <label class="check-row"><input id="sc-overwrite" type="checkbox" /> <span>允许覆盖同名既有适配器</span></label>
+        <div class="actions" style="margin-top:12px">
+          <button id="btn-scaffold" class="btn btn-primary">一键生成适配器</button>
+        </div>
+        <div id="scaffold-msg" class="feedback hidden"></div>
+      </div>
+    </section>
+
+    <!-- 7. 单窗标定 Layout -->
     <section id="view-layout" class="view">
       <div class="section-head">
         <div>
@@ -147,8 +211,18 @@
   </main>
 
   <footer class="footer">
-    <span>RegisterHub Open-Source Community · MIT License · Localhost Only (127.0.0.1)</span>
+    <span>RegisterHub Open-Source Community · Apache License 2.0 · Localhost Only (127.0.0.1)</span>
   </footer>
+
+  <div id="lightbox" class="lightbox hidden">
+    <div class="lightbox-card">
+      <div class="lightbox-head">
+        <span id="lightbox-title" class="mono"></span>
+        <button id="lightbox-close" class="btn btn-ghost btn-sm">关闭</button>
+      </div>
+      <img id="lightbox-img" alt="Failure Snapshot" />
+    </div>
+  </div>
 
   <div id="toast" class="toast hidden"></div>
   <script src="/static/app.js"></script>

@@ -41,6 +41,13 @@ class RefPoolManager:
                 lock_fd = os.open(str(lock_file), os.O_CREAT | os.O_EXCL | os.O_RDWR)
                 break
             except OSError:
+                # 回收僵尸锁（如进程被强杀遗留超过 60 秒）
+                try:
+                    if lock_file.exists() and (time.time() - lock_file.stat().st_mtime) > 60:
+                        lock_file.unlink()
+                        continue
+                except OSError:
+                    pass
                 time.sleep(0.05)
         if lock_fd is None:
             raise TimeoutError(f"Failed to acquire lock for {self.path}: {lock_file}")
@@ -366,7 +373,6 @@ class MilionseekAdapter(BaseSiteAdapter):
                             print(f"{'=' * 65}\n")
 
                             self.account_data["api_key"] = api_key
-                            self.account_data["password"] = api_key
 
                             # Save clean API key list to keys.txt
                             try:

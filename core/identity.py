@@ -85,6 +85,7 @@ def generate_identity(
     locale: str = "US",
     use_disposable: bool = False,
     mail_client: Optional[Any] = None,
+    password_length: int = 14,
 ) -> Dict[str, Any]:
     """Generate a cohesive, multi-field identity profile.
 
@@ -96,22 +97,14 @@ def generate_identity(
     loc_data = LOCALES.get(locale.upper(), LOCALES["US"])
     first, last = generate_synthetic_name(locale)
     username = generate_username(first, last)
-    password = generate_compliant_password()
+    password = generate_compliant_password(password_length)
 
     if mail_client is not None:
-        try:
-            email = mail_client.create_mailbox()
-        except Exception:
-            domain = email_domain or "local.dev"
-            email = f"{username}@{domain}"
+        email = mail_client.create_mailbox()
     elif use_disposable:
-        try:
-            from core.mail_client import DisposableMailClient
-            client = DisposableMailClient()
-            email = client.create_mailbox()
-        except Exception:
-            domain = email_domain or "local.dev"
-            email = f"{username}@{domain}"
+        from core.mail_client import DisposableMailClient
+        client = DisposableMailClient()
+        email = client.create_mailbox()
     elif email_domain:
         email = f"{username}@{email_domain}"
     else:

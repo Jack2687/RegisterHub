@@ -91,6 +91,77 @@ def test_lite_meta_static_adapters_doctor_and_export(tmp_path, monkeypatch):
             assert False, "Expected HTTP 400 for unknown adapter"
         except urllib.error.HTTPError as e:
             assert e.code == 400
+
+        # 6. Unknown /api/* path returns JSON 404 (not HTML 200)
+        try:
+            _get_json(f"{base}/api/does_not_exist")
+            assert False, "Expected HTTP 404"
+        except urllib.error.HTTPError as e:
+            assert e.code == 404
+
+        assert "Apache License 2.0" in html
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_lite_v4_config_snapshots_4col_key_and_mutex(tmp_path, monkeypatch):
+    res_dir = tmp_path / "results"
+    snaps_dir = res_dir / "snapshots"
+    jobs_dir = res_dir / "jobs"
+    snaps_dir.mkdir(parents=True)
+    acc = res_dir / "accounts.txt"
+    acc.write_text("bob@test.com----Pw123----bob_u----sk-live-abcdef123456\n", encoding="utf-8")
+    (snaps_dir / "fail_001.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde"
+    )
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(json.dumps({"browser": {"headless": False}, "defaults": {"country": "US"}}), encoding="utf-8")
+
+    monkeypatch.setattr(lite_server, "RESULTS_DIR", res_dir)
+    monkeypatch.setattr(lite_server, "ACCOUNTS_FILE", acc)
+    monkeypatch.setattr(lite_server, "SNAPSHOTS_DIR", snaps_dir)
+    monkeypatch.setattr(lite_server, "JOBS_DIR", jobs_dir)
+    monkeypatch.setattr(lite_server, "CONFIG_FILE", cfg_file)
+
+    srv, base = _start_ephemeral()
+    try:
+        # 1. 4-col api_key preserved in accounts API & CSV export
+        _, accs = _get_json(f"{base}/api/accounts")
+        assert accs["accounts"][0]["api_key"] == "sk-live-abcdef123456"
+        _, csv_exp = _post_json(f"{base}/api/export/csv", {})
+        assert "sk-live-abcdef123456" in csv_exp["content"]
+
+        # 2. Config read & atomic save
+        _, cfg0 = _get_json(f"{base}/api/config")
+        assert cfg0["browser"]["headless"] is False
+        _, saved = _post_json(f"{base}/api/config", {"headless": True, "proxy": "http://127.0.0.1:7897", "country": "UK"})
+        assert saved["ok"] is True
+        assert saved["config"]["browser"]["headless"] is True
+        assert saved["config"]["browser"]["proxy"] == "http://127.0.0.1:7897"
+        assert saved["config"]["defaults"]["country"] == "UK"
+
+        # 3. Failure snapshots list & binary PNG serve
+        _, sn = _get_json(f"{base}/api/snapshots")
+        assert sn["total"] == 1 and sn["snapshots"][0]["name"] == "fail_001.png"
+        with urllib.request.urlopen(f"{base}/api/snapshots/fail_001.png", timeout=5) as img_r:
+            assert img_r.status == 200
+            assert img_r.headers.get("Content-Type") == "image/png"
+            assert img_r.read().startswith(b"\x89PNG")
+
+        # 4. Single-thread mutex rejects concurrent start with 409
+        fake_job = lite_server._LiteJob("lite_running_1", "demo", 1)
+        with lite_server.job_manager._lock:
+            lite_server.job_manager._jobs[fake_job.id] = fake_job
+        try:
+            try:
+                _post_json(f"{base}/api/run", {"adapter": "demo", "count": 1})
+                assert False, "Expected HTTP 409 mutex conflict"
+            except urllib.error.HTTPError as e:
+                assert e.code == 409
+        finally:
+            with lite_server.job_manager._lock:
+                lite_server.job_manager._jobs.pop(fake_job.id, None)
     finally:
         srv.shutdown()
         srv.server_close()

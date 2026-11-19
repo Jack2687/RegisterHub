@@ -34,12 +34,15 @@ class {class_name}(BaseSiteAdapter):
 
     def prepare_identity(self) -> Dict[str, Any]:
         """Generate synthetic credentials matching target requirements."""
-        use_disposable = self.config.get("use_disposable_mail", True)
+        defaults = self.config.get("defaults") or {{}}
+        use_disposable = defaults.get("use_disposable_mail", self.config.get("use_disposable_mail", True))
+        locale = defaults.get("country", "US")
+        pwd_len = int(defaults.get("password_length", 14) or 14)
         if use_disposable:
             self.mail_client = DisposableMailClient()
-            ident = generate_identity(locale="US", mail_client=self.mail_client)
+            ident = generate_identity(locale=locale, mail_client=self.mail_client, password_length=pwd_len)
         else:
-            ident = generate_identity(locale="US")
+            ident = generate_identity(locale=locale, password_length=pwd_len)
 
         self.account_data = ident
         return self.account_data
