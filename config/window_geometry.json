@@ -1,0 +1,110 @@
+{
+  "calibrated_at": "2026-11-19 12:50:00",
+  "description": "Win11 1920x1080 @ 125% DPI (逻辑工作区 1536x864) 全家桶对称精修标定：1全屏 / 2左右 / 4双形态 / 6双形态",
+  "screen_resolution": "1920x1080 (125% -> 1536x864)",
+  "total_slots": 4,
+  "quad_mode": "centered_compact",
+  "hex_mode": "wing_cascade",
+  "single_concurrency": {
+    "total_slots": 1,
+    "description": "1并发：全屏满屏",
+    "slots": [
+      {
+        "slot": 0,
+        "name": "单窗口 (全屏)",
+        "x": -6,
+        "y": 0,
+        "width": 1548,
+        "height": 871,
+        "dpr": 1.25,
+        "zoom": 0.85
+      }
+    ]
+  },
+  "dual_concurrency": {
+    "total_slots": 2,
+    "description": "2并发：左右两侧全高贴边 (Win11 Snap 对称精修)",
+    "slots": [
+      {
+        "slot": 0,
+        "name": "左窗口 (#1)",
+        "x": -6,
+        "y": 0,
+        "width": 782,
+        "height": 871,
+        "dpr": 1.25,
+        "zoom": 0.85
+      },
+      {
+        "slot": 1,
+        "name": "右窗口 (#2)",
+        "x": 762,
+        "y": 0,
+        "width": 782,
+        "height": 871,
+        "dpr": 1.25,
+        "zoom": 0.85
+      }
+    ]
+  },
+  "quad_presets": {
+    "edge_2x2": {
+      "total_slots": 4,
+      "description": "4并发形式一：严丝合缝贴满四边 (0缝隙0重叠)",
+      "slots": [
+        { "slot": 0, "name": "左上 (#1)", "x": -6,  "y": 0,   "width": 782, "height": 439, "dpr": 1.25, "zoom": 0.68 },
+        { "slot": 1, "name": "右上 (#2)", "x": 762, "y": 0,   "width": 782, "height": 439, "dpr": 1.25, "zoom": 0.68 },
+        { "slot": 2, "name": "左下 (#3)", "x": -6,  "y": 432, "width": 782, "height": 439, "dpr": 1.25, "zoom": 0.68 },
+        { "slot": 3, "name": "右下 (#4)", "x": 762, "y": 432, "width": 782, "height": 439, "dpr": 1.25, "zoom": 0.68 }
+      ]
+    },
+    "centered_compact": {
+      "total_slots": 4,
+      "description": "4并发形式二：四周对称留白居中紧凑微叠 (鼠标行程短)",
+      "slots": [
+        { "slot": 0, "name": "左上 (#1)", "x": 78,  "y": 64,  "width": 780, "height": 440, "dpr": 1.25, "zoom": 0.70 },
+        { "slot": 1, "name": "右上 (#2)", "x": 678, "y": 64,  "width": 780, "height": 440, "dpr": 1.25, "zoom": 0.70 },
+        { "slot": 2, "name": "左下 (#3)", "x": 78,  "y": 360, "width": 780, "height": 440, "dpr": 1.25, "zoom": 0.70 },
+        { "slot": 3, "name": "右下 (#4)", "x": 678, "y": 360, "width": 780, "height": 440, "dpr": 1.25, "zoom": 0.70 }
+      ]
+    }
+  },
+  "hex_presets": {
+    "edge_3x2": {
+      "total_slots": 6,
+      "description": "6并发形式一：严丝合缝贴满六宫格 (0缝隙0重叠)",
+      "slots": [
+        { "slot": 0, "name": "上左 (#1)", "x": -6,   "y": 0,   "width": 526, "height": 440, "dpr": 1.25, "zoom": 0.59 },
+        { "slot": 1, "name": "上中 (#2)", "x": 506,  "y": 0,   "width": 526, "height": 440, "dpr": 1.25, "zoom": 0.59 },
+        { "slot": 2, "name": "上右 (#3)", "x": 1018, "y": 0,   "width": 526, "height": 440, "dpr": 1.25, "zoom": 0.59 },
+        { "slot": 3, "name": "下左 (#4)", "x": -6,   "y": 432, "width": 526, "height": 440, "dpr": 1.25, "zoom": 0.59 },
+        { "slot": 4, "name": "下中 (#5)", "x": 506,  "y": 432, "width": 526, "height": 440, "dpr": 1.25, "zoom": 0.59 },
+        { "slot": 5, "name": "下右 (#6)", "x": 1018, "y": 432, "width": 526, "height": 440, "dpr": 1.25, "zoom": 0.59 }
+      ]
+    },
+    "wing_cascade": {
+      "total_slots": 6,
+      "description": "6并发形式二：左右镜像对称八字阶梯展翼 (660x480大视野、0切边、状态栏全裸露)",
+      "slots": [
+        { "slot": 0, "name": "左翼上 (#1)", "x": 114, "y": 24,  "width": 660, "height": 480, "dpr": 1.25, "zoom": 0.65 },
+        { "slot": 1, "name": "右翼上 (#2)", "x": 762, "y": 24,  "width": 660, "height": 480, "dpr": 1.25, "zoom": 0.65 },
+        { "slot": 2, "name": "左翼中 (#3)", "x": 54,  "y": 204, "width": 660, "height": 480, "dpr": 1.25, "zoom": 0.65 },
+        { "slot": 3, "name": "右翼中 (#4)", "x": 822, "y": 204, "width": 660, "height": 480, "dpr": 1.25, "zoom": 0.65 },
+        { "slot": 4, "name": "左翼下 (#5)", "x": -6,  "y": 384, "width": 660, "height": 480, "dpr": 1.25, "zoom": 0.65 },
+        { "slot": 5, "name": "右翼下 (#6)", "x": 882, "y": 384, "width": 660, "height": 480, "dpr": 1.25, "zoom": 0.65 }
+      ]
+    }
+  },
+  "slots": [
+    { "slot": 0, "name": "左上 (#1)", "x": 78,  "y": 64,  "width": 780, "height": 440, "dpr": 1.25, "zoom": 0.70 },
+    { "slot": 1, "name": "右上 (#2)", "x": 678, "y": 64,  "width": 780, "height": 440, "dpr": 1.25, "zoom": 0.70 },
+    { "slot": 2, "name": "左下 (#3)", "x": 78,  "y": 360, "width": 780, "height": 440, "dpr": 1.25, "zoom": 0.70 },
+    { "slot": 3, "name": "右下 (#4)", "x": 678, "y": 360, "width": 780, "height": 440, "dpr": 1.25, "zoom": 0.70 }
+  ],
+  "x": -6,
+  "y": 0,
+  "width": 1548,
+  "height": 871,
+  "zoom": 0.85,
+  "dpr": 1.25
+}

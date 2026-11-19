@@ -77,13 +77,29 @@ class StandardRunner:
             f.write(line)
 
     def _launch_browser(self, p):
-        """Launch browser with robust maximization, stealth and genuine Chrome channel."""
+        """Launch browser with calibrated geometry (if available), stealth and genuine Chrome channel."""
         launch_args = [
             "--disable-blink-features=AutomationControlled",
-            "--start-maximized",
             "--no-first-run",
             "--no-default-browser-check"
         ]
+        self._calibrated_zoom = None
+        if not self.headless:
+            try:
+                from core.calibrator import DEFAULT_GEOMETRY_PATH, get_window_layout
+                if DEFAULT_GEOMETRY_PATH.exists():
+                    lay = get_window_layout(0, 1)
+                    launch_args.extend([
+                        f"--window-position={lay['x']},{lay['y']}",
+                        f"--window-size={lay['width']},{lay['height']}",
+                    ])
+                    self._calibrated_zoom = float(lay.get("zoom", 0.85))
+                else:
+                    launch_args.append("--start-maximized")
+            except Exception:
+                launch_args.append("--start-maximized")
+        else:
+            launch_args.append("--start-maximized")
         
         launch_kwargs = {
             "headless": self.headless,
@@ -124,6 +140,13 @@ class StandardRunner:
             if self.enable_stealth:
                 apply_stealth_to_context(context)
                 self.log("info", "Anti-fingerprint masking scripts injected into context.")
+
+            if getattr(self, "_calibrated_zoom", None) and not self.headless:
+                try:
+                    from core.calibrator import build_zoom_init_script
+                    context.add_init_script(build_zoom_init_script(self._calibrated_zoom))
+                except Exception:
+                    pass
             
             for idx in range(1, count + 1):
                 self.log("info", f"=== Processing task [{idx}/{count}] ===")

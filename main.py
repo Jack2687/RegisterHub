@@ -172,9 +172,30 @@ def main():
     parser.add_argument("--url", type=str, default=None, help="Inspect URL or target URL for scaffolding")
     parser.add_argument("--cdp", type=str, default=None, help="Connect to an external Fingerprint/Anti-Detect browser CDP (e.g. http://127.0.0.1:9222)")
     parser.add_argument("--export", type=str, default=None, choices=["csv", "json", "bitwarden"], help="Export accounts to csv, json or bitwarden format")
+    parser.add_argument("--auto-layout", action="store_true", help="Auto-generate symmetric window layouts (1/2/4x2/6x2) for the current display work area")
+    parser.add_argument("--demo-layouts", action="store_true", help="Preview all calibrated/auto-generated window layouts in sequence")
+    parser.add_argument("--demo-sec", type=int, default=10, help="Seconds to hold each layout during --demo-layouts (default: 10)")
+    parser.add_argument("--calibrate", action="store_true", help="Launch interactive window geometry & anti-clipping zoom calibrator")
+    parser.add_argument("--calibrate-url", type=str, default="", help="Optional URL to load inside --calibrate")
+    parser.add_argument("-c", "--concurrency", type=int, default=1, help="Window count for --calibrate (1/2/4/6)")
     parser.add_argument("command", nargs="?", default=None, help="Subcommand like 'doctor' or 'export'")
 
     args = parser.parse_args()
+
+    if args.auto_layout:
+        from core.calibrator import auto_generate_layout
+        auto_generate_layout()
+        return
+
+    if args.demo_layouts:
+        from core.calibrator import demo_layouts
+        demo_layouts(hold_sec=args.demo_sec)
+        return
+
+    if args.calibrate:
+        from core.calibrator import calibrate_window
+        calibrate_window(url=args.calibrate_url or (args.url or ""), total_windows=max(1, args.concurrency))
+        return
 
     if args.command == "doctor":
         # Exit non-zero when blocking issues are found, so CI and wrapper
