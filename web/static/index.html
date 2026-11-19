@@ -1,224 +1,441 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>RegisterHub Lite · 开源轻量工作台</title>
+  <title>RegisterHub Lite · 开源社区工作台</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem('rh_lite_theme') || 'dark';
+        var el = document.documentElement;
+        el.classList.remove('dark', 'light');
+        el.classList.add(t === 'light' ? 'light' : 'dark');
+      } catch (e) {}
+    })();
+  </script>
   <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
-  <header class="topbar">
-    <div class="topbar-inner">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true">RH</div>
-        <div>
-          <div class="brand-name">RegisterHub <span class="badge-oss">Lite · 开源社区版</span></div>
-          <div class="brand-sub">零依赖轻量自动化工具台 · 单线程安全闭环</div>
+  <div id="app-shell" class="app-shell">
+    <!-- 左侧悬浮导航栏（与 Studio / PRO 同源设计） -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-card">
+        <div class="brand-head">
+          <div class="brand-row">
+            <div class="brand-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>
+            </div>
+            <div class="brand-meta">
+              <div class="brand-title">RegisterHub Lite</div>
+              <div class="brand-sub">开源社区工作台</div>
+            </div>
+          </div>
+        </div>
+
+        <nav class="nav-scroll" role="tablist">
+          <div class="nav-group">
+            <div class="nav-heading">核心工作台</div>
+            <button type="button" class="nav-item active" data-view="doctor" title="环境诊断">
+              <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span>
+              <span class="nav-label">环境诊断</span>
+              <span id="nav-badge-doctor" class="nav-badge rose hidden">0</span>
+            </button>
+            <button type="button" class="nav-item" data-view="runner" title="单站试跑">
+              <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg></span>
+              <span class="nav-label">单站试跑</span>
+              <span id="nav-badge-runner" class="nav-badge blue hidden">1</span>
+            </button>
+            <button type="button" class="nav-item" data-view="accounts" title="账号与 Key">
+              <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+              <span class="nav-label">账号台账</span>
+              <span id="nav-badge-accounts" class="nav-badge muted hidden">0</span>
+            </button>
+            <button type="button" class="nav-item" data-view="snapshots" title="失败快照">
+              <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg></span>
+              <span class="nav-label">失败快照</span>
+            </button>
+          </div>
+
+          <div class="nav-group">
+            <div class="nav-heading">开发与配置</div>
+            <button type="button" class="nav-item" data-view="scaffold" title="新建适配器">
+              <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
+              <span class="nav-label">新建适配器</span>
+            </button>
+            <button type="button" class="nav-item" data-view="layout" title="单窗标定">
+              <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg></span>
+              <span class="nav-label">单窗标定</span>
+            </button>
+            <button type="button" class="nav-item" data-view="config" title="运行配置">
+              <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></span>
+              <span class="nav-label">运行配置</span>
+            </button>
+          </div>
+        </nav>
+
+        <!-- 左下角环境心跳卡（与 Studio 风格一致） -->
+        <div class="sidebar-foot">
+          <button type="button" id="heartbeat-card" class="heartbeat-card">
+            <div class="hb-top">
+              <span class="hb-title">
+                <span class="dot emerald" id="hb-dot"></span>
+                <span>环境心跳</span>
+              </span>
+              <span id="hb-summary" class="hb-stat mono">检测中…</span>
+            </div>
+            <div class="hb-rows">
+              <div class="hb-row"><span>并发模式</span><span class="mono">单线程 Safe</span></div>
+              <div class="hb-row"><span>本地监听</span><span class="mono">127.0.0.1</span></div>
+              <div class="hb-row"><span>开源协议</span><span class="mono">Apache 2.0</span></div>
+            </div>
+          </button>
+          <div class="sidebar-ver">
+            <span class="mono">v1.0.0</span>
+            <span class="ver-ok mono">本机免密直连</span>
+          </div>
         </div>
       </div>
+    </aside>
 
-      <nav class="tabbar" role="tablist">
-        <button class="tab active" data-view="doctor">环境诊断</button>
-        <button class="tab" data-view="config">运行配置</button>
-        <button class="tab" data-view="runner">单站试跑</button>
-        <button class="tab" data-view="accounts">账号与 Key</button>
-        <button class="tab" data-view="snapshots">失败快照</button>
-        <button class="tab" data-view="scaffold">新建适配器</button>
-        <button class="tab" data-view="layout">单窗标定</button>
-      </nav>
+    <!-- 右侧主工作画布 -->
+    <div class="main-col">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button type="button" id="btn-toggle-sidebar" class="icon-btn" title="展开 / 收起侧边栏">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>
+          </button>
+          <div class="page-head-inline">
+            <h1 id="topbar-title">环境真执行诊断</h1>
+            <span class="badge emerald">开源社区版 · Lite</span>
+          </div>
+        </div>
+
+        <div class="topbar-right">
+          <button type="button" id="btn-global-refresh" class="icon-btn" title="刷新当前页面数据">
+            <svg id="icon-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+          </button>
+          <button type="button" id="btn-theme-toggle" class="icon-btn" title="切换浅色 / 暗黑主题">
+            <svg id="icon-sun" class="hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+            <svg id="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <main class="canvas">
+        <div class="canvas-inner">
+          <!-- 1. 环境诊断 Doctor -->
+          <section id="view-doctor" class="view active">
+            <div class="kpi-grid">
+              <button type="button" class="kpi-card" data-jump="doctor">
+                <div class="kpi-top"><span>环境健康探针</span><span class="kpi-ico emerald"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg></span></div>
+                <div id="kpi-doctor" class="kpi-val tabular-nums">—</div>
+                <div id="kpi-doctor-sub" class="kpi-hint">真实执行依赖校验</div>
+              </button>
+              <button type="button" class="kpi-card" data-jump="runner">
+                <div class="kpi-top"><span>本地站点适配器</span><span class="kpi-ico sky"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg></span></div>
+                <div id="kpi-adapters" class="kpi-val tabular-nums">0</div>
+                <div class="kpi-hint">自动发现 sites/*.py</div>
+              </button>
+              <button type="button" class="kpi-card" data-jump="accounts">
+                <div class="kpi-top"><span>本地成号 / Key</span><span class="kpi-ico violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg></span></div>
+                <div id="kpi-accounts" class="kpi-val tabular-nums">0</div>
+                <div id="kpi-accounts-sub" class="kpi-hint">支持 4 列 API Key 导出</div>
+              </button>
+              <button type="button" class="kpi-card" data-jump="snapshots">
+                <div class="kpi-top"><span>失败现场快照</span><span class="kpi-ico amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg></span></div>
+                <div id="kpi-snaps" class="kpi-val tabular-nums">0</div>
+                <div class="kpi-hint">异常自动截图归档</div>
+              </button>
+            </div>
+
+            <div class="card toolbar-strip">
+              <span class="strip-label">快捷工作流</span>
+              <div class="actions">
+                <button type="button" class="btn btn-primary btn-sm" data-jump="runner">启动单站试跑</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-jump="config">修改运行配置</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-jump="scaffold">生成新适配器</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-jump="layout">单窗视窗标定</button>
+                <button type="button" id="btn-run-doctor" class="btn btn-secondary btn-sm">重新全量体检</button>
+              </div>
+            </div>
+
+            <div id="doctor-banner" class="banner muted">正在执行首次环境体检…</div>
+            <div id="doctor-grid" class="check-grid"></div>
+          </section>
+
+          <!-- 2. 运行配置 Config -->
+          <section id="view-config" class="view">
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <h2 class="card-title">运行配置 (config.json)</h2>
+                  <p class="card-sub">直接在线读写本地 <code>config.json</code>（原子落盘），修改代理、无头模式、指纹浏览器 CDP 与默认参数立即生效。</p>
+                </div>
+                <button type="button" id="btn-save-config" class="btn btn-primary btn-sm">保存配置</button>
+              </div>
+
+              <div class="form-grid">
+                <div class="form-group">
+                  <label for="cfg-proxy">HTTP / SOCKS5 代理地址（留空直连）</label>
+                  <input id="cfg-proxy" type="text" class="mono" placeholder="例如 http://127.0.0.1:7897" />
+                </div>
+                <div class="form-group">
+                  <label for="cfg-cdp">外部指纹浏览器 CDP 地址（可选）</label>
+                  <input id="cfg-cdp" type="text" class="mono" placeholder="例如 http://127.0.0.1:9222" />
+                </div>
+                <div class="form-group">
+                  <label for="cfg-slowmo">拟人步进延迟 slow_mo (ms)</label>
+                  <input id="cfg-slowmo" type="number" min="0" max="2000" value="50" />
+                </div>
+                <div class="form-group">
+                  <label for="cfg-timeout">默认操作超时 timeout (ms)</label>
+                  <input id="cfg-timeout" type="number" min="5000" max="120000" value="30000" />
+                </div>
+                <div class="form-group">
+                  <label for="cfg-country">默认生成人设地区 (US / UK / DE)</label>
+                  <input id="cfg-country" type="text" class="mono" placeholder="US" maxlength="2" />
+                </div>
+                <div class="form-group">
+                  <label for="cfg-pwlen">默认密码长度 (10–32)</label>
+                  <input id="cfg-pwlen" type="number" min="10" max="32" value="14" />
+                </div>
+              </div>
+
+              <div class="check-panel">
+                <label class="check-row"><input id="cfg-headless" type="checkbox" /> <span>启用无头模式运行 (browser.headless)</span></label>
+                <label class="check-row"><input id="cfg-stealth" type="checkbox" /> <span>注入反指纹拟真脚本 (enable_stealth)</span></label>
+                <label class="check-row"><input id="cfg-chrome" type="checkbox" /> <span>优先启动本机真实 Chrome (use_chrome_channel)</span></label>
+                <label class="check-row"><input id="cfg-disposable" type="checkbox" /> <span>默认启用临时邮箱自动接码 (use_disposable_mail)</span></label>
+              </div>
+            </div>
+          </section>
+
+          <!-- 3. 单站试跑 Runner -->
+          <section id="view-runner" class="view">
+            <div class="split-2">
+              <div class="card">
+                <div class="card-head compact">
+                  <div>
+                    <h2 class="card-title">选择站点适配器</h2>
+                    <p class="card-sub">严格单任务互斥 · Safe Mode</p>
+                  </div>
+                  <span class="badge sky">单线程</span>
+                </div>
+
+                <div class="search-wrap">
+                  <input id="adapter-search" type="text" placeholder="搜索适配器名或域名…" />
+                </div>
+                <div id="adapter-list" class="adapter-list"></div>
+
+                <div class="form-row">
+                  <label for="run-count">运行数量 (1–20)</label>
+                  <input id="run-count" type="number" min="1" max="20" value="1" />
+                </div>
+                <div class="actions">
+                  <button type="button" id="btn-start-run" class="btn btn-primary flex-1">启动单线程试跑</button>
+                  <button type="button" id="btn-stop-run" class="btn btn-danger" disabled>停止</button>
+                </div>
+
+                <div class="divider"></div>
+                <div class="sub-head">
+                  <span>最近运行记录（持久化落盘）</span>
+                </div>
+                <div id="job-history" class="history-list"></div>
+              </div>
+
+              <div class="card console-card">
+                <div class="console-head">
+                  <div class="console-status-wrap">
+                    <span id="console-dot" class="dot neutral"></span>
+                    <span id="console-status" class="mono">等待任务启动…</span>
+                  </div>
+                  <div class="actions">
+                    <div class="seg-group" id="log-filter-group">
+                      <button type="button" class="seg-btn active" data-lvl="all">全部</button>
+                      <button type="button" class="seg-btn" data-lvl="ok">成功</button>
+                      <button type="button" class="seg-btn" data-lvl="warn">警告</button>
+                      <button type="button" class="seg-btn" data-lvl="error">报错</button>
+                    </div>
+                    <button type="button" id="btn-clear-log" class="btn btn-ghost btn-sm">清屏</button>
+                  </div>
+                </div>
+                <pre id="console-log" class="console-body">尚未运行任务。点击左侧适配器开始试跑，刷新页面会自动重连运行中的任务。</pre>
+              </div>
+            </div>
+          </section>
+
+          <!-- 4. 账号与 Key 导出 -->
+          <section id="view-accounts" class="view">
+            <div class="kpi-grid cols-3">
+              <div class="kpi-card static">
+                <div class="kpi-top"><span>总成功账号</span></div>
+                <div id="acc-kpi-total" class="kpi-val tabular-nums">0</div>
+                <div class="kpi-hint">来自 results/accounts.txt</div>
+              </div>
+              <div class="kpi-card static">
+                <div class="kpi-top"><span>含 API Key / 产物</span></div>
+                <div id="acc-kpi-keys" class="kpi-val tabular-nums emerald-text">0</div>
+                <div class="kpi-hint">完整保留 4 列凭据无损导出</div>
+              </div>
+              <div class="kpi-card static">
+                <div class="kpi-top"><span>普通登录账号</span></div>
+                <div id="acc-kpi-plain" class="kpi-val tabular-nums sky-text">0</div>
+                <div class="kpi-hint">标准邮箱 + 密码 + 用户名</div>
+              </div>
+            </div>
+
+            <div class="card toolbar-strip">
+              <div class="search-wrap inline">
+                <input id="accounts-search" type="text" placeholder="搜邮箱 / 用户名 / Key…" />
+              </div>
+              <div class="actions">
+                <button type="button" id="btn-toggle-secrets" class="btn btn-secondary btn-sm">显示明文</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-export="csv">导出 CSV</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-export="json">导出 JSON</button>
+                <button type="button" class="btn btn-primary btn-sm" data-export="bitwarden">Bitwarden CSV</button>
+              </div>
+            </div>
+
+            <div class="card table-card">
+              <div id="accounts-empty" class="empty-box hidden">
+                暂无本地账号记录。先在「单站试跑」运行 <code>demo</code> 或其他适配器生成样例数据。
+              </div>
+              <div class="table-scroll">
+                <table id="accounts-table" class="data-table hidden">
+                  <thead>
+                    <tr>
+                      <th>邮箱</th>
+                      <th>密码</th>
+                      <th>用户名</th>
+                      <th>API Key / 产物</th>
+                      <th style="text-align:right">快捷复制</th>
+                    </tr>
+                  </thead>
+                  <tbody id="accounts-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <!-- 5. 失败快照 Snapshots -->
+          <section id="view-snapshots" class="view">
+            <div class="card toolbar-strip">
+              <div>
+                <div class="card-title">本地失败现场快照 (results/snapshots/)</div>
+                <div class="card-sub">运行出现异常时自动截屏留证，点击任意缩略图可放大排查具体报错页面。</div>
+              </div>
+              <button type="button" id="btn-refresh-snaps" class="btn btn-secondary btn-sm">刷新快照</button>
+            </div>
+            <div id="snapshots-empty" class="card empty-box hidden">当前暂无失败现场截图，运行出现异常时将自动归档至此。</div>
+            <div id="snapshots-grid" class="snap-grid"></div>
+          </section>
+
+          <!-- 6. 新建适配器 Scaffold -->
+          <section id="view-scaffold" class="view">
+            <div class="split-equal">
+              <div class="card">
+                <div class="card-head compact">
+                  <div>
+                    <h2 class="card-title">新建站点适配器脚手架</h2>
+                    <p class="card-sub">在 <code>sites/</code> 下生成继承 <code>BaseSite</code> 的适配器骨架，可选真浏览器 DOM 表单选择器自动嗅探。</p>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="sc-name">适配器名称（英文 / 数字 / 下划线）</label>
+                  <input id="sc-name" type="text" class="mono" placeholder="例如 mysite" />
+                </div>
+                <div class="form-group">
+                  <label for="sc-url">目标注册页 URL（可选）</label>
+                  <input id="sc-url" type="url" class="mono" placeholder="https://example.com/signup" />
+                </div>
+                <div class="check-panel compact">
+                  <label class="check-row"><input id="sc-probe" type="checkbox" checked /> <span>填写 URL 时自动启动无头浏览器探测表单选择器 (FormInspector)</span></label>
+                  <label class="check-row"><input id="sc-overwrite" type="checkbox" /> <span>允许覆盖同名既有适配器</span></label>
+                </div>
+                <div class="actions" style="margin-top:14px">
+                  <button type="button" id="btn-scaffold" class="btn btn-primary">一键生成适配器</button>
+                </div>
+                <div id="scaffold-msg" class="feedback hidden"></div>
+              </div>
+
+              <div class="card">
+                <div class="card-head compact">
+                  <div>
+                    <h2 class="card-title">社区版常用 CLI 命令速查</h2>
+                    <p class="card-sub">支持无头脚本批跑、环境体检与账号导出，与 Web 工作台共用配置。</p>
+                  </div>
+                </div>
+                <div class="cmd-list">
+                  <div class="cmd-row">
+                    <div><span class="cmd-lbl">环境体检</span><code class="mono">python main.py --doctor</code></div>
+                    <button type="button" class="btn btn-ghost btn-sm" data-copy-cmd="python main.py --doctor">复制</button>
+                  </div>
+                  <div class="cmd-row">
+                    <div><span class="cmd-lbl">列出适配器</span><code class="mono">python main.py --list</code></div>
+                    <button type="button" class="btn btn-ghost btn-sm" data-copy-cmd="python main.py --list">复制</button>
+                  </div>
+                  <div class="cmd-row">
+                    <div><span class="cmd-lbl">单站试跑</span><code class="mono">python main.py --run demo -n 1</code></div>
+                    <button type="button" class="btn btn-ghost btn-sm" data-copy-cmd="python main.py --run demo -n 1">复制</button>
+                  </div>
+                  <div class="cmd-row">
+                    <div><span class="cmd-lbl">单窗标定</span><code class="mono">python main.py --auto-layout</code></div>
+                    <button type="button" class="btn btn-ghost btn-sm" data-copy-cmd="python main.py --auto-layout">复制</button>
+                  </div>
+                  <div class="cmd-row">
+                    <div><span class="cmd-lbl">启动工作台</span><code class="mono">python main.py --web --port 18886</code></div>
+                    <button type="button" class="btn btn-ghost btn-sm" data-copy-cmd="python main.py --web --port 18886">复制</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 7. 单窗标定 Layout -->
+          <section id="view-layout" class="view">
+            <div class="card toolbar-strip">
+              <div>
+                <div class="card-title">单窗口视窗标定与防切割缩放</div>
+                <div class="card-sub">按当前显示器逻辑工作区自动计算防溢出窗口尺寸与等比缩放，写入 <code>config/window_geometry.json</code>。</div>
+              </div>
+              <button type="button" id="btn-auto-layout" class="btn btn-primary btn-sm">自动适配本机屏幕</button>
+            </div>
+
+            <div class="card layout-stage-card">
+              <div class="layout-stage-head">
+                <span class="mono" id="layout-screen-label">逻辑屏幕工作区预览</span>
+                <span class="badge emerald">单窗无裁切预设</span>
+              </div>
+              <div class="monitor-bezel">
+                <div id="layout-preview-slot" class="monitor-window">
+                  <div class="mw-bar"><span class="mw-dots"><i></i><i></i><i></i></span><span class="mono" id="mw-title">Slot #1</span></div>
+                  <div class="mw-body">
+                    <div id="mw-dim" class="mono mw-dim">— × —</div>
+                    <div id="mw-zoom" class="mono mw-zoom">Zoom —</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div id="layout-summary" class="check-grid"></div>
+          </section>
+        </div>
+
+        <footer class="footer">
+          <span>RegisterHub Open-Source Community · Apache License 2.0 · Localhost Only (127.0.0.1)</span>
+        </footer>
+      </main>
     </div>
-  </header>
+  </div>
 
-  <main class="container">
-    <!-- 1. 环境诊断 Doctor -->
-    <section id="view-doctor" class="view active">
-      <div class="section-head">
-        <div>
-          <h1>环境真执行诊断 (Doctor)</h1>
-          <p>逐项执行真实探针：Python、Playwright、Chrome 渠道、OpenCV 模板匹配、目录写权限与配置代理网络。</p>
-        </div>
-        <button id="btn-run-doctor" class="btn btn-primary">重新体检</button>
-      </div>
-      <div id="doctor-banner" class="banner muted">正在执行首次环境体检…</div>
-      <div id="doctor-grid" class="check-grid"></div>
-    </section>
-
-    <!-- 2. 运行配置 Config -->
-    <section id="view-config" class="view">
-      <div class="section-head">
-        <div>
-          <h1>运行配置 (config.json)</h1>
-          <p>直接在线读写本地 <code>config.json</code>（原子落盘），修改代理、无头模式、指纹浏览器 CDP 与默认参数立即生效。</p>
-        </div>
-        <button id="btn-save-config" class="btn btn-primary">保存配置</button>
-      </div>
-      <div class="card form-grid">
-        <div class="form-group">
-          <label for="cfg-proxy">HTTP / SOCKS5 代理地址（留空直连）</label>
-          <input id="cfg-proxy" type="text" placeholder="例如 http://127.0.0.1:7897" />
-        </div>
-        <div class="form-group">
-          <label for="cfg-cdp">外部指纹浏览器 CDP 地址（可选）</label>
-          <input id="cfg-cdp" type="text" placeholder="例如 http://127.0.0.1:9222" />
-        </div>
-        <div class="form-group">
-          <label for="cfg-slowmo">拟人步进延迟 slow_mo (ms)</label>
-          <input id="cfg-slowmo" type="number" min="0" max="2000" value="50" />
-        </div>
-        <div class="form-group">
-          <label for="cfg-timeout">默认操作超时 timeout (ms)</label>
-          <input id="cfg-timeout" type="number" min="5000" max="120000" value="30000" />
-        </div>
-        <div class="form-group">
-          <label for="cfg-country">默认生成人设地区 (US / UK / DE)</label>
-          <input id="cfg-country" type="text" placeholder="US" maxlength="2" />
-        </div>
-        <div class="form-group">
-          <label for="cfg-pwlen">默认密码长度 (10–32)</label>
-          <input id="cfg-pwlen" type="number" min="10" max="32" value="14" />
-        </div>
-        <label class="check-row"><input id="cfg-headless" type="checkbox" /> <span>启用无头模式运行 (browser.headless)</span></label>
-        <label class="check-row"><input id="cfg-stealth" type="checkbox" /> <span>注入反指纹拟真脚本 (enable_stealth)</span></label>
-        <label class="check-row"><input id="cfg-chrome" type="checkbox" /> <span>优先启动本机真实 Chrome (use_chrome_channel)</span></label>
-        <label class="check-row"><input id="cfg-disposable" type="checkbox" /> <span>默认启用临时邮箱自动接码 (use_disposable_mail)</span></label>
-      </div>
-    </section>
-
-    <!-- 3. 单站试跑 Runner -->
-    <section id="view-runner" class="view">
-      <div class="section-head">
-        <div>
-          <h1>单线程适配器试跑</h1>
-          <p>严格单任务互斥、自动剥离 ANSI 乱码、进程树级彻底停止，刷新页面自动重连运行中任务并保留历史日志。</p>
-        </div>
-        <span class="pill-note">单线程安全互斥 · Safe Mode</span>
-      </div>
-
-      <div class="split-2">
-        <div class="card">
-          <h2 class="card-title">选择站点适配器</h2>
-          <div id="adapter-list" class="adapter-list"></div>
-
-          <div class="form-row">
-            <label for="run-count">生成数量 (1–20)</label>
-            <input id="run-count" type="number" min="1" max="20" value="1" />
-          </div>
-          <div class="actions">
-            <button id="btn-start-run" class="btn btn-primary">启动单线程试跑</button>
-            <button id="btn-stop-run" class="btn btn-danger" disabled>停止任务</button>
-          </div>
-
-          <h3 class="sub-title">最近运行记录（已持久化落盘）</h3>
-          <div id="job-history" class="history-list"></div>
-        </div>
-
-        <div class="card console-card">
-          <div class="console-head">
-            <span id="console-status" class="mono">等待任务启动…</span>
-            <button id="btn-clear-log" class="btn btn-ghost btn-sm">清屏</button>
-          </div>
-          <pre id="console-log" class="console-body">尚未运行任务。点击左侧适配器开始试跑。</pre>
-        </div>
-      </div>
-    </section>
-
-    <!-- 4. 账号与 Key 导出 -->
-    <section id="view-accounts" class="view">
-      <div class="section-head">
-        <div>
-          <h1>本地账号与 API Key 台账</h1>
-          <p>完整保留 4 列数据（含 API Key），支持明文显隐、单字段一键复制与无损 CSV / JSON / Bitwarden 导出。</p>
-        </div>
-        <div class="actions">
-          <button id="btn-toggle-secrets" class="btn btn-secondary">显示明文</button>
-          <button class="btn btn-secondary" data-export="csv">导出 CSV</button>
-          <button class="btn btn-secondary" data-export="json">导出 JSON</button>
-          <button class="btn btn-primary" data-export="bitwarden">导出 Bitwarden</button>
-        </div>
-      </div>
-
-      <div class="card table-card">
-        <div id="accounts-empty" class="empty-box hidden">
-          暂无本地账号记录。先在「单站试跑」运行 <code>demo</code> 或其他适配器生成样例数据。
-        </div>
-        <table id="accounts-table" class="data-table hidden">
-          <thead>
-            <tr>
-              <th>邮箱</th>
-              <th>密码</th>
-              <th>用户名</th>
-              <th>API Key / 产物</th>
-              <th style="text-align:right">复制</th>
-            </tr>
-          </thead>
-          <tbody id="accounts-tbody"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- 5. 失败快照 Snapshots -->
-    <section id="view-snapshots" class="view">
-      <div class="section-head">
-        <div>
-          <h1>本地失败现场快照 (Snapshots)</h1>
-          <p>自动读取 <code>results/snapshots/</code> 中留存的异常截图，点击可放大排查失败环节。</p>
-        </div>
-        <button id="btn-refresh-snaps" class="btn btn-secondary">刷新快照</button>
-      </div>
-      <div id="snapshots-empty" class="card empty-box hidden">当前暂无失败现场截图，运行出现异常时将自动归档至此。</div>
-      <div id="snapshots-grid" class="snap-grid"></div>
-    </section>
-
-    <!-- 6. 新建适配器 Scaffold -->
-    <section id="view-scaffold" class="view">
-      <div class="section-head">
-        <div>
-          <h1>新建站点适配器脚手架</h1>
-          <p>在 <code>sites/</code> 下生成可运行的社区版适配器骨架，可选启用真浏览器 DOM 表单选择器自动嗅探。</p>
-        </div>
-      </div>
-
-      <div class="card narrow">
-        <div class="form-group">
-          <label for="sc-name">适配器名称（英文/数字/下划线）</label>
-          <input id="sc-name" type="text" placeholder="例如 mysite" />
-        </div>
-        <div class="form-group">
-          <label for="sc-url">目标注册页 URL（可选）</label>
-          <input id="sc-url" type="url" placeholder="https://example.com/signup" />
-        </div>
-        <label class="check-row"><input id="sc-probe" type="checkbox" checked /> <span>填写 URL 时自动启动无头浏览器探测表单选择器 (FormInspector)</span></label>
-        <label class="check-row"><input id="sc-overwrite" type="checkbox" /> <span>允许覆盖同名既有适配器</span></label>
-        <div class="actions" style="margin-top:12px">
-          <button id="btn-scaffold" class="btn btn-primary">一键生成适配器</button>
-        </div>
-        <div id="scaffold-msg" class="feedback hidden"></div>
-      </div>
-    </section>
-
-    <!-- 7. 单窗标定 Layout -->
-    <section id="view-layout" class="view">
-      <div class="section-head">
-        <div>
-          <h1>单窗口视窗标定与防切割缩放</h1>
-          <p>根据当前显示器逻辑工作区计算防裁切窗口尺寸与等比缩放比，写入 <code>config/window_geometry.json</code>。</p>
-        </div>
-        <button id="btn-auto-layout" class="btn btn-primary">自动适配本机屏幕</button>
-      </div>
-
-      <div id="layout-summary" class="check-grid"></div>
-    </section>
-  </main>
-
-  <footer class="footer">
-    <span>RegisterHub Open-Source Community · Apache License 2.0 · Localhost Only (127.0.0.1)</span>
-  </footer>
-
+  <!-- 截图放大模态框 -->
   <div id="lightbox" class="lightbox hidden">
     <div class="lightbox-card">
       <div class="lightbox-head">
         <span id="lightbox-title" class="mono"></span>
-        <button id="lightbox-close" class="btn btn-ghost btn-sm">关闭</button>
+        <button type="button" id="lightbox-close" class="btn btn-ghost btn-sm">关闭 (ESC)</button>
       </div>
       <img id="lightbox-img" alt="Failure Snapshot" />
     </div>

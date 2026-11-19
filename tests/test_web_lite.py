@@ -61,7 +61,7 @@ def test_lite_meta_static_adapters_doctor_and_export(tmp_path, monkeypatch):
 
         with urllib.request.urlopen(f"{base}/static/app.css", timeout=5) as r:
             assert r.status == 200
-            assert "--teal:" in r.read().decode("utf-8")
+            assert "--bg-canvas:" in r.read().decode("utf-8")
 
         # 2. Meta enforces community single-thread edition
         st, meta = _get_json(f"{base}/api/meta")
