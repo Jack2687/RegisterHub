@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RegisterHub Lite · 开源轻量工作台</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">RH</div>
+        <div>
+          <div class="brand-name">RegisterHub <span class="badge-oss">Lite · 开源社区版</span></div>
+          <div class="brand-sub">零依赖轻量自动化工具台 · 单线程安全演练</div>
+        </div>
+      </div>
+
+      <nav class="tabbar" role="tablist">
+        <button class="tab active" data-view="doctor">环境诊断</button>
+        <button class="tab" data-view="runner">单站试跑</button>
+        <button class="tab" data-view="scaffold">新建适配器</button>
+        <button class="tab" data-view="accounts">账号导出</button>
+        <button class="tab" data-view="layout">单窗标定</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- 1. 环境诊断 Doctor -->
+    <section id="view-doctor" class="view active">
+      <div class="section-head">
+        <div>
+          <h1>环境真执行诊断 (Doctor)</h1>
+          <p>逐项执行真实探针：Python、Playwright、Chrome 渠道、OpenCV 模板匹配、目录写权限与网络。</p>
+        </div>
+        <button id="btn-run-doctor" class="btn btn-primary">重新体检</button>
+      </div>
+      <div id="doctor-banner" class="banner muted">正在执行首次环境体检…</div>
+      <div id="doctor-grid" class="check-grid"></div>
+    </section>
+
+    <!-- 2. 单站试跑 Runner -->
+    <section id="view-runner" class="view">
+      <div class="section-head">
+        <div>
+          <h1>单线程适配器试跑</h1>
+          <p>社区版专注单线程学习与开发验证：选择已发现的适配器并实时观察运行输出。</p>
+        </div>
+        <span class="pill-note">单线程模式 · Safe Mode</span>
+      </div>
+
+      <div class="split-2">
+        <div class="card">
+          <h2 class="card-title">选择站点适配器</h2>
+          <div id="adapter-list" class="adapter-list"></div>
+
+          <div class="form-row">
+            <label for="run-count">生成数量 (1–20)</label>
+            <input id="run-count" type="number" min="1" max="20" value="1" />
+          </div>
+          <div class="actions">
+            <button id="btn-start-run" class="btn btn-primary">启动单线程试跑</button>
+            <button id="btn-stop-run" class="btn btn-danger" disabled>停止任务</button>
+          </div>
+        </div>
+
+        <div class="card console-card">
+          <div class="console-head">
+            <span id="console-status" class="mono">等待任务启动…</span>
+            <button id="btn-clear-log" class="btn btn-ghost btn-sm">清屏</button>
+          </div>
+          <pre id="console-log" class="console-body">尚未运行任务。点击左侧适配器开始试跑。</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. 新建适配器 Scaffold -->
+    <section id="view-scaffold" class="view">
+      <div class="section-head">
+        <div>
+          <h1>新建站点适配器脚手架</h1>
+          <p>按标准基类在 <code>sites/</code> 下生成可运行的社区版适配器骨架，写完即可自动出现在试跑列表。</p>
+        </div>
+      </div>
+
+      <div class="card narrow">
+        <div class="form-group">
+          <label for="sc-name">适配器名称（英文/数字/下划线）</label>
+          <input id="sc-name" type="text" placeholder="例如 mysite" />
+        </div>
+        <div class="form-group">
+          <label for="sc-url">目标注册页 URL（可选）</label>
+          <input id="sc-url" type="url" placeholder="https://example.com/signup" />
+        </div>
+        <div class="actions">
+          <button id="btn-scaffold" class="btn btn-primary">一键生成适配器</button>
+        </div>
+        <div id="scaffold-msg" class="feedback hidden"></div>
+      </div>
+    </section>
+
+    <!-- 4. 账号导出 Accounts & Export -->
+    <section id="view-accounts" class="view">
+      <div class="section-head">
+        <div>
+          <h1>本地账号台账与标准导出</h1>
+          <p>读取 <code>results/accounts.txt</code>，一键导出标准 CSV、JSON 或 Bitwarden / 1Password 密码库。</p>
+        </div>
+        <div class="actions">
+          <button class="btn btn-secondary" data-export="csv">导出 CSV</button>
+          <button class="btn btn-secondary" data-export="json">导出 JSON</button>
+          <button class="btn btn-primary" data-export="bitwarden">导出 Bitwarden</button>
+        </div>
+      </div>
+
+      <div class="card table-card">
+        <div id="accounts-empty" class="empty-box hidden">
+          暂无本地账号记录。先在「单站试跑」运行 <code>demo</code> 或其他适配器生成样例数据。
+        </div>
+        <table id="accounts-table" class="data-table hidden">
+          <thead>
+            <tr>
+              <th>邮箱</th>
+              <th>密码</th>
+              <th>用户名</th>
+            </tr>
+          </thead>
+          <tbody id="accounts-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 5. 单窗标定 Layout -->
+    <section id="view-layout" class="view">
+      <div class="section-head">
+        <div>
+          <h1>单窗口视窗标定与防切割缩放</h1>
+          <p>根据当前显示器逻辑工作区计算防裁切窗口尺寸与等比缩放比，写入 <code>config/window_geometry.json</code>。</p>
+        </div>
+        <button id="btn-auto-layout" class="btn btn-primary">自动适配本机屏幕</button>
+      </div>
+
+      <div id="layout-summary" class="check-grid"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>RegisterHub Open-Source Community · MIT License · Localhost Only (127.0.0.1)</span>
+  </footer>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
