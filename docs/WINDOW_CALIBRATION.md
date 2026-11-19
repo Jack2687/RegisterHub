@@ -27,14 +27,16 @@
 
 ## 3. 防切割技术标准 (Anti-Clipping Rules)
 
-所有浏览器适配器在初始化时，必须通过 `install_compact_context_layout` 注入以下防切割规则：
+所有浏览器适配器在初始化时，通过 `install_compact_context_layout`（或由 `Runner` 自动透传标定 `zoom`）注入防切割规则。**严禁写死静态 CSS `html { zoom: ... !important; }`**（会导致运行期浮窗 `-`/`+` 按钮点不动），统一通过行内动态属性设置：
+
+```javascript
+// 1. 动态写入根元素缩放（与顶部浮窗 window.__AGENT_TARGET_ZOOM 实时联动）
+document.documentElement.style.setProperty('zoom', String(z), 'important');
+```
 
 ```css
-/* 1. 视口等比自适应缩放，禁止 overflow 隐藏截断 */
-html { zoom: 0.85 !important; }
+/* 2. 禁止横向溢出裁切，穿透弹窗、协议框与表单容器 */
 body { overflow-x: auto !important; max-width: 100vw !important; }
-
-/* 2. 穿透弹窗、协议框与表单容器，避免绝对宽超出视口 */
 .auth-pane, .auth-card, .login-shell, .cl-card, .cl-rootBox,
 [role="dialog"], .modal, .modal-content, .agreement-modal,
 form, .form-container, .terms-box {
@@ -56,24 +58,23 @@ input[type="checkbox"], label {
 
 ### 4.1 CLI 命令
 ```bash
-# 单窗口标定 (默认，未要求并发时用这个)
-python main.py --calibrate
+# 一键自动适配本机屏幕（读取 SPI_GETWORKAREA，生成 1/2/4双态/6双态 6 套对称无溢出预设）
+python main.py --auto-layout
+python main.py --auto-layout --quad-mode edge_2x2 --hex-mode wing_cascade  # 顺手切换 4/6 并发默认形态
 
-# 双并发左右并排标定 (需明确要求并发)
-python main.py --calibrate -c 2
+# 全景轮播巡演验收全部 6 套布局
+python main.py --demo-layouts --demo-sec 8
 
-# 四分屏联动标定 (需明确要求并发)
-python main.py --calibrate -c 4
-
-# 加载指定目标站点 URL 标定
+# 交互式微调标定（仅当对自动布局有个性化偏好时使用）
+python main.py --calibrate                                                 # 单窗口 (默认)
+python main.py --calibrate -c 2                                            # 双并发左右并排
+python main.py --calibrate -c 4                                            # 四分屏联动
+python main.py --calibrate -c 6                                            # 六并发联动
 python main.py --calibrate -c 2 --calibrate-url https://echo.tracerml.ai/login
-
-# 显式单窗口微调 (等价于不带 -c，但显式声明更清楚)
-python main.py --calibrate -c 1
 ```
 
 ### 4.2 独立批处理
-双击运行根目录 [`calibrate.bat`](file:///d:/VsCodeProjects/register-template/calibrate.bat)，按提示输入 `1` (双并发) 或 `2` (四并发) 即可秒级拉起视窗。
+双击运行根目录 [`calibrate.bat`](../calibrate.bat)，直接通过交互菜单一键自动适配屏幕、巡演 6 套布局、切换 4/6 并发形态或进入交互微调。
 
 ### 4.3 极速冷启优化
 * **0 延迟本地靶场**：未指定 URL 时，标定器直接加载本地内置演练画布（包含邮箱、密码、同意条款与提交按钮），0.05 秒秒启；

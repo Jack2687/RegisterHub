@@ -214,6 +214,20 @@ python main.py --run target_service
 python main.py --run demo --cdp http://127.0.0.1:9222
 ```
 
+### 跨分辨率视窗适配与巡演验收
+针对不同分辨率/DPI 屏幕一键生成 `1全屏 / 2左右 / 4双形态 / 6双形态` 对称无溢出预设，并在有头运行期自动应用防切割等比缩放（详见 `docs/WINDOW_CALIBRATION.md`）：
+```bash
+# 读取本机屏幕工作区，一键生成 6 套对称无溢出预设（也可直接双击 calibrate.bat）
+python main.py --auto-layout
+python main.py --auto-layout --quad-mode edge_2x2 --hex-mode wing_cascade
+
+# 桌面轮播巡演验收全部 6 套布局
+python main.py --demo-layouts --demo-sec 8
+
+# 交互式手工微调标定
+python main.py --calibrate -c 2
+```
+
 ### 密码库资产标准导出
 将测试产出的账号资产一键转换为标准格式：
 ```bash
