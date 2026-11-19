@@ -173,6 +173,8 @@ def main():
     parser.add_argument("--cdp", type=str, default=None, help="Connect to an external Fingerprint/Anti-Detect browser CDP (e.g. http://127.0.0.1:9222)")
     parser.add_argument("--export", type=str, default=None, choices=["csv", "json", "bitwarden"], help="Export accounts to csv, json or bitwarden format")
     parser.add_argument("--auto-layout", action="store_true", help="Auto-generate symmetric window layouts (1/2/4x2/6x2) for the current display work area")
+    parser.add_argument("--quad-mode", choices=["edge_2x2", "centered_compact"], help="Switch 4-window preset mode with --auto-layout")
+    parser.add_argument("--hex-mode", choices=["edge_3x2", "wing_cascade"], help="Switch 6-window preset mode with --auto-layout")
     parser.add_argument("--demo-layouts", action="store_true", help="Preview all calibrated/auto-generated window layouts in sequence")
     parser.add_argument("--demo-sec", type=int, default=10, help="Seconds to hold each layout during --demo-layouts (default: 10)")
     parser.add_argument("--calibrate", action="store_true", help="Launch interactive window geometry & anti-clipping zoom calibrator")
@@ -184,7 +186,7 @@ def main():
 
     if args.auto_layout:
         from core.calibrator import auto_generate_layout
-        auto_generate_layout()
+        auto_generate_layout(quad_mode=args.quad_mode, hex_mode=args.hex_mode)
         return
 
     if args.demo_layouts:
