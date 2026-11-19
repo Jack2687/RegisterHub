@@ -1,33 +1,44 @@
 """RegisterHub Lite Web Server (Zero-Dependency Python Stdlib HTTP + SSE).
 
-Strictly scoped to Community Edition single-thread workflows:
+Strictly scoped to Open-Source Community Edition single-thread workflows:
+  - Single-thread Overview Dashboard (KPI, 7-day trend, recent runs)
   - Environment diagnostics (`core.doctor`)
-  - Runtime config editor (`config.json`, atomic save)
-  - Strict single-thread adapter execution + clean ANSI-free SSE stream + process-tree kill + persisted logs
-  - Adapter scaffolding with optional DOM FormInspector probe (`core.scaffold`)
-  - Local accounts table (with API Key column & reveal/copy) + CSV / JSON / Bitwarden export (`core.exporter`)
-  - Failure snapshots viewer (`results/snapshots/`)
+  - Runtime config editor (`config.json`, single-mailbox IMAP + live proxy/IMAP self-test)
+  - Strict single-thread adapter execution + per-run overrides + ANSI-free SSE + process-tree kill + persisted logs
+  - Adapter Workbench (honest tier badges, read-only source viewer, standalone DOM FormInspector probe, scaffold)
+  - Community Tools Lite (US/UK/DE identity generator, live disposable web inbox, RFC 6238 2FA TOTP, Luhn test cards)
+  - Local accounts table (4-col API Key, filter, delete/clear, single-key check) + CSV / JSON / Bitwarden export
+  - Failures (`failed.txt`) & Snapshots (`results/snapshots/`) linked triage + cleanup
   - Single-window geometry calibration (`core.calibrator`)
 """
 
 from __future__ import annotations
 
 import atexit
+import base64
 import collections
+import datetime
+import hashlib
+import hmac
 import json
 import mimetypes
 import os
 import queue
+import random
 import re
+import secrets
+import struct
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
@@ -36,6 +47,7 @@ if str(ROOT_DIR) not in sys.path:
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 RESULTS_DIR = ROOT_DIR / "results"
 ACCOUNTS_FILE = RESULTS_DIR / "accounts.txt"
+FAILED_FILE = RESULTS_DIR / "failed.txt"
 JOBS_DIR = RESULTS_DIR / "jobs"
 SNAPSHOTS_DIR = RESULTS_DIR / "snapshots"
 CONFIG_FILE = ROOT_DIR / "config.json"
@@ -44,6 +56,18 @@ GEOMETRY_FILE = ROOT_DIR / "config" / "window_geometry.json"
 _SAFE_SITE_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,48}$")
 _SAFE_FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$")
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_OTP_RE = re.compile(r"\b\d{4,8}\b")
+
+_ADAPTER_TIERS: Dict[str, str] = {
+    "demo": "demo",
+    "demo_site": "demo",
+    "automation_exercise": "demo",
+    "coarena": "oauth",
+    "amd": "verified",
+    "deepgram": "verified",
+    "milionseek": "verified",
+    "quanticdata": "verified",
+}
 
 
 def _kill_process_tree(pid: Optional[int], proc: Optional[subprocess.Popen[str]] = None) -> None:
@@ -118,17 +142,17 @@ class _LiteJob:
             JOBS_DIR.mkdir(parents=True, exist_ok=True)
             meta_p = JOBS_DIR / f"{self.id}.json"
             log_p = JOBS_DIR / f"{self.id}.log"
-            tmp_m = meta_p.with_suffix(".json.tmp")
-            tmp_m.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
-            os.replace(tmp_m, meta_p)
+            meta = self.to_dict()
+            meta["persisted"] = True
+            meta_p.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
             with self._lock:
                 lines = [f"[{x['ts']}] [{x['level'].upper()}] {x['text']}" for x in self.logs]
             log_p.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
         except Exception:
             pass
 
-    def subscribe(self):
-        q: queue.Queue[Optional[Dict[str, str]]] = queue.Queue(maxsize=300)
+    def subscribe(self) -> tuple[List[Dict[str, str]], queue.Queue[Optional[Dict[str, str]]]]:
+        q: queue.Queue[Optional[Dict[str, str]]] = queue.Queue(maxsize=500)
         with self._lock:
             hist = list(self.logs)
             if self.status == "running":
@@ -137,51 +161,36 @@ class _LiteJob:
                 q.put_nowait(None)
         return hist, q
 
-    def unsubscribe(self, q) -> None:
+    def unsubscribe(self, q: queue.Queue[Optional[Dict[str, str]]]) -> None:
         with self._lock:
             if q in self._subs:
                 self._subs.remove(q)
 
     def to_dict(self) -> Dict[str, Any]:
         with self._lock:
-            st = self.status
-            rc = self.returncode
-            fin = self.finished_at
-            n_logs = len(self.logs)
-        return {
-            "id": self.id,
-            "adapter": self.adapter,
-            "count": self.count,
-            "status": st,
-            "pid": self.pid,
-            "returncode": rc,
-            "log_lines": n_logs,
-            "started_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.started_at)),
-            "duration_s": round((fin or time.time()) - self.started_at, 1),
-        }
+            end_ts = self.finished_at or time.time()
+            return {
+                "id": self.id,
+                "adapter": self.adapter,
+                "count": self.count,
+                "status": self.status,
+                "pid": self.pid,
+                "returncode": self.returncode,
+                "started_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(self.started_at)),
+                "duration_s": round(max(0.0, end_ts - self.started_at), 1),
+                "log_lines": len(self.logs),
+                "persisted": False,
+            }
 
 
 class _LiteJobManager:
-    """Strict single-thread job manager with process-tree cleanup & persisted history."""
+    """Strict single-thread job manager with persistence & process-tree cleanup."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._jobs: Dict[str, _LiteJob] = {}
         self._seq = 0
         atexit.register(self.stop_all)
-
-    def _persisted_history(self) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
-        if not JOBS_DIR.exists():
-            return out
-        for fp in sorted(JOBS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:20]:
-            try:
-                d = json.loads(fp.read_text(encoding="utf-8", errors="ignore"))
-                if isinstance(d, dict) and d.get("id"):
-                    out.append(d)
-            except Exception:
-                continue
-        return out
 
     def active_job(self) -> Optional[_LiteJob]:
         with self._lock:
@@ -191,19 +200,33 @@ class _LiteJobManager:
                         return j
         return None
 
-    def list_jobs(self) -> List[Dict[str, Any]]:
-        with self._lock:
-            live = {j.id: j.to_dict() for j in self._jobs.values()}
-        for old in self._persisted_history():
-            live.setdefault(str(old["id"]), old)
-        items = sorted(live.values(), key=lambda x: str(x.get("started_at", "")), reverse=True)
-        return items[:25]
-
     def get(self, job_id: str) -> Optional[_LiteJob]:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def start(self, adapter: str, count: int = 1) -> _LiteJob:
+    def list_jobs(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            mem = {jid: j.to_dict() for jid, j in self._jobs.items()}
+        disk: Dict[str, Dict[str, Any]] = {}
+        if JOBS_DIR.exists():
+            for fp in sorted(JOBS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:25]:
+                try:
+                    d = json.loads(fp.read_text(encoding="utf-8"))
+                    if isinstance(d, dict) and d.get("id") and d["id"] not in mem:
+                        disk[d["id"]] = d
+                except Exception:
+                    pass
+        merged = list(mem.values()) + list(disk.values())
+        merged.sort(key=lambda x: str(x.get("started_at", "")), reverse=True)
+        return merged[:25]
+
+    def start(
+        self,
+        adapter: str,
+        count: int = 1,
+        headless_override: Optional[bool] = None,
+        custom_email: str = "",
+    ) -> _LiteJob:
         cmd = [sys.executable, "-u", str(ROOT_DIR / "main.py"), "--run", adapter, "--count", str(count)]
         with self._lock:
             for existing in self._jobs.values():
@@ -218,6 +241,13 @@ class _LiteJobManager:
         env = os.environ.copy()
         env["PYTHONUTF8"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
+        if headless_override is True:
+            env["RH_OVERRIDE_HEADLESS"] = "true"
+        elif headless_override is False:
+            env["RH_OVERRIDE_HEADLESS"] = "false"
+        if custom_email.strip():
+            env["RH_OVERRIDE_EMAIL"] = custom_email.strip()
+
         proc = subprocess.Popen(
             cmd,
             cwd=str(ROOT_DIR),
@@ -231,7 +261,13 @@ class _LiteJobManager:
         )
         job.proc = proc
         job.pid = proc.pid
-        job.append(f"[RegisterHub] Started single-thread run: {adapter} (count={count}, PID={proc.pid})")
+        extra_note = []
+        if headless_override is not None:
+            extra_note.append(f"headless={headless_override}")
+        if custom_email.strip():
+            extra_note.append(f"email={custom_email.strip()}")
+        note_s = f", {', '.join(extra_note)}" if extra_note else ""
+        job.append(f"[RegisterHub] Started single-thread run: {adapter} (count={count}, PID={proc.pid}{note_s})")
 
         def _reader() -> None:
             try:
@@ -282,8 +318,12 @@ class _LiteJobManager:
 
 job_manager = _LiteJobManager()
 
+# In-memory live disposable inbox sessions for Tools Lite (max 16)
+_TEMPMAIL_LOCK = threading.Lock()
+_TEMPMAIL_SESSIONS: "collections.OrderedDict[str, Dict[str, Any]]" = collections.OrderedDict()
 
-def load_config_dict() -> Dict[str, Any]:
+
+def _load_raw_config_dict() -> Dict[str, Any]:
     default_cfg: Dict[str, Any] = {
         "browser": {
             "headless": False,
@@ -300,6 +340,12 @@ def load_config_dict() -> Dict[str, Any]:
             "password_length": 14,
             "use_disposable_mail": True,
         },
+        "mail": {
+            "imap_server": "",
+            "imap_port": 993,
+            "imap_user": "",
+            "imap_password": "",
+        },
     }
     if not CONFIG_FILE.exists():
         return default_cfg
@@ -309,6 +355,7 @@ def load_config_dict() -> Dict[str, Any]:
             merged = dict(default_cfg)
             merged["browser"] = {**default_cfg["browser"], **(raw.get("browser") or {})}
             merged["defaults"] = {**default_cfg["defaults"], **(raw.get("defaults") or {})}
+            merged["mail"] = {**default_cfg["mail"], **(raw.get("mail") or {})}
             if raw.get("output_dir"):
                 merged["output_dir"] = str(raw["output_dir"])
             return merged
@@ -317,10 +364,19 @@ def load_config_dict() -> Dict[str, Any]:
     return default_cfg
 
 
+def load_config_dict() -> Dict[str, Any]:
+    cfg = _load_raw_config_dict()
+    safe = json.loads(json.dumps(cfg))
+    if safe.get("mail", {}).get("imap_password"):
+        safe["mail"]["imap_password"] = "***"
+    return safe
+
+
 def save_config_dict(updates: Dict[str, Any]) -> Dict[str, Any]:
-    cfg = load_config_dict()
+    cfg = _load_raw_config_dict()
     b = cfg["browser"]
     d = cfg["defaults"]
+    m = cfg["mail"]
 
     if "headless" in updates:
         b["headless"] = bool(updates["headless"])
@@ -346,10 +402,21 @@ def save_config_dict(updates: Dict[str, Any]) -> Dict[str, Any]:
     if "use_disposable_mail" in updates:
         d["use_disposable_mail"] = bool(updates["use_disposable_mail"])
 
+    if "imap_server" in updates:
+        m["imap_server"] = str(updates["imap_server"] or "").strip()
+    if "imap_port" in updates:
+        m["imap_port"] = max(1, min(65535, int(updates["imap_port"] or 993)))
+    if "imap_user" in updates:
+        m["imap_user"] = str(updates["imap_user"] or "").strip()
+    if "imap_password" in updates:
+        pw = str(updates["imap_password"] or "")
+        if pw != "***":
+            m["imap_password"] = pw
+
     tmp = CONFIG_FILE.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(tmp, CONFIG_FILE)
-    return cfg
+    return load_config_dict()
 
 
 def list_snapshots() -> List[Dict[str, Any]]:
@@ -366,6 +433,37 @@ def list_snapshots() -> List[Dict[str, Any]]:
             "url": f"/api/snapshots/{fp.name}",
         })
     return out
+
+
+def list_failures() -> List[Dict[str, Any]]:
+    if not FAILED_FILE.exists():
+        return []
+    snap_names = {s["name"] for s in list_snapshots()}
+    rows: List[Dict[str, Any]] = []
+    for idx, raw in enumerate(FAILED_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        ts = parts[0][:19].replace("T", " ") if len(parts) >= 1 else ""
+        reason = parts[1] if len(parts) >= 2 else line
+        account = parts[2] if len(parts) >= 3 else ""
+        snap_name = ""
+        for p in parts[2:]:
+            if p.lower().startswith("snapshot:"):
+                cand = p.split(":", 1)[1].strip()
+                if cand in snap_names:
+                    snap_name = cand
+        rows.append({
+            "id": idx,
+            "time": ts,
+            "reason": reason[:240],
+            "account": account[:200],
+            "snapshot": snap_name,
+            "snapshot_url": f"/api/snapshots/{snap_name}" if snap_name else "",
+        })
+    rows.reverse()
+    return rows[:100]
 
 
 def collect_doctor_report(include_network: bool = True) -> Dict[str, Any]:
@@ -410,11 +508,11 @@ def collect_doctor_report(include_network: bool = True) -> Dict[str, Any]:
     }
 
 
-def list_community_adapters() -> List[Dict[str, str]]:
+def list_community_adapters() -> List[Dict[str, Any]]:
     from sites import discover_adapters
 
     adapters = discover_adapters()
-    out: List[Dict[str, str]] = []
+    out: List[Dict[str, Any]] = []
     for name, cls in sorted(adapters.items()):
         url = ""
         try:
@@ -427,15 +525,147 @@ def list_community_adapters() -> List[Dict[str, str]]:
                 url = str(attr)
         except Exception:
             url = ""
+        mod_file = Path(sys.modules[cls.__module__].__file__ or "") if cls.__module__ in sys.modules else (ROOT_DIR / "sites" / f"{name}.py")
+        lines = len(mod_file.read_text(encoding="utf-8", errors="ignore").splitlines()) if mod_file.is_file() else 0
+        rel_file = f"sites/{mod_file.name}" if mod_file.is_file() else f"sites/{name}.py"
         out.append({
             "name": name,
+            "class_name": cls.__name__,
+            "file": rel_file,
+            "lines": lines,
+            "tier": _ADAPTER_TIERS.get(name, "template"),
             "target_url": url if len(url) <= 120 else (url[:80] + "… [embedded]"),
         })
     return out
 
 
+def build_overview_payload() -> Dict[str, Any]:
+    from core.exporter import parse_accounts_file
+
+    accounts = parse_accounts_file(ACCOUNTS_FILE)
+    with_key = sum(1 for a in accounts if (a.get("api_key") or "").strip())
+    failures = list_failures()
+    snaps = list_snapshots()
+    adapters = list_community_adapters()
+    jobs = job_manager.list_jobs()
+    act = job_manager.active_job()
+
+    # Build 7-day trend from job records & failed.txt dates
+    today = datetime.date.today()
+    days = [(today - datetime.timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+    trend_map = {d: {"date": d[5:], "full_date": d, "done": 0, "failed": 0} for d in days}
+    for j in jobs:
+        dkey = str(j.get("started_at") or "")[:10]
+        if dkey in trend_map:
+            if j.get("status") == "done":
+                trend_map[dkey]["done"] += max(1, int(j.get("count") or 1))
+            elif j.get("status") == "failed":
+                trend_map[dkey]["failed"] += 1
+    for f in failures:
+        dkey = str(f.get("time") or "")[:10]
+        if dkey in trend_map:
+            trend_map[dkey]["failed"] += 1
+
+    return {
+        "kpi": {
+            "accounts_total": len(accounts),
+            "accounts_with_key": with_key,
+            "failures_total": len(failures),
+            "snapshots_total": len(snaps),
+            "adapters_total": len(adapters),
+            "running": 1 if act else 0,
+        },
+        "daily_trend": [trend_map[d] for d in days],
+        "recent_jobs": jobs[:6],
+        "adapters": adapters[:8],
+    }
+
+
+def _luhn_complete(prefix: str, total_len: int = 16) -> str:
+    digits = [int(c) for c in re.sub(r"\D", "", prefix)][: total_len - 1]
+    while len(digits) < total_len - 1:
+        digits.append(random.randint(0, 9))
+    s = 0
+    for idx, d in enumerate(reversed(digits)):
+        v = d * 2 if idx % 2 == 0 else d
+        s += v - 9 if v > 9 else v
+    check = (10 - (s % 10)) % 10
+    return "".join(str(x) for x in digits) + str(check)
+
+
+def _compute_totp(secret: str) -> Dict[str, Any]:
+    cleaned = re.sub(r"[\s-]", "", secret).upper()
+    if len(cleaned) < 4:
+        raise ValueError("Secret 长度不足")
+    pad = "=" * ((8 - len(cleaned) % 8) % 8)
+    key = base64.b32decode(cleaned + pad, casefold=True)
+    now_i = int(time.time())
+    counter = now_i // 30
+    digest = hmac.new(key, struct.pack(">Q", counter), hashlib.sha1).digest()
+    off = digest[-1] & 0x0F
+    code_int = (struct.unpack(">I", digest[off : off + 4])[0] & 0x7FFFFFFF) % 1_000_000
+    return {"code": f"{code_int:06d}", "period": 30, "remaining": 30 - (now_i % 30)}
+
+
+def _probe_target_page(target_url: str) -> Dict[str, Any]:
+    from core.inspector import FormInspector
+    from playwright.sync_api import sync_playwright
+
+    cfg = _load_raw_config_dict()
+    proxy = (cfg.get("browser") or {}).get("proxy")
+    t0 = time.perf_counter()
+    with sync_playwright() as p:
+        kw: Dict[str, Any] = {
+            "headless": True,
+            "args": ["--disable-blink-features=AutomationControlled", "--no-first-run"],
+            "ignore_default_args": ["--enable-automation"],
+        }
+        if proxy:
+            kw["proxy"] = {"server": proxy}
+        try:
+            br = p.chromium.launch(channel="chrome", **kw)
+        except Exception:
+            br = p.chromium.launch(**kw)
+        try:
+            ctx = br.new_context()
+            pg = ctx.new_page()
+            resp = pg.goto(target_url, timeout=20000, wait_until="domcontentloaded")
+            status = resp.status if resp else 0
+            title = pg.title()
+            final_url = pg.url
+            fields = FormInspector(pg).detect_inputs()
+            html = (pg.content() or "").lower()
+            signals: List[str] = []
+            for label, needles in [
+                ("Cloudflare Turnstile", ("challenges.cloudflare.com", "cf-turnstile")),
+                ("Google reCAPTCHA", ("recaptcha/api.js", "g-recaptcha")),
+                ("hCaptcha", ("hcaptcha.com", "h-captcha")),
+                ("Clerk Auth", ("clerk.accounts", "__clerk")),
+                ("Supabase Auth", ("supabase.co", "supabase")),
+                ("NextAuth", ("/api/auth/signin", "next-auth")),
+                ("OAuth Login", ("accounts.google.com", "github.com/login/oauth")),
+            ]:
+                if any(n in html for n in needles):
+                    signals.append(label)
+            return {
+                "ok": True,
+                "url": final_url,
+                "status_code": status,
+                "title": title,
+                "fields": fields,
+                "detected_count": sum(1 for v in fields.values() if v),
+                "signals": signals,
+                "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+            }
+        finally:
+            try:
+                br.close()
+            except Exception:
+                pass
+
+
 class LiteRequestHandler(BaseHTTPRequestHandler):
-    server_version = "RegisterHubLite/1.3"
+    server_version = "RegisterHubLite/2.0"
 
     def log_message(self, format: str, *args: Any) -> None:
         return
@@ -483,16 +713,22 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         self._serve_file(STATIC_DIR / clean, STATIC_DIR)
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        qs = parse_qs(parsed.query)
 
         if path == "/api/meta":
             self._send_json({
                 "edition": "community",
                 "brand": "RegisterHub Lite",
                 "subtitle": "Open-Source Automation Workbench",
-                "version": "1.3.0",
+                "version": "2.0.0",
                 "concurrency_mode": "single-thread",
             })
+            return
+
+        if path == "/api/overview":
+            self._send_json(build_overview_payload())
             return
 
         if path == "/api/doctor":
@@ -505,6 +741,27 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/api/adapters":
             self._send_json({"adapters": list_community_adapters()})
+            return
+
+        m_code = re.fullmatch(r"/api/adapters/([a-zA-Z0-9_-]+)/code", path)
+        if m_code:
+            name = m_code.group(1).lower()
+            adapters_map = {a["name"]: a for a in list_community_adapters()}
+            info = adapters_map.get(name)
+            if not info:
+                self._send_json({"error": f"Adapter not found: {name}"}, status=404)
+                return
+            sites_root = (ROOT_DIR / "sites").resolve()
+            fpath = (ROOT_DIR / info["file"]).resolve()
+            if sites_root not in fpath.parents or not fpath.is_file():
+                self._send_json({"error": "Adapter file not found"}, status=404)
+                return
+            self._send_json({
+                "name": name,
+                "file": info["file"],
+                "tier": info["tier"],
+                "code": fpath.read_text(encoding="utf-8", errors="replace"),
+            })
             return
 
         if path == "/api/jobs":
@@ -573,6 +830,11 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"total": len(accounts), "accounts": accounts[::-1]})
             return
 
+        if path == "/api/failures":
+            fails = list_failures()
+            self._send_json({"total": len(fails), "failures": fails})
+            return
+
         if path == "/api/snapshots":
             snaps = list_snapshots()
             self._send_json({"total": len(snaps), "snapshots": snaps})
@@ -585,6 +847,39 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "Invalid snapshot filename"}, status=400)
                 return
             self._serve_file(SNAPSHOTS_DIR / fname, SNAPSHOTS_DIR)
+            return
+
+        if path == "/api/tempmail/messages":
+            sid = (qs.get("session_id") or [""])[0].strip()
+            with _TEMPMAIL_LOCK:
+                sess = _TEMPMAIL_SESSIONS.get(sid)
+            if not sess:
+                self._send_json({"ok": False, "error": "临时邮箱会话不存在或已过期"}, status=404)
+                return
+            client = sess["client"]
+            msgs = []
+            try:
+                raw_list = client.check_messages() or []
+                for m in raw_list[:20]:
+                    mid = m.get("id")
+                    body = str(m.get("body") or "")
+                    if mid and len(body) < 40:
+                        full = client.read_message(mid)
+                        if full:
+                            body = full
+                    subj = str(m.get("subject") or "")
+                    code_m = _OTP_RE.search(f"{subj} {body}")
+                    msgs.append({
+                        "id": str(mid or ""),
+                        "from": str(m.get("from") or ""),
+                        "subject": subj,
+                        "body": body[:2000],
+                        "code": code_m.group(0) if code_m else "",
+                    })
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, status=500)
+                return
+            self._send_json({"ok": True, "email": sess["email"], "provider": sess["provider"], "messages": msgs})
             return
 
         if path == "/api/layout":
@@ -622,18 +917,68 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": str(e)}, status=400)
             return
 
+        if path == "/api/config/test-proxy":
+            cfg = _load_raw_config_dict()
+            px = str(body.get("proxy") if "proxy" in body else (cfg.get("browser") or {}).get("proxy") or "").strip()
+            target = str(body.get("target_url") or "https://api.ipify.org?format=json").strip()
+            t0 = time.perf_counter()
+            try:
+                handlers = [urllib.request.ProxyHandler({"http": px, "https": px})] if px else []
+                opener = urllib.request.build_opener(*handlers)
+                req = urllib.request.Request(target, headers={"User-Agent": "RegisterHub-Lite/2.0"})
+                with opener.open(req, timeout=8) as r:
+                    txt = r.read(512).decode("utf-8", errors="ignore").strip()
+                    self._send_json({
+                        "ok": True,
+                        "proxy": px or "(direct)",
+                        "status_code": r.status,
+                        "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+                        "body": txt[:200],
+                    })
+            except Exception as e:
+                self._send_json({
+                    "ok": False,
+                    "proxy": px or "(direct)",
+                    "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+                    "error": str(e),
+                })
+            return
+
+        if path == "/api/config/test-imap":
+            from core.imap_mail import SingleImapMailClient
+
+            cfg = _load_raw_config_dict()
+            mc = cfg.get("mail") or {}
+            server = str(body.get("imap_server") or mc.get("imap_server") or "").strip()
+            port = int(body.get("imap_port") or mc.get("imap_port") or 993)
+            user = str(body.get("imap_user") or mc.get("imap_user") or "").strip()
+            pw = str(body.get("imap_password") or "")
+            if not pw or pw == "***":
+                pw = str(mc.get("imap_password") or "")
+            client = SingleImapMailClient(server=server, port=port, user=user, password=pw)
+            self._send_json(client.test_connection())
+            return
+
         if path == "/api/run":
             adapter = str(body.get("adapter") or "").strip().lower()
             try:
                 count = max(1, min(20, int(body.get("count") or 1)))
             except Exception:
                 count = 1
+            raw_hl = body.get("headless")
+            hl_override: Optional[bool] = raw_hl if isinstance(raw_hl, bool) else None
+            custom_email = str(body.get("custom_email") or "").strip()
             known = {a["name"] for a in list_community_adapters()}
             if adapter not in known:
                 self._send_json({"ok": False, "error": f"Unknown adapter: {adapter}"}, status=400)
                 return
             try:
-                job = job_manager.start(adapter, count=count)
+                job = job_manager.start(
+                    adapter,
+                    count=count,
+                    headless_override=hl_override,
+                    custom_email=custom_email,
+                )
                 self._send_json({"ok": True, "job": job.to_dict()})
             except RuntimeError as e:
                 self._send_json({"ok": False, "error": str(e)}, status=409)
@@ -643,6 +988,191 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         if m_stop:
             res = job_manager.stop(m_stop.group(1))
             self._send_json(res, status=200 if res.get("ok") else 404)
+            return
+
+        if path == "/api/inspector/probe":
+            url = str(body.get("url") or "").strip()
+            if not url.startswith(("http://", "https://")):
+                self._send_json({"ok": False, "error": "请输入以 http:// 或 https:// 开头的目标 URL"}, status=400)
+                return
+            try:
+                self._send_json(_probe_target_page(url))
+            except Exception as e:
+                self._send_json({"ok": False, "error": f"页面嗅探失败: {e}"}, status=400)
+            return
+
+        if path == "/api/tempmail/new":
+            try:
+                from core.mail_client import DisposableMailClient
+
+                client = DisposableMailClient()
+                addr = client.create_mailbox()
+                sid = f"tm_{secrets.token_hex(6)}"
+                prov = getattr(client, "provider_name", None) or type(getattr(client, "_backend", None)).__name__
+                with _TEMPMAIL_LOCK:
+                    _TEMPMAIL_SESSIONS[sid] = {
+                        "email": addr,
+                        "provider": str(prov),
+                        "client": client,
+                        "created_at": time.strftime("%H:%M:%S"),
+                    }
+                    while len(_TEMPMAIL_SESSIONS) > 16:
+                        _TEMPMAIL_SESSIONS.popitem(last=False)
+                self._send_json({"ok": True, "session_id": sid, "email": addr, "provider": str(prov)})
+            except Exception as e:
+                self._send_json({"ok": False, "error": f"申请临时邮箱失败: {e}"}, status=502)
+            return
+
+        if path == "/api/tools/identity":
+            from core.identity import generate_identity
+
+            loc = str(body.get("country") or "US").strip().upper()
+            if loc not in ("US", "UK", "DE"):
+                loc = "US"
+            cnt = max(1, min(6, int(body.get("count") or 2)))
+            pw_len = max(10, min(32, int(body.get("password_length") or 14)))
+            domain = str(body.get("domain") or "").strip() or None
+            items = [generate_identity(email_domain=domain, locale=loc, use_disposable=False, password_length=pw_len) for _ in range(cnt)]
+            self._send_json({"ok": True, "count": len(items), "identities": items})
+            return
+
+        if path == "/api/tools/totp":
+            secret = str(body.get("secret") or "").strip()
+            try:
+                self._send_json({"ok": True, **_compute_totp(secret)})
+            except Exception as e:
+                self._send_json({"ok": False, "error": f"无效 Base32 密钥: {e}"}, status=400)
+            return
+
+        if path == "/api/tools/ip-score":
+            from core.ip_scorer import score_ip
+
+            ip_val = str(body.get("ip") or "").strip()
+            px = str(body.get("proxy_url") or "").strip()
+            if not ip_val and not px:
+                cfg = _load_raw_config_dict()
+                px = str((cfg.get("browser") or {}).get("proxy") or "").strip()
+            target_url = str(body.get("target_url") or "").strip()
+            self._send_json(score_ip(ip=ip_val, proxy_url=px, target_url=target_url))
+            return
+
+        if path == "/api/tools/card":
+            brands = {
+                "visa": ("Visa", "4532", 16, 3),
+                "mastercard": ("Mastercard", "5425", 16, 3),
+                "amex": ("American Express", "3782", 15, 4),
+                "discover": ("Discover", "6011", 16, 3),
+                "jcb": ("JCB", "3530", 16, 3),
+            }
+            bname, d_bin, clen, cvv_len = brands.get(str(body.get("brand") or "visa").lower(), brands["visa"])
+            prefix = re.sub(r"\D", "", str(body.get("bin_prefix") or ""))[:8] or d_bin
+            cnt = max(1, min(12, int(body.get("count") or 6)))
+            cards = []
+            for _ in range(cnt):
+                num = _luhn_complete(prefix, clen)
+                fmt = f"{num[:4]} {num[4:10]} {num[10:]}" if clen == 15 else " ".join(num[i : i + 4] for i in range(0, len(num), 4))
+                mm = f"{random.randint(1, 12):02d}"
+                yy = str(random.randint(2027, 2031))
+                cvv = "".join(str(random.randint(0, 9)) for _ in range(cvv_len))
+                cards.append({
+                    "brand": bname,
+                    "card_number": num,
+                    "formatted": fmt,
+                    "exp": f"{mm}/{yy[-2:]}",
+                    "exp_month": mm,
+                    "exp_year": yy,
+                    "cvv": cvv,
+                })
+            self._send_json({"ok": True, "count": len(cards), "cards": cards})
+            return
+
+        if path == "/api/accounts/delete":
+            target_email = str(body.get("email") or "").strip().lower()
+            target_key = str(body.get("api_key") or "").strip()
+            if not ACCOUNTS_FILE.exists():
+                self._send_json({"ok": True, "removed": 0})
+                return
+            lines = ACCOUNTS_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
+            kept: List[str] = []
+            removed = 0
+            for ln in lines:
+                s = ln.strip()
+                if not s:
+                    continue
+                parts = [p.strip() for p in s.split("----")]
+                em = (parts[0] if parts else "").lower()
+                ak = parts[3] if len(parts) >= 4 else ""
+                if removed == 0 and ((target_email and em == target_email) and (not target_key or ak == target_key)):
+                    removed += 1
+                    continue
+                kept.append(ln)
+            if removed > 0:
+                ACCOUNTS_FILE.with_suffix(".txt.bak").write_text("\n".join(lines) + "\n", encoding="utf-8")
+                tmp = ACCOUNTS_FILE.with_suffix(".txt.tmp")
+                tmp.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+                os.replace(tmp, ACCOUNTS_FILE)
+            self._send_json({"ok": True, "removed": removed})
+            return
+
+        if path == "/api/accounts/clear":
+            if ACCOUNTS_FILE.exists():
+                ACCOUNTS_FILE.with_suffix(".txt.bak").write_text(
+                    ACCOUNTS_FILE.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8"
+                )
+                ACCOUNTS_FILE.write_text("", encoding="utf-8")
+            self._send_json({"ok": True})
+            return
+
+        if path == "/api/accounts/test-key":
+            key_val = str(body.get("key") or "").strip()
+            base_url = str(body.get("base_url") or "").strip().rstrip("/")
+            if len(key_val) < 8:
+                self._send_json({"ok": False, "detail": "Key 长度不足"}, status=400)
+                return
+            if not base_url:
+                self._send_json({"ok": True, "detail": "格式校验通过（填写 Base URL 可测在线 /v1/models）"})
+                return
+            models_url = f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
+            cfg = _load_raw_config_dict()
+            px = (cfg.get("browser") or {}).get("proxy")
+            handlers = [urllib.request.ProxyHandler({"http": px, "https": px})] if px else []
+            opener = urllib.request.build_opener(*handlers)
+            req = urllib.request.Request(
+                models_url,
+                headers={"Authorization": f"Bearer {key_val}", "Accept": "application/json", "User-Agent": "RegisterHub-Lite/2.0"},
+            )
+            t0 = time.perf_counter()
+            try:
+                with opener.open(req, timeout=10) as r:
+                    raw = r.read(65536).decode("utf-8", errors="ignore")
+                    cnt = 0
+                    try:
+                        j = json.loads(raw)
+                        if isinstance(j, dict) and isinstance(j.get("data"), list):
+                            cnt = len(j["data"])
+                    except Exception:
+                        pass
+                    ms = round((time.perf_counter() - t0) * 1000, 1)
+                    self._send_json({"ok": True, "detail": f"HTTP {r.status} · 存活 ({cnt} 模型 · {ms}ms)"})
+            except urllib.error.HTTPError as he:
+                self._send_json({"ok": False, "detail": f"HTTP {he.code} 拒绝访问"})
+            except Exception as e:
+                self._send_json({"ok": False, "detail": f"探测异常: {str(e)[:120]}"})
+            return
+
+        if path == "/api/failures/clear":
+            clear_snaps = bool(body.get("clear_snapshots", False))
+            if FAILED_FILE.exists():
+                FAILED_FILE.write_text("", encoding="utf-8")
+            snaps_removed = 0
+            if clear_snaps and SNAPSHOTS_DIR.exists():
+                for fp in SNAPSHOTS_DIR.glob("*.png"):
+                    try:
+                        fp.unlink()
+                        snaps_removed += 1
+                    except OSError:
+                        pass
+            self._send_json({"ok": True, "snapshots_removed": snaps_removed})
             return
 
         if path == "/api/scaffold":
@@ -662,21 +1192,9 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             probed_msg = ""
             if target_url and probe:
                 try:
-                    from core.inspector import FormInspector
-                    from playwright.sync_api import sync_playwright
-
-                    cfg = load_config_dict()
-                    proxy = (cfg.get("browser") or {}).get("proxy")
-                    with sync_playwright() as p:
-                        kw: Dict[str, Any] = {"headless": True}
-                        if proxy:
-                            kw["proxy"] = {"server": proxy}
-                        br = p.chromium.launch(**kw)
-                        pg = br.new_page()
-                        pg.goto(target_url, timeout=15000, wait_until="domcontentloaded")
-                        detected_fields = FormInspector.inspect(pg)
-                        br.close()
-                        probed_msg = f"（已自动探测 {sum(1 for v in (detected_fields or {}).values() if v)} 项表单选择器）"
+                    probe_res = _probe_target_page(target_url)
+                    detected_fields = probe_res.get("fields")
+                    probed_msg = f"（已自动探测 {probe_res.get('detected_count', 0)} 项表单选择器）"
                 except Exception as pe:
                     probed_msg = f"（DOM 探测未完成，已回退标准选择器: {type(pe).__name__}）"
             try:

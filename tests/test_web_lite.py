@@ -165,3 +165,108 @@ def test_lite_v4_config_snapshots_4col_key_and_mutex(tmp_path, monkeypatch):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_lite_v2_overview_tools_code_failures_and_imap_config(tmp_path, monkeypatch):
+    res_dir = tmp_path / "results"
+    snaps_dir = res_dir / "snapshots"
+    jobs_dir = res_dir / "jobs"
+    snaps_dir.mkdir(parents=True)
+    acc = res_dir / "accounts.txt"
+    acc.write_text(
+        "alice@test.com----Pw1----u1----sk-live-111122223333\nbob@test.com----Pw2----u2\n",
+        encoding="utf-8",
+    )
+    failed = res_dir / "failed.txt"
+    failed.write_text("2026-11-19T12:00:00 | timeout waiting OTP | {'email':'c@test.com'}\n", encoding="utf-8")
+    cfg_file = tmp_path / "config.json"
+    cfg_file.write_text(json.dumps({"browser": {"headless": False}}), encoding="utf-8")
+
+    monkeypatch.setattr(lite_server, "RESULTS_DIR", res_dir)
+    monkeypatch.setattr(lite_server, "ACCOUNTS_FILE", acc)
+    monkeypatch.setattr(lite_server, "FAILED_FILE", failed)
+    monkeypatch.setattr(lite_server, "SNAPSHOTS_DIR", snaps_dir)
+    monkeypatch.setattr(lite_server, "JOBS_DIR", jobs_dir)
+    monkeypatch.setattr(lite_server, "CONFIG_FILE", cfg_file)
+
+    srv, base = _start_ephemeral()
+    try:
+        st, ov = _get_json(f"{base}/api/overview")
+        assert st == 200
+        assert ov["kpi"]["accounts_total"] == 2
+        assert ov["kpi"]["accounts_with_key"] == 1
+        assert ov["kpi"]["failures_total"] == 1
+        assert len(ov["daily_trend"]) == 7
+
+        # Adapter tier & source code viewer
+        _, ad = _get_json(f"{base}/api/adapters")
+        assert ad["adapters"] and "tier" in ad["adapters"][0]
+        first_name = ad["adapters"][0]["name"]
+        _, code_res = _get_json(f"{base}/api/adapters/{first_name}/code")
+        assert "class " in code_res["code"]
+
+        # Tools Lite: identity, totp, card
+        _, id_res = _post_json(f"{base}/api/tools/identity", {"country": "UK", "count": 2, "password_length": 16})
+        assert id_res["ok"] is True and len(id_res["identities"]) == 2
+        assert len(id_res["identities"][0]["password"]) == 16
+
+        _, totp_res = _post_json(f"{base}/api/tools/totp", {"secret": "JBSWY3DPEHPK3PXP"})
+        assert totp_res["ok"] is True and len(totp_res["code"]) == 6
+
+        _, card_res = _post_json(f"{base}/api/tools/card", {"brand": "visa", "count": 3})
+        assert card_res["ok"] is True and len(card_res["cards"]) == 3
+
+        # Failures list & clear
+        _, fails = _get_json(f"{base}/api/failures")
+        assert fails["total"] == 1 and "timeout" in fails["failures"][0]["reason"]
+        _, clr = _post_json(f"{base}/api/failures/clear", {"clear_snapshots": False})
+        assert clr["ok"] is True
+        _, fails2 = _get_json(f"{base}/api/failures")
+        assert fails2["total"] == 0
+
+        # Account single delete + single key format test
+        _, ktest = _post_json(f"{base}/api/accounts/test-key", {"key": "sk-live-111122223333", "base_url": ""})
+        assert ktest["ok"] is True
+        _, del_res = _post_json(f"{base}/api/accounts/delete", {"email": "alice@test.com", "api_key": "sk-live-111122223333"})
+        assert del_res["removed"] == 1
+        _, accs2 = _get_json(f"{base}/api/accounts")
+        assert accs2["total"] == 1 and accs2["accounts"][0]["email"] == "bob@test.com"
+
+        # Single-mailbox IMAP secret masking
+        _, saved = _post_json(
+            f"{base}/api/config",
+            {"imap_server": "imap.example.com", "imap_port": 993, "imap_user": "me@example.com", "imap_password": "secret-app-password"},
+        )
+        assert saved["config"]["mail"]["imap_password"] == "***"
+        raw_disk = json.loads(cfg_file.read_text(encoding="utf-8"))
+        assert raw_disk["mail"]["imap_password"] == "secret-app-password"
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_lite_ip_score_endpoint(monkeypatch):
+    from core import ip_scorer
+
+    monkeypatch.setattr(
+        ip_scorer,
+        "_fetch_json",
+        lambda url, proxy_url="", timeout=7.0: {
+            "ip": "8.8.4.4",
+            "is_datacenter": True,
+            "is_proxy": False,
+            "location": {"country": "United States", "country_code": "US", "city": "Mountain View"},
+            "company": {"name": "Google LLC", "type": "hosting", "abuser_score": "0.001"},
+            "asn": {"asn": 15169, "org": "Google LLC"},
+        }
+        if "ipapi.is" in url
+        else None,
+    )
+    srv, base = _start_ephemeral()
+    try:
+        st, d = _post_json(f"{base}/api/tools/ip-score", {"ip": "8.8.4.4"})
+        assert st == 200 and d["ok"] is True
+        assert d["ip"] == "8.8.4.4" and d["grade"] == "B" and d["residential"] is False
+    finally:
+        srv.shutdown()
+        srv.server_close()

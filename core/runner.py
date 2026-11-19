@@ -28,7 +28,17 @@ class StandardRunner:
     def __init__(self, config: Dict[str, Any], cdp_endpoint: Optional[str] = None):
         self.config = config
         browser_cfg = config.get("browser", {}) or {}
-        self.headless = browser_cfg.get("headless", False)
+        env_headless = os.environ.get("RH_OVERRIDE_HEADLESS", "").strip().lower()
+        if env_headless in ("1", "true", "yes"):
+            self.headless = True
+        elif env_headless in ("0", "false", "no"):
+            self.headless = False
+        else:
+            self.headless = browser_cfg.get("headless", False)
+        env_email = os.environ.get("RH_OVERRIDE_EMAIL", "").strip()
+        if env_email:
+            self.config = dict(self.config)
+            self.config["email"] = env_email
         self.slow_mo = max(0, int(browser_cfg.get("slow_mo", 0) or 0))
         self.timeout_ms = max(5000, int(browser_cfg.get("timeout", 30000) or 30000))
         self.enable_stealth = browser_cfg.get("enable_stealth", True)
