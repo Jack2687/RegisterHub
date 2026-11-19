@@ -1060,6 +1060,10 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "API endpoint not found"}, status=404)
             return
 
+        if path == "/favicon.ico":
+            self._serve_static("logo.svg")
+            return
+
         if path == "/" or path == "/index.html":
             self._serve_static("index.html")
             return
