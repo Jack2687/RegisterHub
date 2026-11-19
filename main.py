@@ -190,7 +190,7 @@ def main():
     parser.add_argument("--calibrate-url", type=str, default="", help="Optional URL to load inside --calibrate")
     parser.add_argument("-c", "--concurrency", type=int, default=1, help="Window count for --calibrate (1/2/4/6)")
     parser.add_argument("--web", action="store_true", help="Launch RegisterHub Lite Web Workbench (zero-dependency stdlib server)")
-    parser.add_argument("--port", type=int, default=8765, help="Port for --web Lite Workbench (default: 8765)")
+    parser.add_argument("--port", type=int, default=18886, help="Port for --web Lite Workbench (default: 18886)")
     parser.add_argument("command", nargs="?", default=None, help="Subcommand like 'doctor' or 'export'")
 
     args = parser.parse_args()

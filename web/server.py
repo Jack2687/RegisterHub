@@ -457,11 +457,11 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         self._send_json({"error": "Not Found"}, status=404)
 
 
-def create_server(host: str = "127.0.0.1", port: int = 8765) -> ThreadingHTTPServer:
+def create_server(host: str = "127.0.0.1", port: int = 18886) -> ThreadingHTTPServer:
     return ThreadingHTTPServer((host, port), LiteRequestHandler)
 
 
-def start_server(host: str = "127.0.0.1", port: int = 8765) -> None:
+def start_server(host: str = "127.0.0.1", port: int = 18886) -> None:
     """Start RegisterHub Lite Web Workbench on loopback."""
     srv = create_server(host=host, port=port)
     print("=" * 64)
