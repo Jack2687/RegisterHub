@@ -270,3 +270,47 @@ def test_lite_ip_score_endpoint(monkeypatch):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_lite_v21_multiwindow_layout_and_har_extractor(tmp_path, monkeypatch):
+    geo_file = tmp_path / "config" / "window_geometry.json"
+    monkeypatch.setattr(lite_server, "GEOMETRY_FILE", geo_file)
+
+    srv, base = _start_ephemeral()
+    try:
+        # 1. Full 6-preset layout generation & zoom update across single + multi-window presets
+        st, auto_d = _post_json(f"{base}/api/layout/auto", {"quad_mode": "edge_2x2", "hex_mode": "wing_cascade"})
+        assert st == 200 and auto_d["ok"] is True
+        assert len(auto_d["geometry"]["quad_presets"]["edge_2x2"]["slots"]) == 4
+        assert len(auto_d["geometry"]["hex_presets"]["wing_cascade"]["slots"]) == 6
+
+        st2, up_d = _post_json(f"{base}/api/layout/update", {"preset_key": "quad_edge", "zoom": 0.7})
+        assert st2 == 200 and up_d["ok"] is True
+        assert up_d["geometry"]["quad_presets"]["edge_2x2"]["slots"][0]["zoom"] == 0.7
+
+        # 2. Zero-dependency offline HAR extractor
+        har_sample = json.dumps({
+            "log": {
+                "entries": [
+                    {
+                        "request": {
+                            "method": "POST",
+                            "url": "https://api.demo.dev/v1/auth/signup",
+                            "postData": {"text": '{"email":"a@b.com","password":"Secret!"}'},
+                        },
+                        "response": {
+                            "status": 200,
+                            "content": {"mimeType": "application/json", "text": '{"api_key":"sk-demo-1234567890"}'},
+                        },
+                    }
+                ]
+            }
+        })
+        st3, har_d = _post_json(f"{base}/api/tools/har", {"har_text": har_sample, "site_name": "demo"})
+        assert st3 == 200 and har_d["ok"] is True
+        assert len(har_d["api_steps"]) == 1
+        assert "API Key" in har_d["signals"]
+        assert "class DemoProtocolAdapter" in har_d["skeleton"]
+    finally:
+        srv.shutdown()
+        srv.server_close()

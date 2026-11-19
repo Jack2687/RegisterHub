@@ -71,9 +71,10 @@
               <span class="nav-label">环境诊断</span>
               <span id="nav-badge-doctor" class="nav-badge rose hidden">0</span>
             </button>
-            <button type="button" class="nav-item" data-view="layout" title="单窗标定">
+            <button type="button" class="nav-item" data-view="layout" title="视窗标定">
               <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg></span>
-              <span class="nav-label">单窗标定</span>
+              <span class="nav-label">视窗标定</span>
+              <span class="nav-badge muted">6套</span>
             </button>
             <button type="button" class="nav-item" data-view="config" title="运行配置">
               <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></span>
@@ -161,10 +162,11 @@
               <span class="strip-label">快捷工作流</span>
               <div class="actions">
                 <button type="button" class="btn btn-primary btn-sm" data-jump="runner">启动单站试跑</button>
-                <button type="button" class="btn btn-secondary btn-sm" data-jump="tools">打开实用工具箱</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-jump="layout">6 套视窗标定</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-jump-ipscore">IP 纯净度打分</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-jump-har">HAR 抓包提炼</button>
                 <button type="button" class="btn btn-secondary btn-sm" data-jump="scaffold">嗅探表单 / 写适配器</button>
                 <button type="button" class="btn btn-secondary btn-sm" data-jump="config">配置代理 / IMAP</button>
-                <button type="button" class="btn btn-secondary btn-sm" data-jump="doctor">环境诊断</button>
               </div>
             </div>
 
@@ -195,15 +197,28 @@
               </div>
             </div>
 
-            <div class="card">
-              <div class="card-head compact">
-                <div>
-                  <h2 class="card-title">快速启动站点适配器</h2>
-                  <p class="card-sub">已诚实标注适配器层级，点击即可直达单站试跑或审查源码</p>
+            <div class="split-equal">
+              <div class="card">
+                <div class="card-head compact">
+                  <div>
+                    <h2 class="card-title">快速启动站点适配器</h2>
+                    <p class="card-sub">已诚实标注适配器层级，点击即可直达单站试跑或审查源码</p>
+                  </div>
+                  <button type="button" class="btn btn-ghost btn-sm" data-jump="scaffold">全部源码 →</button>
                 </div>
-                <button type="button" class="btn btn-ghost btn-sm" data-jump="scaffold">浏览全部源码 →</button>
+                <div id="ov-adapter-grid" class="adapter-grid"></div>
               </div>
-              <div id="ov-adapter-grid" class="adapter-grid"></div>
+
+              <div class="card">
+                <div class="card-head compact">
+                  <div>
+                    <h2 class="card-title">最新本地产出账号</h2>
+                    <p class="card-sub">实时读取 results/accounts.txt 最新成号记录，支持一键复制</p>
+                  </div>
+                  <button type="button" class="btn btn-ghost btn-sm" data-jump="accounts">全量台账 →</button>
+                </div>
+                <div id="ov-recent-accounts" class="history-list tall"></div>
+              </div>
             </div>
           </section>
 
@@ -355,6 +370,7 @@
               <div class="seg-group" id="tools-tab-group">
                 <button type="button" class="seg-btn active" data-tool="identity">身份与强密码</button>
                 <button type="button" class="seg-btn" data-tool="ipscore">IP 纯净度打分</button>
+                <button type="button" class="seg-btn" data-tool="har">HAR 抓包提炼</button>
                 <button type="button" class="seg-btn" data-tool="tempmail">在线临时收件箱</button>
                 <button type="button" class="seg-btn" data-tool="totp">2FA TOTP 验证器</button>
                 <button type="button" class="seg-btn" data-tool="card">Luhn 测试卡</button>
@@ -405,6 +421,53 @@
                 </div>
                 <div id="ips-result" style="margin-top:14px">
                   <div class="empty-box">点击右上角「立即检测并打分」评估当前出口 IP 或指定 IP 纯净度。</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tool 1.8: Offline HAR Protocol Extractor -->
+            <div id="tool-panel-har" class="tool-panel">
+              <div class="card">
+                <div class="card-head compact">
+                  <div>
+                    <h2 class="card-title">离线 HAR 抓包提炼协议注册链</h2>
+                    <p class="card-sub">将浏览器 F12 导出的 <code>.har</code> 文件拖入或粘贴，自动过滤静态噪音，提取注册 API 链、鉴权信号与可直接复用的 Python 协议骨架。</p>
+                  </div>
+                  <div class="actions">
+                    <label class="btn btn-secondary btn-sm" style="cursor:pointer">
+                      <span>上传 .har 文件</span>
+                      <input id="har-file" type="file" accept=".har,.json" class="hidden" />
+                    </label>
+                    <button type="button" id="btn-parse-har" class="btn btn-primary btn-sm">提炼 API 链与骨架</button>
+                  </div>
+                </div>
+                <div class="form-grid" style="margin-bottom:10px">
+                  <div class="form-group">
+                    <label for="har-site">站点代号（可选，默认从域名提取）</label>
+                    <input id="har-site" type="text" class="mono" placeholder="例如 acme" />
+                  </div>
+                  <div class="form-group">
+                    <label>自动识别特征</label>
+                    <div id="har-signals" class="actions" style="min-height:36px">
+                      <span class="badge neutral">等待上传或粘贴 HAR JSON</span>
+                    </div>
+                  </div>
+                </div>
+                <textarea id="har-text" rows="5" class="mono har-textarea" placeholder='粘贴浏览器 Network 面板导出的 HAR JSON（{"log": {"entries": [...]}}）…'></textarea>
+                <div id="har-result" class="hidden" style="margin-top:14px">
+                  <div class="split-equal">
+                    <div>
+                      <div class="sub-head">提炼出的核心业务请求 (<span id="har-steps-count">0</span>)</div>
+                      <div id="har-steps-list" class="history-list tall" style="max-height:300px"></div>
+                    </div>
+                    <div>
+                      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                        <div class="sub-head" style="margin:0">自动生成的 Python 协议骨架</div>
+                        <button type="button" id="btn-copy-har-code" class="btn btn-secondary btn-sm">复制骨架代码</button>
+                      </div>
+                      <pre id="har-skeleton" class="code-box" style="margin-top:0;max-height:300px"></pre>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -618,28 +681,68 @@
             </div>
           </section>
 
-          <!-- ==================== 7. 单窗标定 Layout ==================== -->
+          <!-- ==================== 7. 视窗标定 Layout (1 / 2 / 4x2 / 6x2) ==================== -->
           <section id="view-layout" class="view">
             <div class="card toolbar-strip">
               <div>
-                <div class="card-title">单窗口视窗标定与防切割缩放</div>
-                <div class="card-sub">按当前显示器逻辑工作区自动计算防溢出窗口尺寸与等比缩放，写入 <code>config/window_geometry.json</code>。</div>
+                <div class="card-title">单窗口 &amp; 多窗口视窗标定台（6 套跨分辨率无溢出预设）</div>
+                <div class="card-sub">支持 1 窗全屏 / 2 窗分屏 / 4 窗双形态 / 6 窗双形态可视化画布、防切割缩放微调、真机交互标定与 6 套实景巡演，写入 <code>config/window_geometry.json</code>。</div>
               </div>
-              <button type="button" id="btn-auto-layout" class="btn btn-primary btn-sm">自动适配本机屏幕</button>
+              <div class="actions">
+                <button type="button" id="btn-demo-layouts" class="btn btn-secondary btn-sm">启动 6 套真机巡演</button>
+                <button type="button" id="btn-auto-layout" class="btn btn-primary btn-sm">一键重算 6 套布局</button>
+              </div>
             </div>
 
             <div class="card layout-stage-card">
               <div class="layout-stage-head">
-                <span class="mono" id="layout-screen-label">逻辑屏幕工作区预览</span>
-                <span class="badge emerald">单窗无裁切预设</span>
+                <div class="actions" id="layout-preset-tabs">
+                  <button type="button" class="btn btn-primary btn-sm" data-preset="single">1窗 · 全屏</button>
+                  <button type="button" class="btn btn-secondary btn-sm" data-preset="dual">2窗 · 左右分屏</button>
+                  <button type="button" class="btn btn-secondary btn-sm" data-preset="quad_edge">4窗 · 贴边四宫格</button>
+                  <button type="button" class="btn btn-secondary btn-sm" data-preset="quad_compact">4窗 · 居中紧凑</button>
+                  <button type="button" class="btn btn-secondary btn-sm" data-preset="hex_edge">6窗 · 贴边六宫格</button>
+                  <button type="button" class="btn btn-secondary btn-sm" data-preset="hex_wing">6窗 · 八字展翼</button>
+                </div>
+                <span class="badge sky mono" id="layout-screen-label">检测中…</span>
               </div>
-              <div class="monitor-bezel">
-                <div id="layout-preview-slot" class="monitor-window">
-                  <div class="mw-bar"><span class="mw-dots"><i></i><i></i><i></i></span><span class="mono" id="mw-title">Slot #1</span></div>
-                  <div class="mw-body">
-                    <div id="mw-dim" class="mono mw-dim">— × —</div>
-                    <div id="mw-zoom" class="mono mw-zoom">Zoom —</div>
+
+              <div class="layout-workbench">
+                <div>
+                  <div class="layout-canvas-meta">
+                    <span id="layout-desc">按本机真实逻辑工作区比例渲染窗口排布</span>
+                    <span class="mono" id="layout-wa-label">— × —</span>
                   </div>
+                  <div id="layout-canvas" class="layout-canvas"></div>
+                </div>
+
+                <div class="layout-inspector">
+                  <div class="layout-insp-head">
+                    <span class="card-title" style="font-size:13px">当前槽位几何参数</span>
+                    <span id="layout-slot-count" class="badge neutral">0 窗</span>
+                  </div>
+                  <div id="layout-slot-list" class="layout-slot-list"></div>
+
+                  <div class="divider"></div>
+                  <div class="form-group" style="margin-bottom:10px">
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                      <label for="layout-zoom-range">当前预设防切割缩放 (Zoom)</label>
+                      <span id="layout-zoom-val" class="mono badge emerald">100%</span>
+                    </div>
+                    <div class="actions" style="flex-wrap:nowrap;margin-top:4px">
+                      <input id="layout-zoom-range" type="range" min="45" max="125" step="5" value="100" style="flex:1;accent-color:#10b981;cursor:pointer" />
+                      <button type="button" id="btn-save-zoom" class="btn btn-primary btn-sm">保存缩放</button>
+                    </div>
+                  </div>
+
+                  <button type="button" id="btn-set-default-mode" class="btn btn-secondary btn-sm hidden" style="width:100%;margin-bottom:10px">设为默认 4/6 窗形态</button>
+
+                  <div class="divider"></div>
+                  <div class="sub-head">桌面真机交互标定 (--calibrate)</div>
+                  <div class="form-group" style="margin-bottom:8px">
+                    <input id="cal-test-url" type="url" class="mono" placeholder="可选：标定时打开的目标测试页 URL" />
+                  </div>
+                  <button type="button" id="btn-launch-calibrate" class="btn btn-primary btn-sm" style="width:100%">启动真机交互标定 (-c 1)</button>
                 </div>
               </div>
             </div>

@@ -35,7 +35,7 @@
     snapshots: '失败原因与现场快照',
     scaffold: '站点工坊 (嗅探 / 源码 / 脚手架)',
     doctor: '环境真执行诊断',
-    layout: '单窗口视窗标定',
+    layout: '视窗标定台 (单 / 多窗口)',
     config: '运行配置 (config.json / IMAP)',
   };
 
@@ -132,6 +132,14 @@
   $$('.nav-item').forEach((btn) => btn.addEventListener('click', () => switchView(btn.dataset.view)));
   $$('[data-jump]').forEach((btn) => btn.addEventListener('click', () => switchView(btn.dataset.jump)));
   $('#heartbeat-card').addEventListener('click', () => switchView('doctor'));
+
+  function activateToolTab(toolName) {
+    switchView('tools');
+    const targetBtn = $(`#tools-tab-group .seg-btn[data-tool="${toolName}"]`);
+    if (targetBtn) targetBtn.click();
+  }
+  $('#btn-jump-ipscore')?.addEventListener('click', () => activateToolTab('ipscore'));
+  $('#btn-jump-har')?.addEventListener('click', () => activateToolTab('har'));
 
   $('#btn-global-refresh').addEventListener('click', async () => {
     const ico = $('#icon-refresh');
@@ -251,6 +259,33 @@
           loadAdapterCode(b.dataset.ovCode);
         });
       });
+
+      // Recent accounts live feed
+      const racc = data.recent_accounts || [];
+      const abox = $('#ov-recent-accounts');
+      if (abox) {
+        if (!racc.length) {
+          abox.innerHTML = `<div class="muted-small" style="padding:18px;text-align:center">暂无成号产出，跑通任意适配器后实时汇聚于此</div>`;
+        } else {
+          abox.innerHTML = racc
+            .map(
+              (a) => `
+              <div class="history-item" style="cursor:default">
+                <div style="min-width:0;flex:1">
+                  <div class="mono" style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(a.email)}</div>
+                  <div class="muted-small mono" style="font-size:10.5px">${a.has_key ? `Key: ${escapeHtml(a.masked_key)}` : escapeHtml(a.username || '标准账号')}</div>
+                </div>
+                <div class="actions" style="flex-shrink:0">
+                  <button type="button" class="btn btn-ghost btn-sm" data-ov-cp="${escapeHtml(a.has_key ? a.api_key : a.email)}">复制</button>
+                </div>
+              </div>`
+            )
+            .join('');
+          abox.querySelectorAll('[data-ov-cp]').forEach((b) => {
+            b.addEventListener('click', () => copyText(b.dataset.ovCp, ''));
+          });
+        }
+      }
     } catch {}
   }
 
@@ -691,6 +726,56 @@
   });
 
   // ==================== 4. Tools Lite ====================
+  let ipScoreAutoLoaded = false;
+  let lastHarSkeleton = '';
+
+  function renderIpScoreBox(d) {
+    const box = $('#ips-result');
+    const gCls = d.grade === 'S' ? 'emerald' : d.grade === 'A' ? 'sky' : d.grade === 'B' ? 'amber' : 'rose';
+    const stroke = d.grade === 'S' ? '#10b981' : d.grade === 'A' ? '#0ea5e9' : d.grade === 'B' ? '#f59e0b' : '#f43f5e';
+    const sc = Math.max(0, Math.min(100, Number(d.score || 0)));
+    const off = (125.66 * (1 - sc / 100)).toFixed(2);
+    const factorsHtml = (d.factors || [])
+      .map((f) => `<span class="badge ${f.tone === 'emerald' ? 'emerald' : f.tone === 'rose' ? 'rose' : f.tone === 'amber' ? 'amber' : 'neutral'}">${escapeHtml(f.label)} (${f.delta === 0 ? '±0' : f.delta})</span>`)
+      .join('');
+    box.innerHTML = `
+      <div class="totp-box" style="margin-top:0">
+        <div class="totp-left">
+          <div class="totp-ring">
+            <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="20" class="ring-bg"/><circle cx="24" cy="24" r="20" class="ring-fg" style="stroke:${stroke};stroke-dashoffset:${off}"/></svg>
+            <span class="mono">${sc}</span>
+          </div>
+          <div>
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+              <span class="mono" style="font-size:16px;font-weight:700">${escapeHtml(d.ip || '探测失败')}</span>
+              <span class="badge ${gCls}">${escapeHtml(d.grade)} 级</span>
+              ${d.ip_type ? `<span class="badge ${d.residential ? 'emerald' : 'amber'}">${escapeHtml(d.ip_type)}</span>` : ''}
+              ${d.asn ? `<span class="badge neutral mono">${escapeHtml(d.asn)}</span>` : ''}
+              ${d.cached ? `<span class="badge neutral">5m 缓存</span>` : ''}
+            </div>
+            <div class="card-sub" style="margin-top:4px;color:var(--text-primary)">${escapeHtml(d.verdict || d.error || '')}</div>
+            <div class="card-sub mono" style="margin-top:4px">
+              位置: ${escapeHtml([d.country, d.region, d.city].filter(Boolean).join(' · ') || '—')} · ISP: ${escapeHtml(d.isp || '—')} · 滥用分: ${d.abuser_score ?? 0} · ${d.latency_ms ?? 0}ms
+            </div>
+          </div>
+        </div>
+      </div>
+      ${factorsHtml ? `<div class="actions" style="margin-top:10px">${factorsHtml}</div>` : ''}`;
+  }
+
+  async function autoLoadCurrentIpScore() {
+    if (ipScoreAutoLoaded) return;
+    ipScoreAutoLoaded = true;
+    $('#ips-result').innerHTML = `<div class="empty-box">正在静默探测当前出口 IP 纯净度…</div>`;
+    try {
+      const res = await fetch('/api/tools/ip-score/current');
+      const d = await res.json();
+      renderIpScoreBox(d);
+    } catch {
+      ipScoreAutoLoaded = false;
+    }
+  }
+
   $$('#tools-tab-group .seg-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const t = btn.dataset.tool;
@@ -698,6 +783,7 @@
       $$('.tool-panel').forEach((p) => p.classList.toggle('active', p.id === `tool-panel-${t}`));
       if (t === 'totp') startTotpLoop();
       else stopTotpLoop();
+      if (t === 'ipscore') autoLoadCurrentIpScore();
     });
   });
 
@@ -780,36 +866,8 @@
         }),
       });
       const d = await res.json();
-      const box = $('#ips-result');
-      const gCls = d.grade === 'S' ? 'emerald' : d.grade === 'A' ? 'sky' : d.grade === 'B' ? 'amber' : 'rose';
-      const stroke = d.grade === 'S' ? '#10b981' : d.grade === 'A' ? '#0ea5e9' : d.grade === 'B' ? '#f59e0b' : '#f43f5e';
+      renderIpScoreBox(d);
       const sc = Math.max(0, Math.min(100, Number(d.score || 0)));
-      const off = (125.66 * (1 - sc / 100)).toFixed(2);
-      const factorsHtml = (d.factors || [])
-        .map((f) => `<span class="badge ${f.tone === 'emerald' ? 'emerald' : f.tone === 'rose' ? 'rose' : f.tone === 'amber' ? 'amber' : 'neutral'}">${escapeHtml(f.label)} (${f.delta === 0 ? '±0' : f.delta})</span>`)
-        .join('');
-      box.innerHTML = `
-        <div class="totp-box" style="margin-top:0">
-          <div class="totp-left">
-            <div class="totp-ring">
-              <svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="20" class="ring-bg"/><circle cx="24" cy="24" r="20" class="ring-fg" style="stroke:${stroke};stroke-dashoffset:${off}"/></svg>
-              <span class="mono">${sc}</span>
-            </div>
-            <div>
-              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
-                <span class="mono" style="font-size:16px;font-weight:700">${escapeHtml(d.ip || '探测失败')}</span>
-                <span class="badge ${gCls}">${escapeHtml(d.grade)} 级</span>
-                ${d.ip_type ? `<span class="badge ${d.residential ? 'emerald' : 'amber'}">${escapeHtml(d.ip_type)}</span>` : ''}
-                ${d.asn ? `<span class="badge neutral mono">${escapeHtml(d.asn)}</span>` : ''}
-              </div>
-              <div class="card-sub" style="margin-top:4px;color:var(--text-primary)">${escapeHtml(d.verdict || d.error || '')}</div>
-              <div class="card-sub mono" style="margin-top:4px">
-                位置: ${escapeHtml([d.country, d.region, d.city].filter(Boolean).join(' · ') || '—')} · ISP: ${escapeHtml(d.isp || '—')} · 滥用分: ${d.abuser_score ?? 0} · ${d.latency_ms ?? 0}ms
-              </div>
-            </div>
-          </div>
-        </div>
-        ${factorsHtml ? `<div class="actions" style="margin-top:10px">${factorsHtml}</div>` : ''}`;
       toast(d.ok ? `IP ${d.ip} 综合纯净度 ${sc} 分 (${d.grade} 级)` : d.error || '探测失败');
     } catch (e) {
       toast('IP 打分异常: ' + e.message);
@@ -818,6 +876,65 @@
       btn.textContent = '立即检测并打分';
     }
   });
+
+  // 4.18 Offline HAR Protocol Extractor
+  $('#har-file')?.addEventListener('change', (ev) => {
+    const f = ev.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      $('#har-text').value = String(reader.result || '');
+      toast(`已载入 ${f.name} (${Math.round(f.size / 1024)} KB)`);
+    };
+    reader.readAsText(f);
+  });
+
+  $('#btn-parse-har')?.addEventListener('click', async () => {
+    const har_text = $('#har-text').value.trim();
+    if (!har_text) return toast('请先上传 .har 文件或粘贴 HAR JSON');
+    const btn = $('#btn-parse-har');
+    btn.disabled = true;
+    btn.textContent = '提炼中…';
+    try {
+      const res = await fetch('/api/tools/har', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ har_text, site_name: $('#har-site').value.trim() }),
+      });
+      const d = await res.json();
+      if (!d.ok) return toast(d.error || 'HAR 解析失败');
+      const sigs = d.signals || [];
+      $('#har-signals').innerHTML = sigs.length
+        ? sigs.map((s) => `<span class="badge sky">${escapeHtml(s)}</span>`).join('')
+        : `<span class="badge emerald">纯 REST 协议链（无显著人机特征）</span>`;
+      const steps = d.api_steps || [];
+      $('#har-steps-count').textContent = String(steps.length);
+      $('#har-steps-list').innerHTML = steps.length
+        ? steps
+            .map(
+              (st) => `
+              <div class="history-item" style="cursor:default;flex-direction:column;align-items:flex-start;gap:4px">
+                <div style="display:flex;width:100%;justify-content:space-between;gap:6px">
+                  <span class="mono" style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(st.method)} ${escapeHtml(st.path)}</span>
+                  <span class="badge ${st.status >= 200 && st.status < 300 ? 'emerald' : 'amber'} mono">${st.status}</span>
+                </div>
+                ${st.req_keys?.length ? `<div class="muted-small mono" style="font-size:10.5px">Req: ${escapeHtml(st.req_keys.join(', '))}</div>` : ''}
+              </div>`
+            )
+            .join('')
+        : `<div class="empty-box" style="padding:18px">未提炼到业务接口，请确认 HAR 含 POST/JSON 请求</div>`;
+      lastHarSkeleton = d.skeleton || '';
+      $('#har-skeleton').textContent = lastHarSkeleton;
+      $('#har-result').classList.remove('hidden');
+      toast(`HAR 解析完成：共提炼 ${steps.length} 条业务请求`);
+    } catch (e) {
+      toast('HAR 解析异常: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '提炼 API 链与骨架';
+    }
+  });
+  $('#btn-copy-har-code')?.addEventListener('click', () => lastHarSkeleton && copyText(lastHarSkeleton, '协议骨架代码'));
 
   // 4.2 TempMail Web Inbox
   $('#btn-tm-new').addEventListener('click', async () => {
@@ -1028,18 +1145,25 @@
       } else {
         $('#failures-empty').classList.add('hidden');
         $('#failures-table').classList.remove('hidden');
+        const CAT_BADGE = {
+          soft: { label: '软失败', cls: 'amber' },
+          captcha: { label: '人机验证', cls: 'sky' },
+          dead: { label: '死号', cls: 'rose' },
+          unknown: { label: '待复核', cls: 'neutral' },
+        };
         $('#failures-tbody').innerHTML = fails
-          .map(
-            (f) => `
+          .map((f) => {
+            const cm = CAT_BADGE[f.category] || CAT_BADGE.unknown;
+            return `
             <tr>
               <td class="mono" style="white-space:nowrap;font-size:11.5px">${escapeHtml(f.time)}</td>
-              <td style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(f.reason)}">${escapeHtml(f.reason)}</td>
+              <td style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(f.reason)}"><span class="badge ${cm.cls}" style="margin-right:6px">${cm.label}</span>${escapeHtml(f.reason)}</td>
               <td class="mono muted-small" style="max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(f.account)}">${escapeHtml(f.account || '—')}</td>
               <td style="text-align:right;white-space:nowrap">
                 ${f.snapshot_url ? `<button type="button" class="btn btn-secondary btn-sm" data-open-snap="${escapeHtml(f.snapshot_url)}" data-open-name="${escapeHtml(f.snapshot)}">查看截图</button>` : '<span class="muted-small">—</span>'}
               </td>
-            </tr>`
-          )
+            </tr>`;
+          })
           .join('');
         $('#failures-tbody').querySelectorAll('[data-open-snap]').forEach((b) => {
           b.addEventListener('click', () => openLightbox(b.dataset.openName, b.dataset.openSnap));
@@ -1190,39 +1314,192 @@
     }
   });
 
-  // ==================== 7. Layout ====================
+  // ==================== 7. Layout (Full 6 Presets + Zoom + Real Calibrate & Demo) ====================
+  let layoutData = null;
+  let layoutPresetKey = 'single';
+
+  const PRESET_META = {
+    single: { label: '1窗 · 全屏', concurrency: 1, getBlock: (g) => g?.single_concurrency },
+    dual: { label: '2窗 · 左右分屏', concurrency: 2, getBlock: (g) => g?.dual_concurrency },
+    quad_edge: { label: '4窗 · 贴边四宫格', concurrency: 4, applyOpts: { quad_mode: 'edge_2x2' }, getBlock: (g) => g?.quad_presets?.edge_2x2 },
+    quad_compact: { label: '4窗 · 居中紧凑', concurrency: 4, applyOpts: { quad_mode: 'centered_compact' }, getBlock: (g) => g?.quad_presets?.centered_compact },
+    hex_edge: { label: '6窗 · 贴边六宫格', concurrency: 6, applyOpts: { hex_mode: 'edge_3x2' }, getBlock: (g) => g?.hex_presets?.edge_3x2 },
+    hex_wing: { label: '6窗 · 八字展翼', concurrency: 6, applyOpts: { hex_mode: 'wing_cascade' }, getBlock: (g) => g?.hex_presets?.wing_cascade },
+  };
+
+  function renderLayoutCanvas() {
+    const g = layoutData || {};
+    const meta = PRESET_META[layoutPresetKey] || PRESET_META.single;
+    const block = meta.getBlock(g);
+    const slots = block?.slots || [];
+    const activeQuad = String(g.quad_mode || 'centered_compact');
+    const activeHex = String(g.hex_mode || 'wing_cascade');
+
+    $$('#layout-preset-tabs [data-preset]').forEach((btn) => {
+      const k = btn.dataset.preset;
+      const active = k === layoutPresetKey;
+      btn.classList.toggle('btn-primary', active);
+      btn.classList.toggle('btn-secondary', !active);
+      const isDef =
+        (k === 'quad_edge' && activeQuad === 'edge_2x2') ||
+        (k === 'quad_compact' && activeQuad === 'centered_compact') ||
+        (k === 'hex_edge' && activeHex === 'edge_3x2') ||
+        (k === 'hex_wing' && activeHex === 'wing_cascade');
+      btn.textContent = PRESET_META[k].label + (isDef ? ' ·默认' : '');
+    });
+
+    const singleSlot = g.single_concurrency?.slots?.[0];
+    const waW = Math.max(640, Number(g.work_area?.width || (singleSlot ? singleSlot.width - 12 : 1920)));
+    const waH = Math.max(480, Number(g.work_area?.height || (singleSlot ? singleSlot.height - 7 : 1040)));
+    const waX = Number(g.work_area?.left || 0);
+    const waY = Number(g.work_area?.top || 0);
+
+    $('#layout-screen-label').textContent = g.screen_resolution || '待自动生成';
+    $('#layout-desc').textContent = block?.description || meta.label;
+    $('#layout-wa-label').textContent = `工作区 ${waW} × ${waH}`;
+    $('#layout-slot-count').textContent = `${slots.length} 窗`;
+    $('#btn-launch-calibrate').textContent = `启动真机交互标定 (-c ${meta.concurrency})`;
+
+    const canvas = $('#layout-canvas');
+    canvas.style.aspectRatio = `${waW} / ${waH}`;
+    if (!slots.length) {
+      canvas.innerHTML = `<div class="empty-box" style="height:100%;display:flex;align-items:center;justify-content:center">尚未生成视窗配置，点击右上角「一键重算 6 套布局」。</div>`;
+    } else {
+      canvas.innerHTML = slots
+        .map((s, i) => {
+          const leftPct = Math.max(0, Math.min(96, ((s.x - waX) / waW) * 100));
+          const topPct = Math.max(0, Math.min(96, ((s.y - waY) / waH) * 100));
+          const wPct = Math.max(8, Math.min(100 - leftPct, (s.width / waW) * 100));
+          const hPct = Math.max(12, Math.min(100 - topPct, (s.height / waH) * 100));
+          const zPct = Math.round((s.zoom || 1) * 100);
+          return `
+            <div class="slot-rect c${i % 6}" style="left:${leftPct}%;top:${topPct}%;width:${wPct}%;height:${hPct}%;z-index:${10 + i}">
+              <div class="slot-head"><span>${escapeHtml(s.name || `Slot #${i + 1}`)}</span><span class="slot-zoom mono">${zPct}%</span></div>
+              <div class="slot-dim mono">${s.width}×${s.height} @ (${s.x},${s.y})</div>
+            </div>`;
+        })
+        .join('');
+    }
+
+    const curZoomPct = slots.length ? Math.round((slots[0].zoom || 1) * 100) : 100;
+    $('#layout-zoom-range').value = String(Math.max(45, Math.min(125, curZoomPct)));
+    $('#layout-zoom-val').textContent = `${curZoomPct}%`;
+
+    $('#layout-slot-list').innerHTML = slots
+      .map(
+        (s) => `
+        <div class="layout-slot-row">
+          <span>${escapeHtml(s.name)}</span>
+          <span class="mono muted-small">${s.width}×${s.height} · ${Math.round((s.zoom || 1) * 100)}%</span>
+        </div>`
+      )
+      .join('');
+
+    const defBtn = $('#btn-set-default-mode');
+    if (meta.applyOpts) {
+      defBtn.classList.remove('hidden');
+      defBtn.textContent = `将「${meta.label}」设为默认形态`;
+    } else {
+      defBtn.classList.add('hidden');
+    }
+
+    const grid = $('#layout-summary');
+    grid.innerHTML = [
+      { name: '屏幕逻辑工作区', val: g.screen_resolution || '已检测' },
+      { name: '当前预览预设', val: `${meta.label} (${slots.length} 窗口)` },
+      { name: '4/6 并发默认形态', val: `${activeQuad} / ${activeHex}` },
+      { name: '最近校准时间', val: g.calibrated_at || '—' },
+    ]
+      .map((m) => `<div class="check-item"><div class="check-name">${escapeHtml(m.name)}</div><div class="check-detail mono">${escapeHtml(m.val)}</div></div>`)
+      .join('');
+  }
+
   async function loadLayout() {
     try {
       const res = await fetch('/api/layout');
       const data = await res.json();
-      const g = data.geometry || {};
-      const single = g.single_concurrency?.slots?.[0];
-      const grid = $('#layout-summary');
-      if (!single) {
-        grid.innerHTML = `<div class="check-item">尚未生成 config/window_geometry.json，请点击右上角自动适配。</div>`;
-        return;
-      }
-      const zoomPct = Math.round((single.zoom || 1) * 100);
-      $('#layout-screen-label').textContent = `逻辑屏幕工作区 · ${g.screen_resolution || '已检测'}`;
-      $('#mw-title').textContent = `Single Window · X=${single.x ?? 0}, Y=${single.y ?? 0}`;
-      $('#mw-dim').textContent = `${single.width} × ${single.height}`;
-      $('#mw-zoom').textContent = `防切割缩放 ${zoomPct}%`;
-      grid.innerHTML = [
-        { name: '适配分辨率', val: g.screen_resolution || '已检测' },
-        { name: '单窗口尺寸', val: `${single.width} × ${single.height}` },
-        { name: '防切割缩放比 (Zoom)', val: `${zoomPct}%` },
-        { name: '校准时间', val: g.calibrated_at || '—' },
-      ]
-        .map((m) => `<div class="check-item"><div class="check-name">${escapeHtml(m.name)}</div><div class="check-detail mono">${escapeHtml(m.val)}</div></div>`)
-        .join('');
+      layoutData = data.geometry || {};
+      renderLayoutCanvas();
     } catch {}
   }
 
+  $$('#layout-preset-tabs [data-preset]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      layoutPresetKey = btn.dataset.preset;
+      renderLayoutCanvas();
+    });
+  });
+
+  $('#layout-zoom-range')?.addEventListener('input', (e) => {
+    $('#layout-zoom-val').textContent = `${e.target.value}%`;
+  });
+
+  $('#btn-save-zoom')?.addEventListener('click', async () => {
+    const zoom = Number($('#layout-zoom-range').value || 100) / 100;
+    const res = await fetch('/api/layout/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preset_key: layoutPresetKey, zoom }),
+    });
+    const d = await res.json();
+    if (d.ok) {
+      layoutData = d.geometry;
+      renderLayoutCanvas();
+      toast(`已保存「${PRESET_META[layoutPresetKey].label}」防切割缩放为 ${Math.round(zoom * 100)}%`);
+    } else {
+      toast(d.error || '保存缩放失败');
+    }
+  });
+
+  $('#btn-set-default-mode')?.addEventListener('click', async () => {
+    const opts = PRESET_META[layoutPresetKey]?.applyOpts;
+    if (!opts) return;
+    const res = await fetch('/api/layout/auto', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(opts),
+    });
+    const d = await res.json();
+    if (d.ok) {
+      layoutData = d.geometry;
+      renderLayoutCanvas();
+      toast(`已设为默认并发形态并写入 config/window_geometry.json`);
+    } else {
+      toast(d.error || '切换失败');
+    }
+  });
+
   $('#btn-auto-layout').addEventListener('click', async () => {
-    const res = await fetch('/api/layout/auto', { method: 'POST' });
+    const res = await fetch('/api/layout/auto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     const data = await res.json();
-    if (data.ok) { toast('已重新计算本机单窗口标定参数'); loadLayout(); }
-    else toast(data.error || '计算失败');
+    if (data.ok) {
+      layoutData = data.geometry;
+      renderLayoutCanvas();
+      toast('已按本机工作区重新生成 6 套单/多窗口无溢出预设');
+    } else {
+      toast(data.error || '计算失败');
+    }
+  });
+
+  $('#btn-launch-calibrate')?.addEventListener('click', async () => {
+    const meta = PRESET_META[layoutPresetKey] || PRESET_META.single;
+    const res = await fetch('/api/layout/calibrate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ concurrency: meta.concurrency, url: $('#cal-test-url')?.value.trim() || '' }),
+    });
+    const d = await res.json();
+    toast(d.ok ? d.message : d.error || '启动标定失败');
+  });
+
+  $('#btn-demo-layouts')?.addEventListener('click', async () => {
+    const res = await fetch('/api/layout/demo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hold_sec: 5 }),
+    });
+    const d = await res.json();
+    toast(d.ok ? d.message : d.error || '启动巡演失败');
   });
 
   // ==================== 8. Config + Proxy/IMAP Self Tests ====================

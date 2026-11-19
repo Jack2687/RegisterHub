@@ -322,6 +322,119 @@ job_manager = _LiteJobManager()
 _TEMPMAIL_LOCK = threading.Lock()
 _TEMPMAIL_SESSIONS: "collections.OrderedDict[str, Dict[str, Any]]" = collections.OrderedDict()
 
+# 5-minute cached current exit IP purity score so Tools/IP Scorer opens with live data
+_IP_SCORE_CACHE_LOCK = threading.Lock()
+_IP_SCORE_CACHE: Dict[str, Any] = {"ts": 0.0, "data": None}
+_IP_SCORE_TTL_S = 300.0
+
+
+def _parse_har_community(har_text: str, site_name: str = "") -> Dict[str, Any]:
+    """Zero-dependency stdlib HAR parser that extracts auth/signup API steps & generates Python skeleton."""
+    raw = json.loads(har_text)
+    entries = ((raw.get("log") or {}).get("entries") or []) if isinstance(raw, dict) else []
+    if not isinstance(entries, list):
+        raise ValueError("HAR 格式非法：缺少 log.entries 数组")
+
+    static_exts = (".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".woff", ".woff2", ".ico", ".map")
+    noise_hosts = ("google-analytics", "googletagmanager", "sentry.io", "segment.io", "clarity.ms", "doubleclick.net")
+    sig_rules = [
+        ("Turnstile", ("turnstile", "cf-turnstile", "challenges.cloudflare.com")),
+        ("reCAPTCHA", ("recaptcha", "g-recaptcha")),
+        ("Clerk", ("clerk.", "/v1/client/sign_ups")),
+        ("Supabase", ("supabase", "/auth/v1/signup")),
+        ("JWT", ("access_token", "id_token", "eyj")),
+        ("API Key", ("api_key", "apikey", "sk-", "gsk_", "sb_live_")),
+        ("CSRF", ("csrf", "x-xsrf-token")),
+    ]
+
+    steps: List[Dict[str, Any]] = []
+    all_sigs: List[str] = []
+    origin = ""
+    for e in entries:
+        req = e.get("request") or {}
+        resp = e.get("response") or {}
+        method = str(req.get("method") or "GET").upper()
+        url = str(req.get("url") or "")
+        if not url.startswith(("http://", "https://")):
+            continue
+        p = urlparse(url)
+        if any(h in p.netloc.lower() for h in noise_hosts) or p.path.lower().endswith(static_exts):
+            continue
+        mime = str(((resp.get("content") or {}).get("mimeType")) or "").lower()
+        if method == "GET" and "json" not in mime and not any(k in p.path.lower() for k in ("auth", "signup", "register", "token", "key", "csrf")):
+            continue
+        req_txt = str(((req.get("postData") or {}).get("text")) or "")
+        resp_txt = str(((resp.get("content") or {}).get("text")) or "")
+        blob = f"{url} {req_txt[:2000]} {resp_txt[:2000]}".lower()
+        sigs = [name for name, kws in sig_rules if any(k in blob for k in kws)]
+        all_sigs.extend(sigs)
+        if not origin:
+            origin = f"{p.scheme}://{p.netloc}"
+
+        req_keys: List[str] = []
+        resp_keys: List[str] = []
+        try:
+            rj = json.loads(req_txt) if req_txt else None
+            if isinstance(rj, dict):
+                req_keys = list(rj.keys())[:10]
+        except Exception:
+            pass
+        try:
+            pj = json.loads(resp_txt) if resp_txt else None
+            if isinstance(pj, dict):
+                resp_keys = list(pj.keys())[:10]
+        except Exception:
+            pass
+
+        steps.append({
+            "method": method,
+            "url": url,
+            "path": p.path or "/",
+            "status": int(resp.get("status") or 0),
+            "req_keys": req_keys,
+            "resp_keys": resp_keys,
+            "signals": sigs,
+        })
+
+    clean_site = re.sub(r"[^a-zA-Z0-9_]", "_", (site_name or (urlparse(origin).hostname or "target").split(".")[0]).lower()).strip("_") or "target"
+    cls_name = "".join(w.capitalize() for w in clean_site.split("_") if w) + "ProtocolAdapter"
+    step_lines = []
+    for idx, st in enumerate(steps[:12], 1):
+        step_lines.append(f"        # Step {idx}: {st['method']} {st['path']} (HTTP {st['status']})")
+        if st["req_keys"]:
+            kv = ", ".join(f"{k!r}: ..." for k in st["req_keys"][:6])
+            step_lines.append(f"        # r{idx} = session.{st['method'].lower()}({st['url']!r}, json={{{kv}}})")
+        else:
+            step_lines.append(f"        # r{idx} = session.{st['method'].lower()}({st['url']!r})")
+    body = "\n".join(step_lines) or "        # 未在 HAR 中捕获到注册接口，请核对抓取流程"
+    sigs_unique = sorted(set(all_sigs))
+    skeleton = f'''"""RegisterHub Community - 由 HAR 抓包自动提炼的协议注册骨架: {clean_site}"""
+
+import requests
+
+
+class {cls_name}:
+    site_name = {clean_site!r}
+    target_url = {origin!r}
+    detected_signals = {sigs_unique!r}
+
+    def register(self, email: str, password: str, proxy: str | None = None) -> dict:
+        session = requests.Session()
+        if proxy:
+            session.proxies = {{"http": proxy, "https": proxy}}
+{body}
+        return {{"email": email, "password": password, "api_key": ""}}
+'''
+    return {
+        "ok": True,
+        "site": clean_site,
+        "origin": origin,
+        "total_entries": len(entries),
+        "api_steps": steps[:30],
+        "signals": sigs_unique,
+        "skeleton": skeleton,
+    }
+
 
 def _load_raw_config_dict() -> Dict[str, Any]:
     default_cfg: Dict[str, Any] = {
@@ -454,11 +567,21 @@ def list_failures() -> List[Dict[str, Any]]:
                 cand = p.split(":", 1)[1].strip()
                 if cand in snap_names:
                     snap_name = cand
+        low_r = reason.lower()
+        if any(k in low_r for k in ("already exists", "已存在", "[dead]", "domain banned", "invalid oauth", "blocked domain")):
+            cat = "dead"
+        elif any(k in low_r for k in ("captcha", "turnstile", "recaptcha", "hcaptcha", "slider")):
+            cat = "captcha"
+        elif any(k in low_r for k in ("timeout", "429", "403", "502", "proxy", "connection", "reset", "no mail")):
+            cat = "soft"
+        else:
+            cat = "unknown"
         rows.append({
             "id": idx,
             "time": ts,
             "reason": reason[:240],
             "account": account[:200],
+            "category": cat,
             "snapshot": snap_name,
             "snapshot_url": f"/api/snapshots/{snap_name}" if snap_name else "",
         })
@@ -566,6 +689,26 @@ def build_overview_payload() -> Dict[str, Any]:
         if dkey in trend_map:
             trend_map[dkey]["failed"] += 1
 
+    recent_accounts = []
+    for a in reversed(accounts[-8:]):
+        ak = (a.get("api_key") or "").strip()
+        masked = (ak[:10] + "..." + ak[-4:]) if len(ak) > 18 else (ak[:6] + "***" if ak else "")
+        recent_accounts.append({
+            "email": a.get("email", ""),
+            "username": a.get("username", ""),
+            "has_key": bool(ak),
+            "masked_key": masked,
+            "api_key": ak,
+        })
+
+    layout_res = ""
+    if GEOMETRY_FILE.exists():
+        try:
+            gd = json.loads(GEOMETRY_FILE.read_text(encoding="utf-8"))
+            layout_res = str(gd.get("screen_resolution") or "")
+        except Exception:
+            pass
+
     return {
         "kpi": {
             "accounts_total": len(accounts),
@@ -577,6 +720,8 @@ def build_overview_payload() -> Dict[str, Any]:
         },
         "daily_trend": [trend_map[d] for d in days],
         "recent_jobs": jobs[:6],
+        "recent_accounts": recent_accounts,
+        "layout_info": {"ready": GEOMETRY_FILE.exists(), "screen_resolution": layout_res},
         "adapters": adapters[:8],
     }
 
@@ -682,7 +827,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
 
     def _read_json(self) -> Dict[str, Any]:
         length = int(self.headers.get("Content-Length") or "0")
-        if length <= 0 or length > 2_000_000:
+        if length <= 0 or length > 16_000_000:
             return {}
         raw = self.rfile.read(length)
         try:
@@ -880,6 +1025,24 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": str(e)}, status=500)
                 return
             self._send_json({"ok": True, "email": sess["email"], "provider": sess["provider"], "messages": msgs})
+            return
+
+        if path == "/api/tools/ip-score/current":
+            from core.ip_scorer import score_ip
+
+            force = (qs.get("force") or ["0"])[0] in ("1", "true", "yes")
+            now = time.time()
+            with _IP_SCORE_CACHE_LOCK:
+                if not force and _IP_SCORE_CACHE["data"] is not None and (now - float(_IP_SCORE_CACHE["ts"])) < _IP_SCORE_TTL_S:
+                    self._send_json({**_IP_SCORE_CACHE["data"], "cached": True})
+                    return
+            cfg = _load_raw_config_dict()
+            px = str((cfg.get("browser") or {}).get("proxy") or "").strip()
+            res = score_ip(ip="", proxy_url=px, target_url="")
+            with _IP_SCORE_CACHE_LOCK:
+                _IP_SCORE_CACHE["ts"] = time.time()
+                _IP_SCORE_CACHE["data"] = res
+            self._send_json({**res, "cached": False})
             return
 
         if path == "/api/layout":
@@ -1225,12 +1388,109 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": str(e)}, status=400)
             return
 
+        if path == "/api/tools/har":
+            har_text = str(body.get("har_text") or "")
+            site_name = str(body.get("site_name") or "").strip()
+            if len(har_text) < 2 or len(har_text) > 15_000_000:
+                self._send_json({"ok": False, "error": "HAR 内容为空或超过 15MB 限制"}, status=400)
+                return
+            try:
+                self._send_json(_parse_har_community(har_text, site_name=site_name))
+            except Exception as e:
+                self._send_json({"ok": False, "error": f"HAR 解析失败: {e}"}, status=400)
+            return
+
         if path == "/api/layout/auto":
             try:
                 from core.calibrator import auto_generate_layout
 
-                geo = auto_generate_layout(save_path=GEOMETRY_FILE)
+                q_mode = body.get("quad_mode") if isinstance(body.get("quad_mode"), str) else None
+                h_mode = body.get("hex_mode") if isinstance(body.get("hex_mode"), str) else None
+                geo = auto_generate_layout(save_path=GEOMETRY_FILE, quad_mode=q_mode, hex_mode=h_mode)
                 self._send_json({"ok": True, "geometry": geo})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, status=500)
+            return
+
+        if path == "/api/layout/update":
+            try:
+                from core.calibrator import auto_generate_layout
+
+                key = str(body.get("preset_key") or "").strip().lower()
+                z = round(max(0.40, min(1.50, float(body.get("zoom") or 1.0))), 2)
+                if GEOMETRY_FILE.exists():
+                    data = json.loads(GEOMETRY_FILE.read_text(encoding="utf-8"))
+                else:
+                    data = auto_generate_layout(save_path=GEOMETRY_FILE)
+                slots = None
+                if key == "single":
+                    slots = (data.get("single_concurrency") or {}).get("slots")
+                    data["zoom"] = z
+                elif key == "dual":
+                    slots = (data.get("dual_concurrency") or {}).get("slots")
+                elif key == "quad_edge":
+                    slots = ((data.get("quad_presets") or {}).get("edge_2x2") or {}).get("slots")
+                elif key == "quad_compact":
+                    slots = ((data.get("quad_presets") or {}).get("centered_compact") or {}).get("slots")
+                elif key == "hex_edge":
+                    slots = ((data.get("hex_presets") or {}).get("edge_3x2") or {}).get("slots")
+                elif key == "hex_wing":
+                    slots = ((data.get("hex_presets") or {}).get("wing_cascade") or {}).get("slots")
+                else:
+                    self._send_json({"ok": False, "error": f"未知预设键: {key}"}, status=400)
+                    return
+                if not isinstance(slots, list) or not slots:
+                    self._send_json({"ok": False, "error": "缺少槽位数据，请先自动适配屏幕"}, status=400)
+                    return
+                for s in slots:
+                    if isinstance(s, dict):
+                        s["zoom"] = z
+                if key == "quad_edge" and data.get("quad_mode") == "edge_2x2":
+                    data["slots"] = slots
+                elif key == "quad_compact" and data.get("quad_mode") == "centered_compact":
+                    data["slots"] = slots
+                data["calibrated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                GEOMETRY_FILE.parent.mkdir(parents=True, exist_ok=True)
+                tmp = GEOMETRY_FILE.with_suffix(".json.tmp")
+                tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                os.replace(tmp, GEOMETRY_FILE)
+                self._send_json({"ok": True, "geometry": data})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, status=400)
+            return
+
+        if path == "/api/layout/calibrate":
+            try:
+                c = int(body.get("concurrency") or 1)
+                c = c if c in (1, 2, 4, 6) else 1
+                url = str(body.get("url") or "").strip()
+                cmd = [sys.executable, str(ROOT_DIR / "main.py"), "--calibrate", "-c", str(c)]
+                if url.startswith(("http://", "https://")):
+                    cmd.extend(["--calibrate-url", url])
+                cflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) if os.name == "nt" else 0
+                proc = subprocess.Popen(cmd, cwd=str(ROOT_DIR), creationflags=cflags)
+                self._send_json({
+                    "ok": True,
+                    "pid": proc.pid,
+                    "concurrency": c,
+                    "message": f"已在桌面启动 {c} 窗口真机交互标定（调整后按弹窗终端回车锁定保存）",
+                })
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, status=500)
+            return
+
+        if path == "/api/layout/demo":
+            try:
+                sec = max(2, min(20, int(body.get("hold_sec") or 5)))
+                cmd = [sys.executable, str(ROOT_DIR / "main.py"), "--demo-layouts", "--demo-sec", str(sec)]
+                cflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) if os.name == "nt" else 0
+                proc = subprocess.Popen(cmd, cwd=str(ROOT_DIR), creationflags=cflags)
+                self._send_json({
+                    "ok": True,
+                    "pid": proc.pid,
+                    "hold_sec": sec,
+                    "message": f"已在桌面启动 6 套真机视窗实景巡演（每套展示 {sec} 秒）",
+                })
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, status=500)
             return
