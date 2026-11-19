@@ -33,10 +33,22 @@
     accounts: '账号与 API Key 台账',
     tools: '开源实用工具箱',
     snapshots: '失败原因与现场快照',
-    scaffold: '站点工坊 (嗅探 / 源码 / 脚手架)',
+    scaffold: '站点工坊 (源码 / 嗅探 / 脚手架)',
     doctor: '环境真执行诊断',
     layout: '视窗标定台 (单 / 多窗口)',
     config: '运行配置 (config.json / IMAP)',
+  };
+
+  const VIEW_GROUPS = {
+    overview: '核心与资产',
+    runner: '核心与资产',
+    accounts: '核心与资产',
+    snapshots: '核心与资产',
+    scaffold: '开发与工具',
+    layout: '开发与工具',
+    tools: '开发与工具',
+    doctor: '运维与配置',
+    config: '运维与配置',
   };
 
   const TIER_META = {
@@ -107,6 +119,8 @@
     if (!VIEW_TITLES[target]) target = 'overview';
     currentView = target;
     $('#topbar-title').textContent = VIEW_TITLES[target];
+    const grpEl = $('#topbar-group');
+    if (grpEl) grpEl.textContent = VIEW_GROUPS[target] || '核心与资产';
     $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === target));
     $$('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${target}`));
     if (target === 'overview') loadOverview();
@@ -140,6 +154,14 @@
   }
   $('#btn-jump-ipscore')?.addEventListener('click', () => activateToolTab('ipscore'));
   $('#btn-jump-har')?.addEventListener('click', () => activateToolTab('har'));
+
+  $$('#scaffold-tab-group .seg-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const t = btn.dataset.scTab;
+      $$('#scaffold-tab-group .seg-btn').forEach((b) => b.classList.toggle('active', b === btn));
+      $$('.scaffold-panel').forEach((p) => p.classList.toggle('active', p.id === `scaffold-panel-${t}`));
+    });
+  });
 
   $('#btn-global-refresh').addEventListener('click', async () => {
     const ico = $('#icon-refresh');
@@ -178,6 +200,16 @@
         badge.classList.remove('hidden');
       } else {
         badge.classList.add('hidden');
+      }
+
+      const snapBadge = $('#nav-badge-snapshots');
+      if (snapBadge) {
+        if ((k.failures_total ?? 0) > 0) {
+          snapBadge.textContent = String(k.failures_total);
+          snapBadge.classList.remove('hidden');
+        } else {
+          snapBadge.classList.add('hidden');
+        }
       }
 
       // 7-day bar chart
