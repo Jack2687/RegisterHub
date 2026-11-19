@@ -139,7 +139,7 @@ class DeepgramAdapter(BaseSiteAdapter):
         code = None
         if self.mail_client:
             print("[*] [Deepgram] Polling public disposable mailbox for 6-digit verification code...")
-            code = self.mail_client.poll_for_verification_code(pattern=r'\b\d{6}\b', timeout=90)
+            code = self.mail_client.poll_for_verification_code(pattern=r'\b\d{6}\b', timeout_secs=90)
         else:
             print(f"\n{'=' * 65}")
             print(f"  [Deepgram] 验证码已发送至自备邮箱: {email}")
@@ -184,6 +184,9 @@ class DeepgramAdapter(BaseSiteAdapter):
 
         key_data = r_key.json()
         self.api_key = key_data.get("key") or key_data.get("api_key")
-        print(f"[+] [Deepgram] Successfully extracted API Key: {self.api_key} ($200 USD allowance)")
+        if not self.api_key:
+            print("[-] [Deepgram] API key missing in server response.")
+            return False
+        print(f"[+] [Deepgram] Successfully extracted API Key: {self.api_key[:10]}*** ($200 USD allowance)")
         self.account_data["api_key"] = self.api_key
         return True

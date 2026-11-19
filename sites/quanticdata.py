@@ -132,7 +132,7 @@ class QuanticdataAdapter(BaseSiteAdapter):
 
         # Commit slider position
         self.page.keyboard.press("Enter")
-        self.page.wait_for_timeout(1800)
+        time.sleep(1.8)
 
         # Confirm slider passed
         slider_text = slider.text_content() or ""
@@ -185,7 +185,7 @@ class QuanticdataAdapter(BaseSiteAdapter):
                 return False
 
             # Wait for backend processing / redirection
-            self.page.wait_for_timeout(5000)
+            time.sleep(5.0)
             current_url = self.page.url
 
             # 1. Check network confirmation flag

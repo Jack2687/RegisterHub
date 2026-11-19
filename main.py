@@ -9,6 +9,7 @@ has not been installed yet. A diagnostic tool that crashes before it can report
 what is missing is useless.
 """
 import sys
+import time
 import json
 import argparse
 from pathlib import Path
@@ -116,7 +117,7 @@ def inspect_url(target_url: str, cdp_endpoint: str = None):
                 
                 print("\n[+] Form autofill finished with humanized typing rhythms.")
                 print("[*] Browser will remain open for 10 seconds for visual inspection.")
-                page.wait_for_timeout(10000)
+                time.sleep(10)
             else:
                 print("[-] Could not detect standard input selectors heuristically.")
         except Exception as e:
@@ -146,13 +147,21 @@ def run_scaffold(site_name: str, target_url: str = None):
                 except Exception:
                     browser = p.chromium.launch(**launch_kwargs)
                 context = browser.new_context()
-                apply_stealth_to_context(context)
-                page = context.new_page()
-                page.goto(target_url, timeout=25000, wait_until="domcontentloaded")
-                inspector = FormInspector(page)
-                detected = inspector.detect_inputs()
-                context.close()
-                browser.close()
+                try:
+                    apply_stealth_to_context(context)
+                    page = context.new_page()
+                    page.goto(target_url, timeout=25000, wait_until="domcontentloaded")
+                    inspector = FormInspector(page)
+                    detected = inspector.detect_inputs()
+                finally:
+                    try:
+                        context.close()
+                    except Exception:
+                        pass
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass
             print("[+] Form fields successfully detected and pre-assembled into scaffold!")
         except Exception as e:
             print(f"[!] Warning: Pre-inspection timed out or failed ({e}), generating standard template instead.")
@@ -239,6 +248,7 @@ def main():
             print(f"[+] Accounts successfully exported to [{fmt.upper()}]: {exported_path.resolve()}")
         except Exception as e:
             print(f"[-] Export error: {e}")
+            sys.exit(1)
         return
 
     if args.scaffold:

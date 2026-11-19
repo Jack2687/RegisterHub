@@ -30,7 +30,7 @@ class {class_name}(BaseSiteAdapter):
         self.mail_client: Optional[DisposableMailClient] = None
 
     def target_url(self) -> str:
-        return "{target_url}"
+        return {target_url_repr}
 
     def prepare_identity(self) -> Dict[str, Any]:
         """Generate synthetic credentials matching target requirements."""
@@ -82,11 +82,11 @@ class {class_name}(BaseSiteAdapter):
             if not smart_click(self.page, submit_btn):
                 return False
 
-            self.page.wait_for_timeout(4000)
+            time.sleep(4.0)
             current_url = self.page.url
 
             # 1. Assert explicit success criteria: dashboard / welcome / onboarding / home
-            success_keywords = ["dashboard", "welcome", "confirm", "home", "account", "verify", "onboarding"]
+            success_keywords = ["dashboard", "welcome", "confirm", "home", "account", "onboarding"]
             if any(kw in current_url.lower() for kw in success_keywords):
                 print(f"[+] [{site_name}] Registration success confirmed! URL: {{current_url}}")
                 return True
@@ -118,10 +118,11 @@ def to_camel_case(snake_str: str) -> str:
 
 
 def scaffold_site(site_name: str, target_url: Optional[str] = None, detected_fields: Optional[Dict[str, Optional[str]]] = None) -> Path:
-    """Generate a clean, high-grade site adapter file under sites/ directory."""
-    clean_name = re.sub(r"[^a-zA-Z0-9_]", "_", site_name.strip().lower()).strip("_")
-    if not clean_name:
-        clean_name = "custom_site"
+    """Generate a clean, high-grade site adapter file under sites/ directory (atomic write)."""
+    raw = (site_name or "").strip().lower().replace("-", "_")
+    if not raw or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", raw):
+        raise ValueError(f"Invalid site name: {site_name!r} (only letters, digits, underscores, hyphens allowed)")
+    clean_name = raw
 
     class_name = to_camel_case(clean_name)
     target_url = target_url or f"https://{clean_name}.com/signup"
@@ -136,6 +137,7 @@ def scaffold_site(site_name: str, target_url: Optional[str] = None, detected_fie
         site_name=clean_name,
         class_name=class_name,
         target_url=target_url,
+        target_url_repr=repr(target_url),
         email_selector=email_sel,
         password_selector=pwd_sel,
         username_selector=user_sel,
@@ -145,5 +147,7 @@ def scaffold_site(site_name: str, target_url: Optional[str] = None, detected_fie
     root_dir = Path(__file__).resolve().parent.parent
     out_file = root_dir / "sites" / f"{clean_name}.py"
     out_file.parent.mkdir(parents=True, exist_ok=True)
-    out_file.write_text(code, encoding="utf-8")
+    tmp_file = out_file.with_suffix(".py.tmp")
+    tmp_file.write_text(code, encoding="utf-8")
+    tmp_file.replace(out_file)
     return out_file

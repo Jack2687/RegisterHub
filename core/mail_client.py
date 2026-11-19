@@ -127,8 +127,11 @@ class _MailTmBackend:
         )
         r.raise_for_status()
         j = r.json()
-        # mail.tm exposes text; html carries the richer body when text is empty.
-        return "\n".join(filter(None, [j.get("subject", ""), j.get("text", ""), j.get("html", "")]))
+        # mail.tm returns `html` as a list of HTML strings; normalize before join.
+        raw_html = j.get("html") or ""
+        if isinstance(raw_html, list):
+            raw_html = "\n".join(str(part) for part in raw_html if part)
+        return "\n".join(filter(None, [str(j.get("subject") or ""), str(j.get("text") or ""), str(raw_html)]))
 
 
 # ---------------------------------------------------------------------------
@@ -417,10 +420,15 @@ class DisposableMailClient:
                     continue
                 seen.add(mid)
 
-                text = msg.get("body") or self.read_message(mid)
-                match = re.search(pattern, text or "")
+                excerpt = msg.get("body") or ""
+                match = re.search(pattern, excerpt)
                 if match:
                     return match.group(0)
+                full_text = self.read_message(mid)
+                if full_text and full_text != excerpt:
+                    match = re.search(pattern, full_text)
+                    if match:
+                        return match.group(0)
 
             time.sleep(interval)
             interval = min(interval * 1.3, max_interval)
@@ -449,10 +457,15 @@ class DisposableMailClient:
                     continue
                 seen.add(mid)
 
-                text = msg.get("body") or self.read_message(mid)
-                match = re.search(url_pattern, text or "")
+                excerpt = msg.get("body") or ""
+                match = re.search(url_pattern, excerpt)
                 if match:
                     return match.group(0).rstrip(".,;)\"'")
+                full_text = self.read_message(mid)
+                if full_text and full_text != excerpt:
+                    match = re.search(url_pattern, full_text)
+                    if match:
+                        return match.group(0).rstrip(".,;)\"'")
 
             time.sleep(interval)
             interval = min(interval * 1.3, max_interval)

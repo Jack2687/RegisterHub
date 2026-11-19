@@ -39,8 +39,19 @@ def test_export_pipeline(tmp_path):
     bw_out = tmp_path / "bitwarden.csv"
     export_to_bitwarden(accounts, bw_out)
     assert bw_out.exists()
+    assert not csv_out.with_suffix(".csv.tmp").exists()
+    assert not json_out.with_suffix(".json.tmp").exists()
+    assert not bw_out.with_suffix(".csv.tmp").exists()
     with open(bw_out, "r", encoding="utf-8") as f:
         bw_reader = list(csv.DictReader(f))
         assert len(bw_reader) == 1
         assert bw_reader[0]["login_username"] == "alex_miller1@test.com"
         assert bw_reader[0]["login_password"] == "Secret123!"
+
+    # 5. Backward compatibility with 4-column records (with api_key)
+    mock_file_4col = tmp_path / "accounts4.txt"
+    mock_file_4col.write_text("u@test.com----P@ss1----uname----sk-live-1234567890\n", encoding="utf-8")
+    parsed4 = parse_accounts_file(mock_file_4col)
+    assert len(parsed4) == 1
+    assert parsed4[0]["email"] == "u@test.com"
+    assert parsed4[0]["username"] == "uname"

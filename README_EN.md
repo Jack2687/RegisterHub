@@ -40,6 +40,8 @@ RegisterHub is an engineering-first automation framework designed to eliminate t
 RegisterHub/
 ├── core/
 │   ├── adapter.py         # Abstract base adapter (BaseSiteAdapter) & lifecycle hooks
+│   ├── calibrator.py      # Cross-resolution symmetric window layouts & anti-clipping zoom
+│   ├── doctor.py          # Executable environment diagnostics (OpenCV, Chrome, network, FS)
 │   ├── pilot.py           # Human-like keystroke dynamics & resilient interaction helpers
 │   ├── stealth.py         # Native Chrome consistency & CDP bridge engine
 │   ├── inspector.py       # Heuristic DOM form inspector (FormInspector)
@@ -49,6 +51,10 @@ RegisterHub/
 │   ├── runner.py          # Deterministic task execution, snapshot logger & ledger writer
 │   ├── scaffold.py        # Automated adapter scaffolding & code generation engine
 │   └── exporter.py        # Bitwarden, 1Password, CSV & JSON credential exporter
+├── config/
+│   └── window_geometry.json # Calibrated multi-window layout & zoom presets
+├── docs/
+│   └── WINDOW_CALIBRATION.md # Cross-resolution window calibration & preview guide
 ├── sites/                 # Production & reference adapters
 │   ├── _template.py       # Standard adapter implementation template
 │   ├── demo_site.py       # Self-contained offline Base64 reference target
@@ -63,6 +69,7 @@ RegisterHub/
 ├── pytest.ini             # Test runner isolation rules
 ├── main.py                # Unified CLI entry point
 ├── run.bat                # Windows interactive execution bootstrap (CRLF)
+├── calibrate.bat          # Windows interactive window layout calibrator & preview launcher
 └── requirements.txt       # Core dependency manifest
 ```
 
@@ -217,7 +224,7 @@ python main.py --run demo --cdp http://127.0.0.1:9222
 ### Credential Vault Export
 Export verified account records into standardized credential management formats:
 ```bash
-# Bitwarden / 1Password compatible JSON
+# Bitwarden / 1Password compatible CSV
 python main.py export --export bitwarden
 
 # Standard CSV format
@@ -225,6 +232,22 @@ python main.py export --export csv
 
 # Raw JSON format
 python main.py export --export json
+```
+
+### Cross-Resolution Window Layouts & Anti-Clipping Preview
+Automatically read the host display work area (`SPI_GETWORKAREA` + DPI scale) to generate symmetric, zero-overflow window presets (`1 / 2 / 4x2 / 6x2`) with adaptive anti-clipping CSS zoom (see [docs/WINDOW_CALIBRATION.md](docs/WINDOW_CALIBRATION.md)):
+```bash
+# Auto-generate symmetric window presets for the current display
+python main.py --auto-layout
+
+# Switch default 4-window or 6-window preset mode
+python main.py --auto-layout --quad-mode centered_compact --hex-mode wing_cascade
+
+# Preview all 6 presets sequentially (10s per preset by default)
+python main.py --demo-layouts --demo-sec 10
+
+# Launch interactive drag/resize & zoom calibrator (or double-click calibrate.bat)
+python main.py --calibrate -c 2
 ```
 
 ---

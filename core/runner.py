@@ -65,7 +65,10 @@ class StandardRunner:
             return None
 
     def save_success(self, account: Dict[str, Any]):
-        line = f"{account.get('email', '')}----{account.get('password', '')}----{account.get('username', '')}\n"
+        api_key = str(account.get("api_key", "") or "").strip()
+        password = str(account.get("password", "") or "")
+        extra = f"----{api_key}" if api_key and api_key != password else ""
+        line = f"{account.get('email', '')}----{password}----{account.get('username', '')}{extra}\n"
         with open(self.success_file, "a", encoding="utf-8") as f:
             f.write(line)
         self.log("success", f"Credential saved to {self.success_file}")
@@ -181,7 +184,8 @@ class StandardRunner:
                 finally:
                     page.close()
 
-            context.close()
+            if not self.cdp_endpoint:
+                context.close()
             browser.close()
 
         self.log("info", f"Session completed. Success: {success_count}/{count}")

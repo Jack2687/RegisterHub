@@ -90,7 +90,7 @@ python main.py demo
    - 代理策略：已自动绑定至 http://127.0.0.1:XXXX（或当前为直连模式）
    - 临时邮箱：已启用三通道自动故障转移模式 (mail.tm / tempmail.io / guerrillamail)
 2. 验收结果：
-   - 单元测试覆盖：6/6 项测试全部通过
+   - 单元测试覆盖：全部通过
    - 离线靶场验证：通过 (Task [1/1] finished successfully)
 3. 立即启动使用：
    - 运行指定适配器：python main.py <site_name>（可选: demo, quanticdata, deepgram, amd, coarena, milionseek, automation_exercise）

@@ -116,16 +116,21 @@ class SiteTemplateAdapter(BaseSiteAdapter):
                 return False
 
             # Wait for response redirect or confirmation message
-            self.page.wait_for_timeout(4000)
+            time.sleep(4.0)
             current_url = self.page.url
 
-            # [TODO]: Define success criteria (URL changes or success message appears)
-            if "dashboard" in current_url or "welcome" in current_url or "confirm" in current_url:
+            # [TODO]: Define explicit success criteria (never treat ambiguous pages as success)
+            if any(kw in current_url.lower() for kw in ("dashboard", "welcome", "confirm", "onboarding")):
                 print(f"[+] Registration success confirmed! Current URL: {current_url}")
                 return True
 
-            print("[+] Form submitted without critical errors.")
-            return True
+            error_loc = self.page.locator('.error, [role="alert"], .alert-danger').first
+            if error_loc.count() > 0 and error_loc.is_visible():
+                print(f"[-] Rejected by site error banner: {(error_loc.text_content() or '')[:100]}")
+                return False
+
+            print("[!] Ambiguous result state after submission; snapshot captured for review.")
+            return False
 
         except Exception as e:
             print(f"[-] Submission confirmation failed: {e}")

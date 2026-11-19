@@ -28,10 +28,12 @@ class RefPoolManager:
 
     def __init__(self, pool_path: Path):
         self.path = pool_path
+        self._loaded_corrupt = False
 
     @contextmanager
     def _file_lock(self):
         """Cross-process lock ensuring atomic read-modify-write across concurrent workers."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         lock_file = self.path.with_suffix(".lock")
         lock_fd = None
         for _ in range(80):
@@ -40,30 +42,44 @@ class RefPoolManager:
                 break
             except OSError:
                 time.sleep(0.05)
+        if lock_fd is None:
+            raise TimeoutError(f"Failed to acquire lock for {self.path}: {lock_file}")
         try:
             yield
         finally:
-            if lock_fd is not None:
-                try:
-                    os.close(lock_fd)
-                    if lock_file.exists():
-                        lock_file.unlink()
-                except Exception:
-                    pass
+            try:
+                os.close(lock_fd)
+            except Exception:
+                pass
+            try:
+                if lock_file.exists():
+                    lock_file.unlink()
+            except Exception:
+                pass
 
     def load(self) -> Dict[str, Any]:
+        self._loaded_corrupt = False
         if self.path.exists():
             try:
                 with open(self.path, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception:
-                pass
+                    data = json.load(f)
+                if not isinstance(data, dict):
+                    raise ValueError("ref_pool root must be a JSON object")
+                return data
+            except Exception as e:
+                self._loaded_corrupt = True
+                print(f"[ERROR] [RefPool] Failed to parse {self.path} (refusing to overwrite corrupt file): {e}")
         return {"active_code": None, "nodes": {}}
 
     def save(self, data: Dict[str, Any]):
+        if self._loaded_corrupt:
+            print(f"[ERROR] [RefPool] Refusing to overwrite corrupt pool file: {self.path}")
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.path, "w", encoding="utf-8") as f:
+        tmp_path = self.path.with_suffix(self.path.suffix + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+        tmp_path.replace(self.path)
 
     def get_active_code(self, default_code: str = "") -> str:
         with self._file_lock():

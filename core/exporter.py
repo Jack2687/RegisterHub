@@ -33,8 +33,10 @@ def parse_accounts_file(filepath: Path) -> List[Dict[str, str]]:
 
 
 def export_to_csv(accounts: List[Dict[str, str]], out_path: Path):
-    """Export accounts as a clean CSV with standard headers."""
-    with open(out_path, "w", encoding="utf-8", newline="") as f:
+    """Export accounts as a clean CSV with standard headers (atomic write)."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["email", "password", "username", "exported_at"])
         writer.writeheader()
         now = datetime.now().isoformat()
@@ -45,10 +47,12 @@ def export_to_csv(accounts: List[Dict[str, str]], out_path: Path):
                 "username": acc["username"],
                 "exported_at": now
             })
+    tmp_path.replace(out_path)
 
 
 def export_to_json(accounts: List[Dict[str, str]], out_path: Path):
-    """Export accounts as structured JSON."""
+    """Export accounts as structured JSON (atomic write)."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     now = datetime.now().isoformat()
     data = {
         "metadata": {
@@ -57,20 +61,24 @@ def export_to_json(accounts: List[Dict[str, str]], out_path: Path):
         },
         "accounts": accounts
     }
-    with open(out_path, "w", encoding="utf-8") as f:
+    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    tmp_path.replace(out_path)
 
 
 def export_to_bitwarden(accounts: List[Dict[str, str]], out_path: Path):
     """
-    Export accounts matching official Bitwarden / 1Password import specification:
+    Export accounts matching official Bitwarden / 1Password import specification (atomic write):
     folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp
     """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "folder", "favorite", "type", "name", "notes", "fields",
         "reprompt", "login_uri", "login_username", "login_password", "login_totp"
     ]
-    with open(out_path, "w", encoding="utf-8", newline="") as f:
+    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for acc in accounts:
@@ -88,6 +96,7 @@ def export_to_bitwarden(accounts: List[Dict[str, str]], out_path: Path):
                 "login_password": acc["password"],
                 "login_totp": ""
             })
+    tmp_path.replace(out_path)
 
 
 def run_export(fmt: str = "csv", input_file: str = "results/accounts.txt", out_dir: str = "results") -> Path:
