@@ -1300,9 +1300,6 @@ input[type="password"]:focus { outline: none; border-color: var(--border-hover);
   transform: scale(0.92);
   pointer-events: none;
 }
-@media (prefers-reduced-motion: reduce) {
-  .slot-rect { transition: none !important; }
-}
 .slot-rect.is-focused {
   z-index: 40 !important;
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.36), 0 0 0 1px rgba(255, 255, 255, 0.22);
