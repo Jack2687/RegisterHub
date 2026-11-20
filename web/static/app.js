@@ -1360,6 +1360,7 @@
   // ==================== 7. Layout (Full 6 Presets + Zoom + Real Calibrate & Demo) ====================
   let layoutData = null;
   let layoutPresetKey = 'single';
+  const layoutSlotExitTimers = new Map();
 
   const PRESET_META = {
     single: { label: '1窗 · 全屏', concurrency: 1, getBlock: (g) => g?.single_concurrency },
@@ -1369,6 +1370,21 @@
     hex_edge: { label: '6窗 · 贴边六宫格', concurrency: 6, applyOpts: { hex_mode: 'edge_3x2' }, getBlock: (g) => g?.hex_presets?.edge_3x2 },
     hex_wing: { label: '6窗 · 八字展翼', concurrency: 6, applyOpts: { hex_mode: 'wing_cascade' }, getBlock: (g) => g?.hex_presets?.wing_cascade },
   };
+
+  function setHoveredLayoutSlot(slotKey) {
+    const canvas = $('#layout-canvas');
+    const list = $('#layout-slot-list');
+    if (canvas) {
+      canvas.querySelectorAll('.slot-rect').forEach((el) => {
+        el.classList.toggle('is-hovered', Boolean(slotKey) && el.dataset.slot === slotKey);
+      });
+    }
+    if (list) {
+      list.querySelectorAll('.layout-slot-row').forEach((el) => {
+        el.classList.toggle('is-hovered', Boolean(slotKey) && el.dataset.slot === slotKey);
+      });
+    }
+  }
 
   function renderLayoutCanvas() {
     const g = layoutData || {};
@@ -1406,37 +1422,102 @@
     const canvas = $('#layout-canvas');
     canvas.style.aspectRatio = `${waW} / ${waH}`;
     if (!slots.length) {
+      layoutSlotExitTimers.forEach((t) => clearTimeout(t));
+      layoutSlotExitTimers.clear();
       canvas.innerHTML = `<div class="empty-box" style="height:100%;display:flex;align-items:center;justify-content:center">尚未生成视窗配置，点击右上角「一键重算 6 套布局」。</div>`;
     } else {
-      canvas.innerHTML = slots
-        .map((s, i) => {
-          const leftPct = Math.max(0, Math.min(96, ((s.x - waX) / waW) * 100));
-          const topPct = Math.max(0, Math.min(96, ((s.y - waY) / waH) * 100));
-          const wPct = Math.max(8, Math.min(100 - leftPct, (s.width / waW) * 100));
-          const hPct = Math.max(12, Math.min(100 - topPct, (s.height / waH) * 100));
-          const zPct = Math.round((s.zoom || 1) * 100);
-          return `
-            <div class="slot-rect c${i % 6}" style="left:${leftPct}%;top:${topPct}%;width:${wPct}%;height:${hPct}%;z-index:${10 + i}">
-              <div class="slot-head"><span>${escapeHtml(s.name || `Slot #${i + 1}`)}</span><span class="slot-zoom mono">${zPct}%</span></div>
-              <div class="slot-dim mono">${s.width}×${s.height} @ (${s.x},${s.y})</div>
-            </div>`;
-        })
-        .join('');
+      const emptyEl = canvas.querySelector('.empty-box');
+      if (emptyEl) emptyEl.remove();
+
+      const activeKeys = new Set(slots.map((s, i) => String(s.slot ?? i)));
+
+      // Smoothly exit slots no longer in this preset
+      canvas.querySelectorAll('.slot-rect').forEach((el) => {
+        const key = el.dataset.slot || '';
+        if (!activeKeys.has(key)) {
+          el.classList.remove('is-hovered');
+          el.classList.add('slot-exit');
+          if (!layoutSlotExitTimers.has(key)) {
+            const timer = setTimeout(() => {
+              layoutSlotExitTimers.delete(key);
+              el.remove();
+            }, 320);
+            layoutSlotExitTimers.set(key, timer);
+          }
+        }
+      });
+
+      // Reuse existing slot DOM nodes in place so CSS transitions glide smoothly
+      slots.forEach((s, i) => {
+        const key = String(s.slot ?? i);
+        if (layoutSlotExitTimers.has(key)) {
+          clearTimeout(layoutSlotExitTimers.get(key));
+          layoutSlotExitTimers.delete(key);
+        }
+
+        const leftPct = Math.max(0, Math.min(96, ((s.x - waX) / waW) * 100));
+        const topPct = Math.max(0, Math.min(96, ((s.y - waY) / waH) * 100));
+        const wPct = Math.max(8, Math.min(100 - leftPct, (s.width / waW) * 100));
+        const hPct = Math.max(12, Math.min(100 - topPct, (s.height / waH) * 100));
+        const zPct = Math.round((s.zoom || 1) * 100);
+        const titleText = s.name || `Slot #${i + 1}`;
+        const dimText = `${s.width}×${s.height} @ (${s.x},${s.y})`;
+
+        let el = canvas.querySelector(`.slot-rect[data-slot="${CSS.escape(key)}"]`);
+        const isNew = !el;
+        if (isNew) {
+          el = document.createElement('div');
+          el.dataset.slot = key;
+          el.className = `slot-rect c${i % 6} slot-enter`;
+          el.innerHTML = `<div class="slot-head"><span class="slot-title"></span><span class="slot-zoom mono"></span></div><div class="slot-dim mono"></div>`;
+          el.addEventListener('mouseenter', () => setHoveredLayoutSlot(key));
+          el.addEventListener('mouseleave', () => setHoveredLayoutSlot(''));
+          canvas.appendChild(el);
+        } else {
+          el.className = `slot-rect c${i % 6}`;
+        }
+
+        el.style.left = `${leftPct}%`;
+        el.style.top = `${topPct}%`;
+        el.style.width = `${wPct}%`;
+        el.style.height = `${hPct}%`;
+        el.style.zIndex = String(10 + i);
+        const titleEl = el.querySelector('.slot-title');
+        const zoomEl = el.querySelector('.slot-zoom');
+        const dimEl = el.querySelector('.slot-dim');
+        if (titleEl) titleEl.textContent = titleText;
+        if (zoomEl) zoomEl.textContent = `${zPct}%`;
+        if (dimEl) dimEl.textContent = dimText;
+
+        if (isNew) {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              el.classList.remove('slot-enter');
+            });
+          });
+        }
+      });
     }
 
     const curZoomPct = slots.length ? Math.round((slots[0].zoom || 1) * 100) : 100;
     $('#layout-zoom-range').value = String(Math.max(45, Math.min(125, curZoomPct)));
     $('#layout-zoom-val').textContent = `${curZoomPct}%`;
 
-    $('#layout-slot-list').innerHTML = slots
+    const listEl = $('#layout-slot-list');
+    listEl.innerHTML = slots
       .map(
-        (s) => `
-        <div class="layout-slot-row">
+        (s, i) => `
+        <div class="layout-slot-row" data-slot="${escapeHtml(String(s.slot ?? i))}">
           <span>${escapeHtml(s.name)}</span>
           <span class="mono muted-small">${s.width}×${s.height} · ${Math.round((s.zoom || 1) * 100)}%</span>
         </div>`
       )
       .join('');
+    listEl.querySelectorAll('.layout-slot-row').forEach((row) => {
+      const key = row.dataset.slot || '';
+      row.addEventListener('mouseenter', () => setHoveredLayoutSlot(key));
+      row.addEventListener('mouseleave', () => setHoveredLayoutSlot(''));
+    });
 
     const defBtn = $('#btn-set-default-mode');
     if (meta.applyOpts) {
@@ -1474,7 +1555,11 @@
   });
 
   $('#layout-zoom-range')?.addEventListener('input', (e) => {
-    $('#layout-zoom-val').textContent = `${e.target.value}%`;
+    const val = `${e.target.value}%`;
+    $('#layout-zoom-val').textContent = val;
+    $('#layout-canvas')?.querySelectorAll('.slot-zoom').forEach((el) => {
+      el.textContent = val;
+    });
   });
 
   $('#btn-save-zoom')?.addEventListener('click', async () => {
