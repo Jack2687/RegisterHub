@@ -17,7 +17,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=motion2" />
+  <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
   <div id="app-shell" class="app-shell">
@@ -770,7 +770,7 @@
                     </div>
                   </div>
 
-                  <button type="button" id="btn-set-default-mode" class="btn btn-secondary btn-sm hidden" style="width:100%;margin-bottom:10px">设为默认 4/6 窗形态</button>
+                  <button type="button" id="btn-set-default-mode" class="btn btn-secondary btn-sm" style="width:100%;margin-bottom:10px" disabled>该档位为唯一形态（默认生效）</button>
 
                   <div class="divider"></div>
                   <div class="sub-head">桌面真机交互标定 (--calibrate)</div>
@@ -1048,6 +1048,6 @@
   </div>
 
   <div id="toast" class="toast hidden"></div>
-  <script src="/static/app.js?v=motion2"></script>
+  <script src="/static/app.js"></script>
 </body>
 </html>

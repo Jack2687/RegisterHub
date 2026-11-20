@@ -405,19 +405,7 @@ pre,
 }
 
 .view { display: none; }
-.view.active {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  animation: viewFadeIn 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-@keyframes viewFadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .view.active { animation: none !important; }
-}
+.view.active { display: flex; flex-direction: column; gap: 16px; }
 
 /* ==================== Cards, KPIs, Badges, Buttons ==================== */
 .card {
@@ -1186,7 +1174,7 @@ input[type="password"]:focus { outline: none; border-color: var(--border-hover);
   display: grid;
   grid-template-columns: minmax(0, 1.8fr) minmax(260px, 1fr);
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
 }
 @media (max-width: 960px) {
   .layout-workbench { grid-template-columns: 1fr; }
@@ -1195,9 +1183,18 @@ input[type="password"]:focus { outline: none; border-color: var(--border-hover);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   font-size: 11.5px;
   color: var(--text-muted);
   margin-bottom: 8px;
+}
+.layout-canvas-meta > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.layout-canvas-meta > span:last-child {
+  flex-shrink: 0;
 }
 .layout-canvas {
   position: relative;
@@ -1220,44 +1217,6 @@ input[type="password"]:focus { outline: none; border-color: var(--border-hover);
   justify-content: space-between;
   backdrop-filter: blur(2px);
   overflow: hidden;
-  will-change: left, top, width, height, transform, opacity;
-  transition:
-    left 0.38s cubic-bezier(0.22, 1, 0.36, 1),
-    top 0.38s cubic-bezier(0.22, 1, 0.36, 1),
-    width 0.38s cubic-bezier(0.22, 1, 0.36, 1),
-    height 0.38s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.28s ease,
-    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 0.2s ease,
-    background-color 0.2s ease,
-    box-shadow 0.2s ease;
-}
-.slot-rect.slot-enter {
-  opacity: 0;
-  transform: scale(0.92);
-}
-.slot-rect.slot-exit {
-  opacity: 0;
-  transform: scale(0.92);
-  pointer-events: none;
-}
-.slot-rect.is-hovered {
-  z-index: 40 !important;
-  transform: scale(1.015);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.36), 0 0 0 1px rgba(255, 255, 255, 0.22);
-}
-html.light .slot-rect.is-hovered {
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16), 0 0 0 1px rgba(15, 23, 42, 0.12);
-}
-.layout-slot-row {
-  transition: border-color 0.15s ease, background-color 0.15s ease;
-}
-.layout-slot-row.is-hovered {
-  border-color: var(--border-hover);
-  background: var(--bg-hover);
-}
-@media (prefers-reduced-motion: reduce) {
-  .slot-rect { transition: none !important; }
 }
 .slot-rect.c0 { border-color: rgba(14, 165, 233, 0.85); background: rgba(14, 165, 233, 0.16); }
 .slot-rect.c1 { border-color: rgba(16, 185, 129, 0.85); background: rgba(16, 185, 129, 0.16); }
@@ -1272,22 +1231,35 @@ html.light .slot-zoom { background: rgba(255, 255, 255, 0.88); color: #09090b; }
 .slot-dim { font-size: 10px; opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .layout-inspector {
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--border-hairline);
   border-radius: 12px;
   background: var(--bg-muted);
   padding: 14px;
 }
-.layout-insp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.layout-slot-list { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+.layout-insp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.layout-slot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 192px;
+  min-height: 192px;
+  max-height: 192px;
+  overflow-y: auto;
+}
 .layout-slot-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  height: 27px;
+  flex-shrink: 0;
+  box-sizing: border-box;
   background: var(--bg-input);
   border: 1px solid var(--border-hairline);
   border-radius: 8px;
-  padding: 6px 9px;
+  padding: 0 9px;
   font-size: 11px;
 }
 
