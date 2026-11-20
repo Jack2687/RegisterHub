@@ -765,7 +765,7 @@
                       <span id="layout-zoom-val" class="mono badge emerald">100%</span>
                     </div>
                     <div class="actions" style="flex-wrap:nowrap;margin-top:4px">
-                      <input id="layout-zoom-range" type="range" min="45" max="125" step="5" value="100" style="flex:1;accent-color:#10b981;cursor:pointer" />
+                      <input id="layout-zoom-range" class="lite-range" type="range" min="45" max="125" step="5" value="100" />
                       <button type="button" id="btn-save-zoom" class="btn btn-primary btn-sm">保存缩放</button>
                     </div>
                   </div>
@@ -781,7 +781,7 @@
                 </div>
               </div>
             </div>
-            <div id="layout-summary" class="check-grid"></div>
+            <div id="layout-summary" class="layout-summary-grid"></div>
           </section>
 
           <!-- ==================== 8. 运行配置 Config (+ Single IMAP + Self Tests) ==================== -->
@@ -899,6 +899,9 @@
                   </div>
                   <button type="button" id="btn-agent-new-session" class="btn btn-secondary btn-sm">+ 新会话</button>
                 </div>
+                <div class="search-wrap agent-session-search-wrap">
+                  <input id="agent-session-search" type="text" placeholder="搜索会话标题或目标 URL…" autocomplete="off" />
+                </div>
                 <div id="agent-session-list" class="agent-session-list">
                   <div class="muted-small" style="padding:12px;text-align:center">暂无历史会话</div>
                 </div>
@@ -935,7 +938,7 @@
                 <div class="console-head">
                   <div class="console-status-wrap">
                     <span id="agent-status-dot" class="dot neutral"></span>
-                    <span id="agent-chat-title" style="font-weight:600;color:var(--text-primary)">未选择会话</span>
+                    <span id="agent-chat-title" class="agent-chat-title" title="双击重命名当前会话">未选择会话</span>
                     <span id="agent-status-badge" class="badge neutral">idle</span>
                   </div>
                   <div class="actions" style="flex-wrap:nowrap;min-width:0">

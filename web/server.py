@@ -1126,7 +1126,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                                 "type": "status",
                                 "ts": time.strftime("%H:%M:%S"),
                                 "status": sess.status,
-                                "error": last_error if sess.status == "error" else "",
+                                "error": last_error if sess.status in ("error", "stopped") else "",
                                 "seq": seq_cursor,
                                 "replay": False,
                                 "eof": True,
@@ -1666,6 +1666,30 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "Agent session not found"}, status=404)
                 return
             self._send_json(res)
+            return
+
+        self._send_json({"error": "Not Found"}, status=404)
+
+    def do_PATCH(self) -> None:
+        path = urlparse(self.path).path
+        body = self._read_json()
+
+        m_ag_patch = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)", path)
+        if m_ag_patch:
+            sid = m_ag_patch.group(1)
+            raw_title = body.get("title")
+            if not isinstance(raw_title, str):
+                self._send_json({"ok": False, "error": "会话标题不能为空"}, status=400)
+                return
+            try:
+                summary = agent_manager.rename_session(sid, raw_title)
+            except ValueError as ve:
+                self._send_json({"ok": False, "error": str(ve)}, status=400)
+                return
+            if summary is None:
+                self._send_json({"ok": False, "error": "Agent session not found"}, status=404)
+                return
+            self._send_json({"ok": True, "session": summary})
             return
 
         self._send_json({"error": "Not Found"}, status=404)

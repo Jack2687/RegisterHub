@@ -916,6 +916,7 @@ class AgentSession:
         target_url: str = "",
         *,
         status: str = "idle",
+        last_error: str = "",
         created_at: Optional[str] = None,
         updated_at: Optional[str] = None,
         plan: Optional[List[Dict[str, str]]] = None,
@@ -928,6 +929,7 @@ class AgentSession:
         self.title = title or "新 AI 直跑会话"
         self.target_url = target_url
         self.status = status
+        self.last_error = str(last_error or "")
         self.created_at = created_at or now_s
         self.updated_at = updated_at or now_s
         self.plan: List[Dict[str, str]] = list(plan or [])
@@ -945,6 +947,8 @@ class AgentSession:
         self._subs: List[queue.Queue[Optional[Dict[str, Any]]]] = []
         self._active_proc: Optional[subprocess.Popen[str]] = None
         self._active_pid: Optional[int] = None
+        self._active_tool_name: Optional[str] = None
+        self._active_tool_started_at: Optional[float] = None
 
     def is_stop_requested(self) -> bool:
         with self._lock:
@@ -988,6 +992,25 @@ class AgentSession:
             if self._active_proc is proc:
                 self._active_proc = None
                 self._active_pid = None
+
+    def set_active_tool(
+        self,
+        tool_name: str,
+        started_at: float,
+        stop_ev: Optional[threading.Event] = None,
+    ) -> None:
+        with self._lock:
+            if stop_ev is not None and (stop_ev.is_set() or self._stop_event is not stop_ev):
+                return
+            self._active_tool_name = str(tool_name or "").strip() or None
+            self._active_tool_started_at = started_at
+
+    def clear_active_tool(self, stop_ev: Optional[threading.Event] = None) -> None:
+        with self._lock:
+            if stop_ev is not None and self._stop_event is not stop_ev:
+                return
+            self._active_tool_name = None
+            self._active_tool_started_at = None
 
     def emit(self, event_type: str, **payload: Any) -> Dict[str, Any]:
         ev = {
@@ -1033,18 +1056,27 @@ class AgentSession:
                 self._subs.remove(q)
 
     def stop(self) -> str:
+        abort_note = ""
         with self._lock:
             self._stop_event.set()
             pid = self._active_pid
             proc = self._active_proc
+            tool_name = self._active_tool_name
+            tool_started = self._active_tool_started_at
+            self._active_tool_name = None
+            self._active_tool_started_at = None
             was_running = self.status == "running"
             if was_running:
                 self.status = "stopped"
+                if tool_name:
+                    elapsed = max(0.0, time.perf_counter() - tool_started) if tool_started is not None else 0.0
+                    abort_note = f"已手动停止（中断时正在执行工具 {tool_name}，已耗时 {elapsed:.1f}s）"
+                self.last_error = abort_note
         self.drain_steers()
         if pid or proc:
             _kill_process_tree(pid, proc)
         if was_running:
-            self.emit("status", status="stopped", error="")
+            self.emit("status", status="stopped", error=abort_note)
             self.persist()
             self.close_streams()
             return "stopped"
@@ -1057,6 +1089,7 @@ class AgentSession:
                 "title": self.title,
                 "target_url": self.target_url,
                 "status": self.status,
+                "error": self.last_error,
                 "created_at": self.created_at,
                 "updated_at": self.updated_at,
                 "plan": list(self.plan),
@@ -1071,6 +1104,7 @@ class AgentSession:
                 "title": self.title,
                 "target_url": self.target_url,
                 "status": self.status,
+                "error": self.last_error,
                 "created_at": self.created_at,
                 "updated_at": self.updated_at,
                 "plan": list(self.plan),
@@ -1189,6 +1223,9 @@ class AgentSession:
             elif et == "status" and ev.get("status") == "error" and ev.get("error"):
                 lines.append(f"> **运行异常 ({ts})**: {ev['error']}")
                 lines.append("")
+            elif et == "status" and ev.get("status") == "stopped" and ev.get("error"):
+                lines.append(f"> **手动停止 ({ts})**: {ev['error']}")
+                lines.append("")
 
         return "\n".join(lines).rstrip() + "\n"
 
@@ -1202,6 +1239,7 @@ class AgentSession:
                 "title": self.title,
                 "target_url": self.target_url,
                 "status": self.status,
+                "error": self.last_error,
                 "created_at": self.created_at,
                 "updated_at": self.updated_at,
                 "plan": list(self.plan),
@@ -1230,6 +1268,7 @@ class AgentSession:
             title=str(data.get("title") or ""),
             target_url=str(data.get("target_url") or ""),
             status=status,
+            last_error=str(data.get("error") or ""),
             created_at=data.get("created_at"),
             updated_at=data.get("updated_at"),
             plan=data.get("plan") if isinstance(data.get("plan"), list) else [],
@@ -1381,12 +1420,27 @@ class SingleAgentManager:
                 pass
         return existed
 
+    def rename_session(self, session_id: str, title: str) -> Optional[Dict[str, Any]]:
+        clean_title = re.sub(r"\s+", " ", str(title or "")).strip()[:80]
+        if not clean_title:
+            raise ValueError("会话标题不能为空")
+        sess = self.get_session(session_id)
+        if sess is None:
+            return None
+        with sess._lock:
+            sess.title = clean_title
+            sess.updated_at = time.strftime("%Y-%m-%d %H:%M:%S")
+        sess.persist()
+        return sess.to_summary()
+
     def stop_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         sess = self.get_session(session_id)
         if sess is None:
             return None
         st = sess.stop()
-        return {"ok": True, "id": session_id, "status": st}
+        with sess._lock:
+            err = sess.last_error
+        return {"ok": True, "id": session_id, "status": st, "error": err}
 
     def export_session_markdown(self, session_id: str) -> Optional[Dict[str, Any]]:
         sess = self.get_session(session_id)
@@ -1439,6 +1493,9 @@ class SingleAgentManager:
                 with sess._lock:
                     sess._stop_event = turn_stop_ev
                     sess.status = "running"
+                    sess.last_error = ""
+                    sess._active_tool_name = None
+                    sess._active_tool_started_at = None
                     if clean_url:
                         sess.target_url = clean_url
                         if sess.title.startswith("AI 会话"):
@@ -1507,6 +1564,9 @@ class SingleAgentManager:
                 if stop_ev.is_set() or sess._stop_event is not stop_ev:
                     return False
                 sess.status = status
+                sess.last_error = str(error or "")
+                sess._active_tool_name = None
+                sess._active_tool_started_at = None
         sess.emit("status", status=status, error=error)
         sess.persist()
         sess.close_streams()
@@ -1611,13 +1671,17 @@ class SingleAgentManager:
 
                     sess.emit("tool_start", call_id=call_id, name=fn_name, args=parsed_args)
                     t_tool = time.perf_counter()
-                    if parse_err:
-                        tool_res: Dict[str, Any] = {"ok": False, "error": parse_err}
-                    else:
-                        try:
-                            tool_res = _execute_tool_call(fn_name, parsed_args, sess, stop_ev=stop_ev)
-                        except Exception as te:
-                            tool_res = {"ok": False, "error": f"工具执行异常: {te}"}
+                    sess.set_active_tool(fn_name, t_tool, stop_ev=stop_ev)
+                    try:
+                        if parse_err:
+                            tool_res: Dict[str, Any] = {"ok": False, "error": parse_err}
+                        else:
+                            try:
+                                tool_res = _execute_tool_call(fn_name, parsed_args, sess, stop_ev=stop_ev)
+                            except Exception as te:
+                                tool_res = {"ok": False, "error": f"工具执行异常: {te}"}
+                    finally:
+                        sess.clear_active_tool(stop_ev=stop_ev)
                     dur_ms = round((time.perf_counter() - t_tool) * 1000, 1)
 
                     if stop_ev.is_set():
@@ -1703,6 +1767,11 @@ class SingleAgentManager:
 
 
 agent_manager = SingleAgentManager()
+
+
+def rename_session(session_id: str, title: str) -> Optional[Dict[str, Any]]:
+    """Rename an agent session title (<= 80 chars, persisted atomically)."""
+    return agent_manager.rename_session(session_id, title)
 
 
 def export_session_markdown(session_id: str) -> Optional[Dict[str, Any]]:

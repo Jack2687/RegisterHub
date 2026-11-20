@@ -1360,6 +1360,8 @@
   // ==================== 7. Layout (Full 6 Presets + Zoom + Real Calibrate & Demo) ====================
   let layoutData = null;
   let layoutPresetKey = 'single';
+  let layoutHoveredSlotIdx = null;
+  let layoutFocusedSlotIdx = null;
 
   const PRESET_META = {
     single: { label: '1窗 · 全屏', concurrency: 1, getBlock: (g) => g?.single_concurrency },
@@ -1370,6 +1372,49 @@
     hex_wing: { label: '6窗 · 八字展翼', concurrency: 6, applyOpts: { hex_mode: 'wing_cascade' }, getBlock: (g) => g?.hex_presets?.wing_cascade },
   };
 
+  function syncLayoutRangeFill(val) {
+    const slider = $('#layout-zoom-range');
+    if (!slider) return;
+    const min = Number(slider.min || 45);
+    const max = Number(slider.max || 125);
+    const cur = Math.max(min, Math.min(max, Number(val ?? slider.value) || 100));
+    const pct = max > min ? ((cur - min) / (max - min)) * 100 : 0;
+    slider.style.setProperty('--range-pct', `${pct.toFixed(2)}%`);
+  }
+
+  function syncLayoutSlotFocus() {
+    const activeIdx = layoutHoveredSlotIdx !== null ? layoutHoveredSlotIdx : layoutFocusedSlotIdx;
+    $$('#layout-canvas .slot-rect[data-slot-idx]').forEach((el) => {
+      el.classList.toggle('is-focused', activeIdx !== null && Number(el.dataset.slotIdx) === activeIdx);
+    });
+    $$('#layout-slot-list .layout-slot-row.active-slot[data-slot-idx]').forEach((el) => {
+      el.classList.toggle('is-focused', activeIdx !== null && Number(el.dataset.slotIdx) === activeIdx);
+    });
+  }
+
+  function bindLayoutSlotInteractions() {
+    const bindTarget = (el) => {
+      const idx = Number(el.dataset.slotIdx);
+      el.addEventListener('mouseenter', () => {
+        layoutHoveredSlotIdx = idx;
+        syncLayoutSlotFocus();
+      });
+      el.addEventListener('mouseleave', () => {
+        if (layoutHoveredSlotIdx === idx) {
+          layoutHoveredSlotIdx = null;
+          syncLayoutSlotFocus();
+        }
+      });
+      el.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        layoutFocusedSlotIdx = layoutFocusedSlotIdx === idx ? null : idx;
+        syncLayoutSlotFocus();
+      });
+    };
+    $$('#layout-canvas .slot-rect[data-slot-idx]').forEach(bindTarget);
+    $$('#layout-slot-list .layout-slot-row.active-slot[data-slot-idx]').forEach(bindTarget);
+  }
+
   function renderLayoutCanvas() {
     const g = layoutData || {};
     const meta = PRESET_META[layoutPresetKey] || PRESET_META.single;
@@ -1377,6 +1422,13 @@
     const slots = block?.slots || [];
     const activeQuad = String(g.quad_mode || 'centered_compact');
     const activeHex = String(g.hex_mode || 'wing_cascade');
+
+    if (layoutFocusedSlotIdx !== null && layoutFocusedSlotIdx >= slots.length) {
+      layoutFocusedSlotIdx = null;
+    }
+    if (layoutHoveredSlotIdx !== null && layoutHoveredSlotIdx >= slots.length) {
+      layoutHoveredSlotIdx = null;
+    }
 
     $$('#layout-preset-tabs [data-preset]').forEach((btn) => {
       const k = btn.dataset.preset;
@@ -1415,28 +1467,48 @@
           const wPct = Math.max(8, Math.min(100 - leftPct, (s.width / waW) * 100));
           const hPct = Math.max(12, Math.min(100 - topPct, (s.height / waH) * 100));
           const zPct = Math.round((s.zoom || 1) * 100);
+          const colorCls = `c${i % 6}`;
           return `
-            <div class="slot-rect c${i % 6}" style="left:${leftPct}%;top:${topPct}%;width:${wPct}%;height:${hPct}%;z-index:${10 + i}">
-              <div class="slot-head"><span>${escapeHtml(s.name || `Slot #${i + 1}`)}</span><span class="slot-zoom mono">${zPct}%</span></div>
-              <div class="slot-dim mono">${s.width}×${s.height} @ (${s.x},${s.y})</div>
+            <div class="slot-rect ${colorCls}" data-slot-idx="${i}" style="left:${leftPct}%;top:${topPct}%;width:${wPct}%;height:${hPct}%;z-index:${10 + i}">
+              <div class="slot-head">
+                <span class="slot-title"><i class="slot-dot ${colorCls}"></i><span>${escapeHtml(s.name || `Slot #${i + 1}`)}</span></span>
+                <span class="slot-zoom mono">${zPct}%</span>
+              </div>
+              <div class="slot-body">
+                <div class="slot-dim mono">${s.width}×${s.height} @ (${s.x},${s.y})</div>
+              </div>
             </div>`;
         })
         .join('');
     }
 
     const curZoomPct = slots.length ? Math.round((slots[0].zoom || 1) * 100) : 100;
-    $('#layout-zoom-range').value = String(Math.max(45, Math.min(125, curZoomPct)));
+    const clampedZoom = Math.max(45, Math.min(125, curZoomPct));
+    $('#layout-zoom-range').value = String(clampedZoom);
     $('#layout-zoom-val').textContent = `${curZoomPct}%`;
+    syncLayoutRangeFill(clampedZoom);
 
-    $('#layout-slot-list').innerHTML = slots
-      .map(
-        (s) => `
-        <div class="layout-slot-row">
-          <span>${escapeHtml(s.name)}</span>
-          <span class="mono muted-small">${s.width}×${s.height} · ${Math.round((s.zoom || 1) * 100)}%</span>
-        </div>`
-      )
-      .join('');
+    const fixedRows = [];
+    for (let i = 0; i < 6; i += 1) {
+      if (i < slots.length) {
+        const s = slots[i];
+        const colorCls = `c${i % 6}`;
+        fixedRows.push(`
+          <button type="button" class="layout-slot-row active-slot ${colorCls}" data-slot-idx="${i}" title="悬停或点击置顶预览 ${escapeHtml(s.name || `槽位 #${i + 1}`)}">
+            <span class="slot-row-name"><i class="slot-dot ${colorCls}"></i><span>${escapeHtml(s.name || `槽位 #${i + 1}`)}</span></span>
+            <span class="slot-row-meta mono">${s.width}×${s.height} · ${Math.round((s.zoom || 1) * 100)}%</span>
+          </button>`);
+      } else {
+        fixedRows.push(`
+          <div class="layout-slot-row inactive-slot" aria-disabled="true">
+            <span class="slot-row-name"><i class="slot-dot muted"></i><span>槽位 #${i + 1}</span></span>
+            <span class="slot-row-meta">当前档位未启用</span>
+          </div>`);
+      }
+    }
+    $('#layout-slot-list').innerHTML = fixedRows.join('');
+    bindLayoutSlotInteractions();
+    syncLayoutSlotFocus();
 
     const defBtn = $('#btn-set-default-mode');
     const isCurDef =
@@ -1464,6 +1536,13 @@
       .join('');
   }
 
+  $('#layout-canvas')?.addEventListener('click', () => {
+    if (layoutFocusedSlotIdx !== null) {
+      layoutFocusedSlotIdx = null;
+      syncLayoutSlotFocus();
+    }
+  });
+
   async function loadLayout() {
     try {
       const res = await fetch('/api/layout');
@@ -1476,12 +1555,15 @@
   $$('#layout-preset-tabs [data-preset]').forEach((btn) => {
     btn.addEventListener('click', () => {
       layoutPresetKey = btn.dataset.preset;
+      layoutHoveredSlotIdx = null;
+      layoutFocusedSlotIdx = null;
       renderLayoutCanvas();
     });
   });
 
   $('#layout-zoom-range')?.addEventListener('input', (e) => {
     $('#layout-zoom-val').textContent = `${e.target.value}%`;
+    syncLayoutRangeFill(e.target.value);
   });
 
   $('#btn-save-zoom')?.addEventListener('click', async () => {
@@ -1884,6 +1966,7 @@
   // ==================== 10. AI Direct-Run Workbench ====================
   let agentSessionsCache = [];
   let activeAgentSessionId = '';
+  let editingAgentSessionId = '';
   let agentEventSource = null;
   let agentRunning = false;
   let agentEvents = [];
@@ -1961,6 +2044,58 @@
     if ($('#agent-tok-total')) $('#agent-tok-total').textContent = String(agentUsage.total_tokens);
   }
 
+  function startAgentSessionRename(sid) {
+    if (!sid) return;
+    editingAgentSessionId = sid;
+    renderAgentSessions();
+    const inp = $(`#agent-session-list [data-ag-rename-input="${CSS.escape(sid)}"]`);
+    if (inp) {
+      inp.scrollIntoView({ block: 'nearest' });
+      inp.focus();
+      inp.select();
+    }
+  }
+
+  async function commitAgentSessionRename(sid, rawTitle) {
+    const clean = String(rawTitle || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    const existing = agentSessionsCache.find((x) => x.id === sid);
+    editingAgentSessionId = '';
+    if (!clean) {
+      toast('会话标题不能为空');
+      renderAgentSessions();
+      return;
+    }
+    if (existing && existing.title === clean) {
+      renderAgentSessions();
+      return;
+    }
+    try {
+      const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sid)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: clean }),
+      });
+      const d = await res.json();
+      if (!res.ok || !d.ok) {
+        toast(d.error || '重命名失败');
+        renderAgentSessions();
+        return;
+      }
+      if (d.session) {
+        const idx = agentSessionsCache.findIndex((x) => x.id === sid);
+        if (idx >= 0) agentSessionsCache[idx] = { ...agentSessionsCache[idx], ...d.session };
+        if (activeAgentSessionId === sid) {
+          $('#agent-chat-title').textContent = d.session.title || sid;
+        }
+      }
+      renderAgentSessions();
+      toast('会话已重命名');
+    } catch (e) {
+      toast('重命名异常: ' + e.message);
+      renderAgentSessions();
+    }
+  }
+
   function renderAgentSessions() {
     const box = $('#agent-session-list');
     if (!box) return;
@@ -1968,28 +2103,77 @@
       box.innerHTML = `<div class="muted-small" style="padding:12px;text-align:center">暂无历史会话</div>`;
       return;
     }
-    box.innerHTML = agentSessionsCache
+    const q = ($('#agent-session-search')?.value || '').trim().toLowerCase();
+    const filtered = q
+      ? agentSessionsCache.filter((s) => `${s.title || ''} ${s.target_url || ''} ${s.id || ''}`.toLowerCase().includes(q))
+      : agentSessionsCache;
+    if (!filtered.length) {
+      box.innerHTML = `<div class="muted-small" style="padding:12px;text-align:center">未匹配到包含 “${escapeHtml(q)}” 的会话</div>`;
+      return;
+    }
+    box.innerHTML = filtered
       .map((s) => {
         const activeCls = s.id === activeAgentSessionId ? 'active' : '';
         const pillCls = s.status === 'done' ? 'pass' : s.status === 'running' ? 'warn' : s.status === 'error' ? 'fail' : 'neutral';
+        const isEditing = editingAgentSessionId === s.id;
+        const titleHtml = isEditing
+          ? `<input type="text" class="agent-rename-input" maxlength="80" value="${escapeHtml(s.title)}" data-ag-rename-input="${escapeHtml(s.id)}" />`
+          : `<div class="agent-session-title" data-ag-title="${escapeHtml(s.id)}" title="${escapeHtml(s.title)}（双击重命名）">${escapeHtml(s.title)}</div>`;
         return `
           <div class="agent-session-row ${activeCls}" data-ag-select="${escapeHtml(s.id)}">
             <div class="agent-session-main">
-              <div class="agent-session-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</div>
+              ${titleHtml}
               <div class="agent-session-meta">
                 <span class="pill ${pillCls}" style="padding:0 6px;font-size:10px">${escapeHtml(s.status)}</span>
                 <span class="mono">${escapeHtml((s.updated_at || s.created_at || '').slice(5, 16))}</span>
               </div>
             </div>
-            <button type="button" class="agent-session-del" title="删除会话" data-ag-del="${escapeHtml(s.id)}">×</button>
+            <div class="agent-session-actions">
+              <button type="button" class="agent-session-btn" title="重命名会话" data-ag-rename="${escapeHtml(s.id)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+              <button type="button" class="agent-session-del" title="删除会话" data-ag-del="${escapeHtml(s.id)}">×</button>
+            </div>
           </div>`;
       })
       .join('');
 
     box.querySelectorAll('[data-ag-select]').forEach((row) => {
       row.addEventListener('click', (ev) => {
-        if (ev.target.closest('[data-ag-del]')) return;
+        if (ev.target.closest('[data-ag-del], [data-ag-rename], [data-ag-rename-input]')) return;
         selectAgentSession(row.dataset.agSelect);
+      });
+    });
+    box.querySelectorAll('[data-ag-title]').forEach((el) => {
+      el.addEventListener('dblclick', (ev) => {
+        ev.stopPropagation();
+        startAgentSessionRename(el.dataset.agTitle);
+      });
+    });
+    box.querySelectorAll('[data-ag-rename]').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        startAgentSessionRename(btn.dataset.agRename);
+      });
+    });
+    box.querySelectorAll('[data-ag-rename-input]').forEach((inp) => {
+      let settled = false;
+      const sid = inp.dataset.agRenameInput;
+      inp.addEventListener('click', (ev) => ev.stopPropagation());
+      inp.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') {
+          ev.preventDefault();
+          settled = true;
+          editingAgentSessionId = '';
+          renderAgentSessions();
+        } else if (ev.key === 'Enter' && !ev.isComposing && ev.keyCode !== 229) {
+          ev.preventDefault();
+          settled = true;
+          commitAgentSessionRename(sid, inp.value);
+        }
+      });
+      inp.addEventListener('blur', () => {
+        if (settled) return;
+        settled = true;
+        commitAgentSessionRename(sid, inp.value);
       });
     });
     box.querySelectorAll('[data-ag-del]').forEach((btn) => {
@@ -1997,6 +2181,7 @@
         ev.stopPropagation();
         const sid = btn.dataset.agDel;
         if (!window.confirm('确认删除该 AI 会话记录？')) return;
+        if (editingAgentSessionId === sid) editingAgentSessionId = '';
         await fetch(`/api/agent/sessions/${encodeURIComponent(sid)}`, { method: 'DELETE' });
         if (activeAgentSessionId === sid) {
           closeAgentStream();
@@ -2014,6 +2199,17 @@
       });
     });
   }
+
+  $('#agent-session-search')?.addEventListener('input', renderAgentSessions);
+  $('#agent-chat-title')?.addEventListener('dblclick', () => {
+    if (!activeAgentSessionId) return;
+    const searchEl = $('#agent-session-search');
+    const rowVisible = $(`#agent-session-list [data-ag-select="${CSS.escape(activeAgentSessionId)}"]`);
+    if (!rowVisible && searchEl && searchEl.value) {
+      searchEl.value = '';
+    }
+    startAgentSessionRename(activeAgentSessionId);
+  });
 
   function formatToolPreview(args) {
     if (!args || typeof args !== 'object') return '';
@@ -2079,6 +2275,8 @@
         }
       } else if (ev.type === 'status' && ev.status === 'error' && ev.error) {
         items.push({ type: 'error_msg', ts: ev.ts || '', error: ev.error });
+      } else if (ev.type === 'status' && ev.status === 'stopped' && ev.error) {
+        items.push({ type: 'stopped_msg', ts: ev.ts || '', error: ev.error });
       }
     }
 
@@ -2110,17 +2308,24 @@
               <div class="chat-bubble">${escapeHtml(it.error)}</div>
             </div>`;
         }
+        if (it.type === 'stopped_msg') {
+          return `
+            <div class="chat-msg stopped">
+              <div class="chat-meta"><span class="badge amber">已手动停止</span><span class="mono">${escapeHtml(it.ts)}</span></div>
+              <div class="chat-bubble">${escapeHtml(it.error)}</div>
+            </div>`;
+        }
         if (it.type === 'tool') {
           const key = `${it.call_id}_${idx}`;
           const isOpen = openKeys.has(key) ? ' open' : '';
           const statePill = !it.done
-            ? `<span class="badge sky">执行中…</span>`
+            ? (agentRunning ? `<span class="badge sky">执行中…</span>` : `<span class="badge amber">已中止</span>`)
             : it.ok
               ? `<span class="badge emerald">完成</span>`
               : `<span class="badge rose">失败</span>`;
           const durTxt = it.duration_ms != null ? `<span class="mono muted-small">${it.duration_ms}ms</span>` : '';
           const argsJson = JSON.stringify(it.args || {}, null, 2);
-          const resJson = it.done ? JSON.stringify(it.result ?? {}, null, 2) : '等待工具返回…';
+          const resJson = it.done ? JSON.stringify(it.result ?? {}, null, 2) : (agentRunning ? '等待工具返回…' : '工具执行已被中止');
           return `
             <details class="tool-card" data-call-key="${escapeHtml(key)}"${isOpen}>
               <summary>
@@ -2173,7 +2378,7 @@
         loadAdapters();
         loadOverview();
         if (st === 'done') toast('AI 直跑本轮已完成');
-        else if (st === 'stopped') toast('AI 直跑已停止');
+        else if (st === 'stopped') toast(ev.error || 'AI 直跑已停止');
         else if (st === 'error') toast(`AI 直跑报错: ${ev.error || ''}`);
       }
     }
@@ -2236,7 +2441,9 @@
       if ($('#nav-badge-agent')) {
         $('#nav-badge-agent').classList.toggle('hidden', !activeId);
       }
-      renderAgentSessions();
+      if (!editingAgentSessionId || !document.activeElement?.matches('.agent-rename-input')) {
+        renderAgentSessions();
+      }
       if (autoReconnect && activeId) {
         await selectAgentSession(activeId);
       } else if (!activeAgentSessionId && agentSessionsCache.length && currentView === 'agent') {
@@ -2400,11 +2607,14 @@
 
   $('#btn-agent-stop')?.addEventListener('click', async () => {
     if (!activeAgentSessionId) return;
+    const sid = activeAgentSessionId;
     try {
-      await fetch(`/api/agent/sessions/${encodeURIComponent(activeAgentSessionId)}/stop`, { method: 'POST' });
-      setAgentRunningState(false, 'stopped');
+      const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sid)}/stop`, { method: 'POST' });
+      const d = await res.json();
+      setAgentRunningState(false, d.status || 'stopped');
       closeAgentStream();
-      toast('已发送 AI 直跑停止指令');
+      toast(d.error || '已发送 AI 直跑停止指令');
+      await selectAgentSession(sid);
       loadAgentSessions(false);
     } catch (e) {
       toast('停止异常: ' + e.message);

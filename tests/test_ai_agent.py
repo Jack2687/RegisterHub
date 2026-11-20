@@ -923,6 +923,166 @@ def test_agent_empty_nudge_budget_wrapup_steering_and_markdown_export(tmp_path, 
         srv.server_close()
 
 
+def test_agent_session_rename_patch_and_validation(tmp_path, monkeypatch):
+    sessions_dir = tmp_path / "agent_sessions"
+    monkeypatch.setattr(ai_agent, "AGENT_SESSIONS_DIR", sessions_dir)
+    monkeypatch.setattr(ai_agent.agent_manager, "_sessions", {})
+
+    srv, base = _start_ephemeral()
+    try:
+        # Verify Layout Workbench & Agent UI polish hooks exist in served HTML
+        with urllib.request.urlopen(f"{base}/", timeout=5) as r:
+            html = r.read().decode("utf-8")
+            assert 'id="layout-summary" class="layout-summary-grid"' in html
+            assert 'id="layout-zoom-range" class="lite-range"' in html
+            assert 'id="agent-session-search"' in html
+
+        st, cr = _req_json("POST", f"{base}/api/agent/sessions", {
+            "title": "初始会话名",
+            "target_url": "https://demo.example.com/register",
+        })
+        assert st == 200 and cr["ok"] is True
+        sid = cr["session"]["id"]
+
+        # 1. Valid PATCH rename with surrounding spaces & newline collapsed
+        st, rn = _req_json("PATCH", f"{base}/api/agent/sessions/{sid}", {
+            "title": "  自定义   新标题\n测试  ",
+        })
+        assert st == 200 and rn["ok"] is True
+        assert rn["session"]["id"] == sid
+        assert rn["session"]["title"] == "自定义 新标题 测试"
+
+        # Persisted atomically on disk and visible via GET
+        disk_obj = json.loads((sessions_dir / f"{sid}.json").read_text(encoding="utf-8"))
+        assert disk_obj["title"] == "自定义 新标题 测试"
+        st, detail = _req_json("GET", f"{base}/api/agent/sessions/{sid}")
+        assert st == 200 and detail["session"]["title"] == "自定义 新标题 测试"
+
+        # 2. >80 chars title trimmed cleanly to 80 chars
+        long_title = "A" * 120
+        st, rn_long = _req_json("PATCH", f"{base}/api/agent/sessions/{sid}", {"title": long_title})
+        assert st == 200 and rn_long["ok"] is True
+        assert len(rn_long["session"]["title"]) == 80
+        assert rn_long["session"]["title"] == "A" * 80
+
+        # 3. Empty / whitespace / non-string titles rejected with 400 without mutating title
+        for bad_payload in ({"title": ""}, {"title": "   \t\n  "}, {}, {"title": 12345}):
+            try:
+                _req_json("PATCH", f"{base}/api/agent/sessions/{sid}", bad_payload)
+                assert False, f"Expected 400 for payload {bad_payload!r}"
+            except urllib.error.HTTPError as he:
+                assert he.code == 400
+                err_body = json.loads(he.read().decode("utf-8"))
+                assert err_body["ok"] is False
+
+        st, detail_after = _req_json("GET", f"{base}/api/agent/sessions/{sid}")
+        assert st == 200 and detail_after["session"]["title"] == "A" * 80
+
+        # 4. Unknown session id returns 404
+        try:
+            _req_json("PATCH", f"{base}/api/agent/sessions/missing_sid_404", {"title": "Valid"})
+            assert False, "Expected 404 for unknown session"
+        except urllib.error.HTTPError as he:
+            assert he.code == 404
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_agent_stop_mid_tool_records_diagnostic_note(tmp_path, monkeypatch):
+    import re
+
+    sessions_dir = tmp_path / "agent_sessions"
+    monkeypatch.setattr(ai_agent, "AGENT_SESSIONS_DIR", sessions_dir)
+    monkeypatch.setattr(ai_agent.agent_manager, "_sessions", {})
+
+    tool_entered = threading.Event()
+    tool_release = threading.Event()
+
+    def _blocking_list_adapters():
+        tool_entered.set()
+        tool_release.wait(timeout=3.0)
+        return {"ok": True, "count": 0, "adapters": []}
+
+    call_n = {"n": 0}
+
+    def _chat_calling_tool(messages, tools=None, system_prompt="", **kwargs):
+        call_n["n"] += 1
+        if call_n["n"] == 1:
+            return {
+                "content": "开始扫描适配器。",
+                "tool_calls": [
+                    {
+                        "id": "call_mid_abort_1",
+                        "type": "function",
+                        "function": {"name": "list_adapters", "arguments": "{}"},
+                    }
+                ],
+                "usage": {"prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20},
+                "model": "gpt-4o-mini",
+                "finish_reason": "tool_calls",
+            }
+        return {
+            "content": "新回合已恢复完成。",
+            "tool_calls": [],
+            "usage": {"prompt_tokens": 15, "completion_tokens": 6, "total_tokens": 21},
+            "model": "gpt-4o-mini",
+            "finish_reason": "stop",
+        }
+
+    monkeypatch.setattr(ai_agent, "tool_list_adapters", _blocking_list_adapters)
+    monkeypatch.setattr(llm_client, "chat_completion", _chat_calling_tool)
+
+    srv, base = _start_ephemeral()
+    try:
+        st, cr = _req_json("POST", f"{base}/api/agent/sessions", {"title": "Mid-Tool Abort"})
+        assert st == 200
+        sid = cr["session"]["id"]
+
+        st, _ = _req_json("POST", f"{base}/api/agent/sessions/{sid}/message", {"message": "开始扫描"})
+        assert st == 200
+        assert tool_entered.wait(timeout=2.0)
+        time.sleep(0.06)
+
+        st, stop_res = _req_json("POST", f"{base}/api/agent/sessions/{sid}/stop", {})
+        assert st == 200 and stop_res["ok"] is True
+        assert stop_res["status"] == "stopped"
+        diag_re = re.compile(r"^已手动停止（中断时正在执行工具 list_adapters，已耗时 \d+\.\ds）$")
+        assert diag_re.match(stop_res.get("error", "")), f"Unexpected abort note: {stop_res!r}"
+
+        tool_release.set()
+        time.sleep(0.08)
+
+        # Persisted in detail, status event, disk JSON, and Markdown export
+        st, detail = _req_json("GET", f"{base}/api/agent/sessions/{sid}")
+        assert st == 200
+        assert detail["session"]["status"] == "stopped"
+        assert diag_re.match(detail["session"]["error"])
+        stop_evs = [ev for ev in detail["session"]["events"] if ev.get("type") == "status" and ev.get("status") == "stopped"]
+        assert stop_evs and diag_re.match(stop_evs[-1].get("error", ""))
+
+        disk_obj = json.loads((sessions_dir / f"{sid}.json").read_text(encoding="utf-8"))
+        assert diag_re.match(disk_obj.get("error", ""))
+
+        st, exp = _req_json("GET", f"{base}/api/agent/sessions/{sid}/export")
+        assert st == 200 and "list_adapters" in exp["markdown"] and "手动停止" in exp["markdown"]
+
+        # Starting a fresh turn clears the previous abort diagnostic error cleanly
+        st, r2 = _req_json("POST", f"{base}/api/agent/sessions/{sid}/message", {"message": "继续执行"})
+        assert st == 200 and r2["ok"] is True
+        for _ in range(40):
+            _, d2 = _req_json("GET", f"{base}/api/agent/sessions/{sid}")
+            if d2["session"]["status"] == "done":
+                break
+            time.sleep(0.05)
+        assert d2["session"]["status"] == "done"
+        assert d2["session"]["error"] == ""
+    finally:
+        tool_release.set()
+        srv.shutdown()
+        srv.server_close()
+
+
 def test_stdlib_only_imports_in_llm_and_agent():
     import ast
     import sys
