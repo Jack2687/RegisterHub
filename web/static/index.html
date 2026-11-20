@@ -43,6 +43,11 @@
               <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
               <span class="nav-label">总览仪表盘</span>
             </button>
+            <button type="button" class="nav-item" data-view="agent" title="核心与资产 · AI 直跑">
+              <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg></span>
+              <span class="nav-label">AI 直跑</span>
+              <span id="nav-badge-agent" class="nav-badge blue hidden">1</span>
+            </button>
             <button type="button" class="nav-item" data-view="runner" title="核心与资产 · 单站试跑">
               <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg></span>
               <span class="nav-label">单站试跑</span>
@@ -87,6 +92,10 @@
             <button type="button" class="nav-item" data-view="config" title="运维与配置 · 运行配置">
               <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></span>
               <span class="nav-label">运行配置</span>
+            </button>
+            <button type="button" class="nav-item" data-view="llm" title="运维与配置 · LLM 配置">
+              <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></span>
+              <span class="nav-label">LLM 配置</span>
             </button>
           </div>
         </nav>
@@ -171,13 +180,15 @@
             <div class="card toolbar-strip">
               <span class="strip-label">快捷工作流</span>
               <div class="actions">
-                <button type="button" class="btn btn-primary btn-sm" data-jump="runner">启动单站试跑</button>
+                <button type="button" class="btn btn-primary btn-sm" data-jump="agent">AI 直跑</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-jump="runner">启动单站试跑</button>
                 <button type="button" class="btn btn-secondary btn-sm" data-jump="accounts">账号与 Key</button>
                 <button type="button" class="btn btn-secondary btn-sm" data-jump="scaffold">站点工坊</button>
                 <button type="button" class="btn btn-secondary btn-sm" data-jump="layout">6 套视窗标定</button>
                 <button type="button" class="btn btn-secondary btn-sm" id="btn-jump-ipscore">IP 纯净度打分</button>
                 <button type="button" class="btn btn-secondary btn-sm" id="btn-jump-har">HAR 抓包提炼</button>
                 <button type="button" class="btn btn-secondary btn-sm" data-jump="config">代理 / IMAP 配置</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-jump="llm">LLM 配置</button>
               </div>
             </div>
 
@@ -851,6 +862,169 @@
                 </div>
               </div>
               <pre id="imap-test-out" class="code-box hidden"></pre>
+            </div>
+          </section>
+
+          <!-- ==================== 9. AI 直跑工作台 Agent ==================== -->
+          <section id="view-agent" class="view">
+            <!-- 顶部极速直跑启动卡 -->
+            <div class="card">
+              <div class="card-head compact">
+                <div>
+                  <h2 class="card-title">自主注册 AI 直跑工作台（单线程安全 · 最多 8 步自主闭环）</h2>
+                  <p class="card-sub">输入目标注册页 URL 与一句话指令，AI 自动探测表单、生成并校验 <code>sites/*.py</code> 适配器、单线程试跑 1 号并排障。</p>
+                </div>
+                <button type="button" id="agent-llm-pill" class="badge neutral" data-jump="llm" style="cursor:pointer" title="点击前往 LLM 配置">LLM: 检测中…</button>
+              </div>
+              <div class="agent-launch-row">
+                <input id="agent-target-url" type="url" class="mono" placeholder="目标注册页 URL（可选，例如 https://example.com/signup）" />
+                <input id="agent-instruction" type="text" placeholder="一句话指令（如：探测页面并生成适配器，然后试跑 1 个号）" />
+                <button type="button" id="btn-agent-quick-run" class="btn btn-primary">一键 AI 直跑</button>
+              </div>
+              <div class="agent-chips">
+                <span class="muted-small">快捷指令：</span>
+                <button type="button" class="chip-btn" data-agent-chip="探测该目标注册页的表单与风控特征，生成符合 BaseSiteAdapter 规范的适配器代码并单线程试跑 1 个号验证结果">探测并生成适配器+试跑1号</button>
+                <button type="button" class="chip-btn" data-agent-chip="查看最近失败日志，定位报错对应的适配器代码缺陷并修复后试跑 1 个号验证">查看最近失败并修复代码</button>
+              </div>
+            </div>
+
+            <!-- 下方左右分栏工作台 -->
+            <div class="agent-workbench">
+              <!-- 左侧：会话列表 + 实时计划清单 + Token 统计 -->
+              <div class="card agent-side">
+                <div class="card-head compact">
+                  <div>
+                    <h3 class="card-title">会话记录</h3>
+                    <p class="card-sub">自动持久化至 <code>results/agent_sessions/</code></p>
+                  </div>
+                  <button type="button" id="btn-agent-new-session" class="btn btn-secondary btn-sm">+ 新会话</button>
+                </div>
+                <div id="agent-session-list" class="agent-session-list">
+                  <div class="muted-small" style="padding:12px;text-align:center">暂无历史会话</div>
+                </div>
+
+                <div class="divider"></div>
+                <div class="sub-head" style="display:flex;align-items:center;justify-content:space-between">
+                  <span>实时执行计划</span>
+                  <span id="agent-plan-progress" class="mono muted-small">0/0</span>
+                </div>
+                <div id="agent-plan-list" class="agent-plan-list">
+                  <div class="muted-small">等待 AI 规划执行步骤…</div>
+                </div>
+
+                <div class="divider"></div>
+                <div class="sub-head">当前会话 Token 消耗</div>
+                <div class="token-grid">
+                  <div class="token-cell">
+                    <span class="token-k">Prompt</span>
+                    <span id="agent-tok-prompt" class="token-v mono tabular-nums">0</span>
+                  </div>
+                  <div class="token-cell">
+                    <span class="token-k">Completion</span>
+                    <span id="agent-tok-completion" class="token-v mono tabular-nums">0</span>
+                  </div>
+                  <div class="token-cell">
+                    <span class="token-k">Total</span>
+                    <span id="agent-tok-total" class="token-v mono tabular-nums emerald-text">0</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 右侧：流式对话 + 可折叠工具卡片 + 底部追问/停止 -->
+              <div class="card agent-chat-card">
+                <div class="console-head">
+                  <div class="console-status-wrap">
+                    <span id="agent-status-dot" class="dot neutral"></span>
+                    <span id="agent-chat-title" style="font-weight:600;color:var(--text-primary)">未选择会话</span>
+                    <span id="agent-status-badge" class="badge neutral">idle</span>
+                  </div>
+                  <div class="actions" style="flex-wrap:nowrap;min-width:0">
+                    <span id="agent-chat-url" class="muted-small mono" style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+                    <button type="button" id="btn-agent-export" class="btn btn-secondary btn-sm" disabled title="导出当前会话为 Markdown 报告">导出 .md</button>
+                  </div>
+                </div>
+
+                <div id="agent-chat-feed" class="agent-chat-feed">
+                  <div class="empty-box">在上方填写目标 URL 并点击「一键 AI 直跑」，或在下方直接向注册工程师 AI 提问。</div>
+                </div>
+
+                <div class="agent-composer">
+                  <input id="agent-followup-input" type="text" placeholder="输入追问或下一步指令（Enter 发送，如：修改选择器后再试跑 1 次）…" />
+                  <button type="button" id="btn-agent-send" class="btn btn-primary btn-sm">发送</button>
+                  <button type="button" id="btn-agent-stop" class="btn btn-danger btn-sm" disabled>停止</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ==================== 10. LLM 配置 ==================== -->
+          <section id="view-llm" class="view">
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <h2 class="card-title">OpenAI 兼容 LLM 接口配置</h2>
+                  <p class="card-sub">单配置文件原子保存至 <code>results/llm_config.json</code>（零外部依赖，纯 stdlib 直连 OpenAI / DeepSeek / OpenRouter / 本地 Ollama 等兼容接口）。</p>
+                </div>
+                <div class="actions">
+                  <button type="button" id="btn-llm-models" class="btn btn-secondary btn-sm">获取模型</button>
+                  <button type="button" id="btn-llm-test" class="btn btn-secondary btn-sm">一键测试连通</button>
+                  <button type="button" id="btn-llm-save" class="btn btn-primary btn-sm">保存配置</button>
+                </div>
+              </div>
+
+              <div class="form-grid">
+                <div class="form-group">
+                  <label for="llm-base-url">OpenAI 兼容 Base URL</label>
+                  <input id="llm-base-url" type="url" class="mono" placeholder="https://api.openai.com/v1" />
+                </div>
+                <div class="form-group">
+                  <label for="llm-model">模型名称 (Model)</label>
+                  <input id="llm-model" type="text" class="mono" placeholder="gpt-4o-mini" />
+                </div>
+                <div class="form-group">
+                  <label for="llm-api-key" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                    <span>API Key（留空保存将保留既有密钥）</span>
+                    <span id="llm-key-hint" class="badge neutral mono">未配置</span>
+                  </label>
+                  <input id="llm-api-key" type="password" class="mono" placeholder="留空保持当前已保存的 Key 不变" autocomplete="off" />
+                </div>
+                <div class="form-group">
+                  <label for="llm-proxy-url">专属代理 Proxy URL（可选，仅支持 http:// 或 https://）</label>
+                  <input id="llm-proxy-url" type="text" class="mono" placeholder="例如 http://127.0.0.1:7897" />
+                </div>
+                <div class="form-group">
+                  <label for="llm-max-tokens">最大输出 Token (max_tokens)</label>
+                  <input id="llm-max-tokens" type="number" min="64" max="65536" value="4096" />
+                </div>
+                <div class="form-group">
+                  <label>Token 上限字段名 (适配推理模型)</label>
+                  <div class="seg-group full" id="llm-mtf-group">
+                    <button type="button" class="seg-btn active" data-mtf="max_tokens">max_tokens</button>
+                    <button type="button" class="seg-btn" data-mtf="max_completion_tokens">max_completion_tokens</button>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="llm-temperature">采样温度 Temperature (0.0 – 2.0)</label>
+                  <input id="llm-temperature" type="number" min="0" max="2" step="0.1" value="0.2" />
+                </div>
+                <div class="form-group" style="justify-content:flex-end">
+                  <label>快捷跳转</label>
+                  <div class="actions">
+                    <button type="button" class="btn btn-secondary btn-sm" data-jump="agent">前往 AI 直跑工作台 →</button>
+                  </div>
+                </div>
+              </div>
+
+              <div id="llm-models-box" class="llm-models-box hidden">
+                <div class="llm-models-head">
+                  <span id="llm-models-meta" class="muted-small mono">已发现 0 个模型</span>
+                  <input id="llm-models-filter" type="text" class="mono llm-models-filter" placeholder="输入关键词筛选模型…" />
+                </div>
+                <div id="llm-models-chips" class="llm-models-chips"></div>
+              </div>
+
+              <div id="llm-test-banner" class="banner muted hidden" style="margin-top:14px"></div>
+              <pre id="llm-test-out" class="code-box hidden"></pre>
             </div>
           </section>
         </div>

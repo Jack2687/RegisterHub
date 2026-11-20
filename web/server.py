@@ -44,6 +44,9 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from core import llm_client
+from core.ai_agent import agent_manager
+
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 RESULTS_DIR = ROOT_DIR / "results"
 ACCOUNTS_FILE = RESULTS_DIR / "accounts.txt"
@@ -317,6 +320,16 @@ class _LiteJobManager:
 
 
 job_manager = _LiteJobManager()
+
+
+def _check_manual_job_busy() -> Optional[str]:
+    act = job_manager.active_job()
+    if act is not None:
+        return f"单线程模式已有运行中的单站试跑任务: {act.adapter} ({act.id})"
+    return None
+
+
+agent_manager.set_external_busy_check(_check_manual_job_busy)
 
 # In-memory live disposable inbox sessions for Tools Lite (max 16)
 _TEMPMAIL_LOCK = threading.Lock()
@@ -717,6 +730,7 @@ def build_overview_payload() -> Dict[str, Any]:
             "snapshots_total": len(snaps),
             "adapters_total": len(adapters),
             "running": 1 if act else 0,
+            "agent_running": 1 if agent_manager.active_session_id() else 0,
         },
         "daily_trend": [trend_map[d] for d in days],
         "recent_jobs": jobs[:6],
@@ -1060,6 +1074,98 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"geometry": data})
             return
 
+        if path == "/api/llm/config":
+            self._send_json(llm_client.get_public_llm_config())
+            return
+
+        if path == "/api/agent/sessions":
+            self._send_json({
+                "sessions": agent_manager.list_sessions(),
+                "active_session_id": agent_manager.active_session_id(),
+            })
+            return
+
+        m_ag_stream = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/stream", path)
+        if m_ag_stream:
+            sess = agent_manager.get_session(m_ag_stream.group(1))
+            if not sess:
+                self._send_json({"error": "Agent session not found"}, status=404)
+                return
+            try:
+                since = max(0, int((qs.get("since") or ["0"])[0]))
+            except Exception:
+                since = 0
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            hist, sub_q = sess.subscribe()
+            sent_live_terminal = False
+            last_error = ""
+            try:
+                for idx, item in enumerate(hist):
+                    if item.get("type") == "status":
+                        last_error = str(item.get("error") or "")
+                    if idx < since:
+                        continue
+                    chunk = f"data: {json.dumps({**item, 'seq': idx, 'replay': True}, ensure_ascii=False)}\n\n"
+                    self.wfile.write(chunk.encode("utf-8"))
+                self.wfile.flush()
+                seq_cursor = len(hist)
+                while True:
+                    try:
+                        ev = sub_q.get(timeout=12.0)
+                    except queue.Empty:
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+                        continue
+                    if ev is None:
+                        if not sent_live_terminal:
+                            end_ev = {
+                                "type": "status",
+                                "ts": time.strftime("%H:%M:%S"),
+                                "status": sess.status,
+                                "error": last_error if sess.status == "error" else "",
+                                "seq": seq_cursor,
+                                "replay": False,
+                                "eof": True,
+                            }
+                            self.wfile.write(f"data: {json.dumps(end_ev, ensure_ascii=False)}\n\n".encode("utf-8"))
+                            self.wfile.flush()
+                        break
+                    if ev.get("type") == "status":
+                        last_error = str(ev.get("error") or "")
+                        if ev.get("status") in ("done", "error", "stopped"):
+                            sent_live_terminal = True
+                    chunk = f"data: {json.dumps({**ev, 'seq': seq_cursor, 'replay': False}, ensure_ascii=False)}\n\n"
+                    seq_cursor += 1
+                    self.wfile.write(chunk.encode("utf-8"))
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            finally:
+                sess.unsubscribe(sub_q)
+            return
+
+        m_ag_export = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/export", path)
+        if m_ag_export:
+            exp = agent_manager.export_session_markdown(m_ag_export.group(1))
+            if exp is None:
+                self._send_json({"ok": False, "error": "Agent session not found"}, status=404)
+                return
+            self._send_json(exp)
+            return
+
+        m_ag_get = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)", path)
+        if m_ag_get:
+            sess = agent_manager.get_session(m_ag_get.group(1))
+            if not sess:
+                self._send_json({"error": "Agent session not found"}, status=404)
+                return
+            self._send_json({"ok": True, "session": sess.to_detail()})
+            return
+
         if path.startswith("/api/"):
             self._send_json({"error": "API endpoint not found"}, status=404)
             return
@@ -1145,6 +1251,12 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             known = {a["name"] for a in list_community_adapters()}
             if adapter not in known:
                 self._send_json({"ok": False, "error": f"Unknown adapter: {adapter}"}, status=400)
+                return
+            if agent_manager.active_session_id():
+                self._send_json(
+                    {"ok": False, "error": "单线程模式已有运行中的 AI 直跑会话，请等待结束或先停止"},
+                    status=409,
+                )
                 return
             try:
                 job = job_manager.start(
@@ -1506,6 +1618,71 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "error": str(e)}, status=500)
             return
 
+        if path == "/api/llm/config":
+            try:
+                saved = llm_client.save_llm_config(body)
+                self._send_json({"ok": True, "config": saved})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, status=400)
+            return
+
+        if path == "/api/llm/test":
+            res = llm_client.test_connection(overrides=body if body else None)
+            self._send_json(res)
+            return
+
+        if path == "/api/llm/models":
+            res = llm_client.discover_models(overrides=body if body else None)
+            self._send_json(res)
+            return
+
+        if path == "/api/agent/sessions":
+            title = str(body.get("title") or "").strip()
+            target_url = str(body.get("target_url") or "").strip()
+            sess = agent_manager.create_session(title=title, target_url=target_url)
+            self._send_json({"ok": True, "session": sess.to_summary()})
+            return
+
+        m_ag_msg = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/message", path)
+        if m_ag_msg:
+            sid = m_ag_msg.group(1)
+            msg_text = str(body.get("message") or "").strip()
+            target_url = str(body.get("target_url") or "").strip()
+            try:
+                res = agent_manager.send_message(sid, msg_text, target_url=target_url)
+                self._send_json(res)
+            except KeyError as ke:
+                self._send_json({"ok": False, "error": str(ke)}, status=404)
+            except ValueError as ve:
+                self._send_json({"ok": False, "error": str(ve)}, status=400)
+            except RuntimeError as re_err:
+                self._send_json({"ok": False, "error": str(re_err)}, status=409)
+            return
+
+        m_ag_stop = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/stop", path)
+        if m_ag_stop:
+            res = agent_manager.stop_session(m_ag_stop.group(1))
+            if res is None:
+                self._send_json({"ok": False, "error": "Agent session not found"}, status=404)
+                return
+            self._send_json(res)
+            return
+
+        self._send_json({"error": "Not Found"}, status=404)
+
+    def do_DELETE(self) -> None:
+        path = urlparse(self.path).path
+
+        m_ag_del = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)", path)
+        if m_ag_del:
+            sid = m_ag_del.group(1)
+            ok = agent_manager.delete_session(sid)
+            if not ok:
+                self._send_json({"ok": False, "error": "Agent session not found"}, status=404)
+                return
+            self._send_json({"ok": True, "deleted": sid})
+            return
+
         self._send_json({"error": "Not Found"}, status=404)
 
 
@@ -1525,6 +1702,7 @@ def start_server(host: str = "127.0.0.1", port: int = 18886) -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        agent_manager.stop_all()
         job_manager.stop_all()
         srv.server_close()
 

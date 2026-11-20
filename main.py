@@ -272,14 +272,16 @@ def main():
 
     from sites import discover_adapters
     adapters = discover_adapters()
-    target_name = args.run or (args.command if args.command and args.command.lower() in adapters else None) or "demo"
-    adapter_name = target_name.lower()
+    cmd_norm = args.command.lower().replace("-", "_") if args.command else None
+    target_name = args.run or (cmd_norm if cmd_norm and cmd_norm in adapters else None) or "demo"
+    adapter_name = target_name.lower().replace("-", "_")
     
     if adapter_name in adapters:
         runner.execute_adapter(adapters[adapter_name], count=args.count)
     else:
         available = ", ".join(sorted(adapters.keys()))
         print(f"[-] Unknown adapter '{adapter_name}'. Available discovered adapters: {available}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

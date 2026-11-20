@@ -29,6 +29,7 @@
 
   const VIEW_TITLES = {
     overview: '总览仪表盘',
+    agent: 'AI 直跑工作台 (单线程自主代理)',
     runner: '单线程适配器试跑',
     accounts: '账号与 API Key 台账',
     tools: '开源实用工具箱',
@@ -37,10 +38,12 @@
     doctor: '环境真执行诊断',
     layout: '视窗标定台 (单 / 多窗口)',
     config: '运行配置 (config.json / IMAP)',
+    llm: 'LLM 模型与 API 配置',
   };
 
   const VIEW_GROUPS = {
     overview: '核心与资产',
+    agent: '核心与资产',
     runner: '核心与资产',
     accounts: '核心与资产',
     snapshots: '核心与资产',
@@ -49,6 +52,7 @@
     tools: '开发与工具',
     doctor: '运维与配置',
     config: '运维与配置',
+    llm: '运维与配置',
   };
 
   const TIER_META = {
@@ -124,6 +128,11 @@
     $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === target));
     $$('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${target}`));
     if (target === 'overview') loadOverview();
+    if (target === 'agent') {
+      loadLlmConfig(false);
+      loadAgentSessions(false);
+    }
+    if (target === 'llm') loadLlmConfig(true);
     if (target === 'config') loadConfig();
     if (target === 'accounts') loadAccounts();
     if (target === 'snapshots') loadFailuresAndSnapshots();
@@ -168,6 +177,8 @@
     ico.classList.add('spin');
     try {
       if (currentView === 'overview') await Promise.all([loadOverview(), loadDoctor()]);
+      else if (currentView === 'agent') await Promise.all([loadLlmConfig(false), loadAgentSessions(false)]);
+      else if (currentView === 'llm') await loadLlmConfig(true);
       else if (currentView === 'doctor') await loadDoctor();
       else if (currentView === 'config') await loadConfig();
       else if (currentView === 'runner') await Promise.all([loadAdapters(), loadJobs(false)]);
@@ -1631,9 +1642,773 @@
     }
   });
 
+  // ==================== 9. LLM Configuration ====================
+  let llmMaxTokensField = 'max_tokens';
+  let discoveredModelsCache = [];
+
+  function syncLlmMtfButtons() {
+    $$('#llm-mtf-group .seg-btn').forEach((b) => {
+      b.classList.toggle('active', b.dataset.mtf === llmMaxTokensField);
+    });
+  }
+
+  $$('#llm-mtf-group .seg-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      llmMaxTokensField = btn.dataset.mtf || 'max_tokens';
+      syncLlmMtfButtons();
+    });
+  });
+
+  function isLocalLlmUrl(url) {
+    const raw = String(url || '').trim();
+    if (!raw) return false;
+    try {
+      const u = new URL(raw);
+      return ['127.0.0.1', 'localhost', '::1', '[::1]'].includes((u.hostname || '').toLowerCase());
+    } catch {
+      return /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(?::|\/|$)/i.test(raw);
+    }
+  }
+
+  function updateAgentLlmPill(cfg) {
+    const pill = $('#agent-llm-pill');
+    if (!pill) return;
+    if (cfg && cfg.has_key) {
+      pill.className = 'badge emerald mono';
+      pill.textContent = `LLM: ${cfg.model || 'ready'}`;
+    } else if (cfg && isLocalLlmUrl(cfg.base_url)) {
+      pill.className = 'badge emerald mono';
+      pill.textContent = `本地模型就绪: ${cfg.model || 'local'}`;
+    } else {
+      pill.className = 'badge amber';
+      pill.textContent = 'LLM: 未配置 Key · 点击配置';
+    }
+  }
+
+  function renderDiscoveredModels() {
+    const box = $('#llm-models-box');
+    const chips = $('#llm-models-chips');
+    const meta = $('#llm-models-meta');
+    if (!box || !chips) return;
+    if (!discoveredModelsCache.length) {
+      box.classList.add('hidden');
+      return;
+    }
+    box.classList.remove('hidden');
+    const q = ($('#llm-models-filter')?.value || '').trim().toLowerCase();
+    const currentModel = ($('#llm-model')?.value || '').trim();
+    const filtered = q
+      ? discoveredModelsCache.filter((m) => m.toLowerCase().includes(q))
+      : discoveredModelsCache;
+    const shown = filtered.slice(0, 80);
+    if (meta) {
+      meta.textContent =
+        filtered.length > shown.length
+          ? `共 ${discoveredModelsCache.length} 个模型（显示前 ${shown.length} 个，输入关键词可筛选）`
+          : `已发现 ${filtered.length} / ${discoveredModelsCache.length} 个模型（点击填入）`;
+    }
+    if (!shown.length) {
+      chips.innerHTML = `<span class="muted-small">未匹配到包含 "${escapeHtml(q)}" 的模型</span>`;
+      return;
+    }
+    chips.innerHTML = shown
+      .map(
+        (m) =>
+          `<button type="button" class="model-chip mono ${m === currentModel ? 'active' : ''}" data-pick-model="${escapeHtml(m)}">${escapeHtml(m)}</button>`
+      )
+      .join('');
+    chips.querySelectorAll('[data-pick-model]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const picked = btn.dataset.pickModel || '';
+        if ($('#llm-model')) $('#llm-model').value = picked;
+        renderDiscoveredModels();
+        toast(`已选择模型: ${picked}`);
+      });
+    });
+  }
+
+  $('#llm-models-filter')?.addEventListener('input', renderDiscoveredModels);
+  $('#llm-model')?.addEventListener('input', () => {
+    if (discoveredModelsCache.length) renderDiscoveredModels();
+  });
+
+  async function loadLlmConfig(fillForm = true) {
+    try {
+      const res = await fetch('/api/llm/config');
+      const cfg = await res.json();
+      updateAgentLlmPill(cfg);
+      if (!fillForm) return cfg;
+      if ($('#llm-base-url')) $('#llm-base-url').value = cfg.base_url || 'https://api.openai.com/v1';
+      if ($('#llm-model')) $('#llm-model').value = cfg.model || 'gpt-4o-mini';
+      if ($('#llm-api-key')) $('#llm-api-key').value = '';
+      if ($('#llm-proxy-url')) $('#llm-proxy-url').value = cfg.proxy_url || '';
+      if ($('#llm-max-tokens')) $('#llm-max-tokens').value = cfg.max_tokens ?? 4096;
+      if ($('#llm-temperature')) $('#llm-temperature').value = cfg.temperature ?? 0.2;
+      llmMaxTokensField = cfg.max_tokens_field || 'max_tokens';
+      syncLlmMtfButtons();
+      const hint = $('#llm-key-hint');
+      if (hint) {
+        if (cfg.has_key) {
+          hint.className = 'badge emerald mono';
+          hint.textContent = `已保存: ${cfg.api_key_hint || '***'}`;
+        } else if (isLocalLlmUrl(cfg.base_url)) {
+          hint.className = 'badge sky';
+          hint.textContent = '本地免 Key';
+        } else {
+          hint.className = 'badge amber';
+          hint.textContent = '未配置 Key';
+        }
+      }
+      return cfg;
+    } catch (e) {
+      if (fillForm) toast('读取 LLM 配置失败: ' + e.message);
+      return null;
+    }
+  }
+
+  function collectLlmFormPayload() {
+    const rawTemp = ($('#llm-temperature')?.value ?? '').trim();
+    const parsedTemp = rawTemp === '' ? 0.2 : Number(rawTemp);
+    const rawMaxTok = ($('#llm-max-tokens')?.value ?? '').trim();
+    const parsedMaxTok = rawMaxTok === '' ? 4096 : Number(rawMaxTok);
+    return {
+      base_url: $('#llm-base-url')?.value.trim() || 'https://api.openai.com/v1',
+      model: $('#llm-model')?.value.trim() || 'gpt-4o-mini',
+      api_key: $('#llm-api-key')?.value.trim() || '',
+      proxy_url: $('#llm-proxy-url')?.value.trim() || '',
+      max_tokens: Number.isFinite(parsedMaxTok) && parsedMaxTok > 0 ? parsedMaxTok : 4096,
+      max_tokens_field: llmMaxTokensField,
+      temperature: Number.isFinite(parsedTemp) ? parsedTemp : 0.2,
+    };
+  }
+
+  $('#btn-llm-models')?.addEventListener('click', async () => {
+    const btn = $('#btn-llm-models');
+    const banner = $('#llm-test-banner');
+    btn.disabled = true;
+    btn.textContent = '获取模型中…';
+    try {
+      const res = await fetch('/api/llm/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectLlmFormPayload()),
+      });
+      const d = await res.json();
+      if (d.ok && Array.isArray(d.models) && d.models.length) {
+        discoveredModelsCache = d.models;
+        if ($('#llm-models-filter')) $('#llm-models-filter').value = '';
+        renderDiscoveredModels();
+        if (banner) {
+          banner.className = 'banner ok';
+          banner.textContent = `已从 ${d.source_url || '/models'} 获取 ${d.count} 个模型，点击下方标签可直接填入`;
+          banner.classList.remove('hidden');
+        }
+        toast(`已获取 ${d.count} 个可用模型`);
+      } else {
+        discoveredModelsCache = [];
+        renderDiscoveredModels();
+        if (banner) {
+          banner.className = 'banner fail';
+          banner.textContent = `获取模型失败: ${d.error || '未返回可用模型'}`;
+          banner.classList.remove('hidden');
+        }
+        toast(d.error || '获取模型列表失败');
+      }
+    } catch (e) {
+      toast('获取模型异常: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '获取模型';
+    }
+  });
+
+  $('#btn-llm-save')?.addEventListener('click', async () => {
+    const btn = $('#btn-llm-save');
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/llm/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectLlmFormPayload()),
+      });
+      const d = await res.json();
+      if (!d.ok) return toast(d.error || '保存 LLM 配置失败');
+      await loadLlmConfig(true);
+      toast('LLM 配置已原子保存至 results/llm_config.json');
+    } catch (e) {
+      toast('保存异常: ' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  $('#btn-llm-test')?.addEventListener('click', async () => {
+    const btn = $('#btn-llm-test');
+    const banner = $('#llm-test-banner');
+    const out = $('#llm-test-out');
+    btn.disabled = true;
+    btn.textContent = '连通性测试中…';
+    banner.className = 'banner muted';
+    banner.textContent = '正在发送最小 1 轮探针请求（Reply with OK）…';
+    banner.classList.remove('hidden');
+    try {
+      const res = await fetch('/api/llm/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectLlmFormPayload()),
+      });
+      const d = await res.json();
+      banner.className = `banner ${d.ok ? 'ok' : 'fail'}`;
+      banner.textContent = d.ok
+        ? `连通成功 · 模型 ${d.model} · 延迟 ${d.latency_ms}ms · 回复: ${d.reply || 'OK'}`
+        : `连通失败 (${d.latency_ms ?? 0}ms): ${d.error || '未知错误'}`;
+      out.classList.remove('hidden');
+      out.textContent = JSON.stringify(d, null, 2);
+      toast(d.ok ? `LLM 连通正常 (${d.latency_ms}ms)` : `LLM 测试失败: ${d.error || ''}`);
+    } catch (e) {
+      banner.className = 'banner fail';
+      banner.textContent = '测试请求异常: ' + e.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '一键测试连通';
+    }
+  });
+
+  // ==================== 10. AI Direct-Run Workbench ====================
+  let agentSessionsCache = [];
+  let activeAgentSessionId = '';
+  let agentEventSource = null;
+  let agentRunning = false;
+  let agentEvents = [];
+  let agentPlan = [];
+  let agentUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
+  function syncAgentExportButton() {
+    const expBtn = $('#btn-agent-export');
+    if (expBtn) expBtn.disabled = !activeAgentSessionId;
+  }
+
+  function setAgentRunningState(running, statusLabel = '') {
+    agentRunning = Boolean(running);
+    const badge = $('#nav-badge-agent');
+    if (badge) badge.classList.toggle('hidden', !agentRunning);
+    if ($('#btn-agent-stop')) $('#btn-agent-stop').disabled = !agentRunning;
+    if ($('#btn-agent-quick-run')) $('#btn-agent-quick-run').disabled = agentRunning;
+
+    const sendBtn = $('#btn-agent-send');
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.textContent = agentRunning ? '发送纠偏' : '发送';
+    }
+    const followInp = $('#agent-followup-input');
+    if (followInp) {
+      followInp.placeholder = agentRunning
+        ? '运行中可输入实时纠偏指令（Enter 注入，当前工具完成后生效）…'
+        : '输入追问或下一步指令（Enter 发送，如：修改选择器后再试跑 1 次）…';
+    }
+
+    const st = statusLabel || (agentRunning ? 'running' : 'idle');
+    const dot = $('#agent-status-dot');
+    const stBadge = $('#agent-status-badge');
+    if (dot) {
+      dot.className = `dot ${st === 'running' ? 'blue' : st === 'done' ? 'emerald' : st === 'error' ? 'rose' : st === 'stopped' ? 'amber' : 'neutral'}`;
+    }
+    if (stBadge) {
+      stBadge.className = `badge ${st === 'running' ? 'sky' : st === 'done' ? 'emerald' : st === 'error' ? 'rose' : st === 'stopped' ? 'amber' : 'neutral'}`;
+      stBadge.textContent = st;
+    }
+    syncAgentExportButton();
+  }
+
+  function renderAgentPlan(steps) {
+    agentPlan = Array.isArray(steps) ? steps : [];
+    const box = $('#agent-plan-list');
+    const prog = $('#agent-plan-progress');
+    if (!box) return;
+    const doneCnt = agentPlan.filter((s) => s.status === 'done').length;
+    if (prog) prog.textContent = `${doneCnt}/${agentPlan.length}`;
+    if (!agentPlan.length) {
+      box.innerHTML = `<div class="muted-small">等待 AI 规划执行步骤…</div>`;
+      return;
+    }
+    const icoMap = { pending: '○', in_progress: '◐', done: '✓', failed: '✕' };
+    box.innerHTML = agentPlan
+      .map(
+        (s) => `
+        <div class="plan-step ${escapeHtml(s.status || 'pending')}">
+          <span class="plan-ico">${icoMap[s.status] || '○'}</span>
+          <span class="plan-title">${escapeHtml(s.title)}</span>
+        </div>`
+      )
+      .join('');
+  }
+
+  function renderAgentUsage(usage) {
+    agentUsage = {
+      prompt_tokens: Number(usage?.prompt_tokens || 0),
+      completion_tokens: Number(usage?.completion_tokens || 0),
+      total_tokens: Number(usage?.total_tokens || 0),
+    };
+    if ($('#agent-tok-prompt')) $('#agent-tok-prompt').textContent = String(agentUsage.prompt_tokens);
+    if ($('#agent-tok-completion')) $('#agent-tok-completion').textContent = String(agentUsage.completion_tokens);
+    if ($('#agent-tok-total')) $('#agent-tok-total').textContent = String(agentUsage.total_tokens);
+  }
+
+  function renderAgentSessions() {
+    const box = $('#agent-session-list');
+    if (!box) return;
+    if (!agentSessionsCache.length) {
+      box.innerHTML = `<div class="muted-small" style="padding:12px;text-align:center">暂无历史会话</div>`;
+      return;
+    }
+    box.innerHTML = agentSessionsCache
+      .map((s) => {
+        const activeCls = s.id === activeAgentSessionId ? 'active' : '';
+        const pillCls = s.status === 'done' ? 'pass' : s.status === 'running' ? 'warn' : s.status === 'error' ? 'fail' : 'neutral';
+        return `
+          <div class="agent-session-row ${activeCls}" data-ag-select="${escapeHtml(s.id)}">
+            <div class="agent-session-main">
+              <div class="agent-session-title" title="${escapeHtml(s.title)}">${escapeHtml(s.title)}</div>
+              <div class="agent-session-meta">
+                <span class="pill ${pillCls}" style="padding:0 6px;font-size:10px">${escapeHtml(s.status)}</span>
+                <span class="mono">${escapeHtml((s.updated_at || s.created_at || '').slice(5, 16))}</span>
+              </div>
+            </div>
+            <button type="button" class="agent-session-del" title="删除会话" data-ag-del="${escapeHtml(s.id)}">×</button>
+          </div>`;
+      })
+      .join('');
+
+    box.querySelectorAll('[data-ag-select]').forEach((row) => {
+      row.addEventListener('click', (ev) => {
+        if (ev.target.closest('[data-ag-del]')) return;
+        selectAgentSession(row.dataset.agSelect);
+      });
+    });
+    box.querySelectorAll('[data-ag-del]').forEach((btn) => {
+      btn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const sid = btn.dataset.agDel;
+        if (!window.confirm('确认删除该 AI 会话记录？')) return;
+        await fetch(`/api/agent/sessions/${encodeURIComponent(sid)}`, { method: 'DELETE' });
+        if (activeAgentSessionId === sid) {
+          closeAgentStream();
+          activeAgentSessionId = '';
+          agentEvents = [];
+          renderAgentPlan([]);
+          renderAgentUsage({});
+          $('#agent-chat-title').textContent = '未选择会话';
+          $('#agent-chat-url').textContent = '';
+          setAgentRunningState(false, 'idle');
+          renderAgentFeed();
+        }
+        toast('已删除会话');
+        await loadAgentSessions(false);
+      });
+    });
+  }
+
+  function formatToolPreview(args) {
+    if (!args || typeof args !== 'object') return '';
+    const keys = Object.keys(args);
+    if (!keys.length) return '';
+    const firstVal = args[keys[0]];
+    const preview = typeof firstVal === 'string' ? firstVal : JSON.stringify(firstVal);
+    return `${keys[0]}=${String(preview || '').slice(0, 60)}`;
+  }
+
+  function renderAgentFeed() {
+    const feed = $('#agent-chat-feed');
+    if (!feed) return;
+    // Preserve open state of user-expanded <details> tool cards
+    const openKeys = new Set(
+      Array.from(feed.querySelectorAll('details.tool-card[open]')).map((el) => el.dataset.callKey)
+    );
+
+    if (!agentEvents.length) {
+      feed.innerHTML = `<div class="empty-box">在上方填写目标 URL 并点击「一键 AI 直跑」，或在下方直接向注册工程师 AI 提问。</div>`;
+      return;
+    }
+
+    // Group tool_start + tool_end pairs by call_id while preserving timeline order
+    const items = [];
+    const toolByCallId = new Map();
+    for (const ev of agentEvents) {
+      if (ev.type === 'user_msg' || ev.type === 'assistant_msg') {
+        items.push(ev);
+      } else if (ev.type === 'tool_start') {
+        const entry = {
+          type: 'tool',
+          call_id: ev.call_id || `t_${items.length}`,
+          name: ev.name || 'tool',
+          args: ev.args || {},
+          ts: ev.ts || '',
+          done: false,
+          ok: true,
+          duration_ms: null,
+          result: null,
+        };
+        toolByCallId.set(entry.call_id, entry);
+        items.push(entry);
+      } else if (ev.type === 'tool_end') {
+        const existing = toolByCallId.get(ev.call_id);
+        if (existing) {
+          existing.done = true;
+          existing.ok = ev.ok !== false;
+          existing.duration_ms = ev.duration_ms;
+          existing.result = ev.result;
+        } else {
+          items.push({
+            type: 'tool',
+            call_id: ev.call_id || `t_${items.length}`,
+            name: ev.name || 'tool',
+            args: {},
+            ts: ev.ts || '',
+            done: true,
+            ok: ev.ok !== false,
+            duration_ms: ev.duration_ms,
+            result: ev.result,
+          });
+        }
+      } else if (ev.type === 'status' && ev.status === 'error' && ev.error) {
+        items.push({ type: 'error_msg', ts: ev.ts || '', error: ev.error });
+      }
+    }
+
+    if (!items.length) {
+      feed.innerHTML = `<div class="empty-box">会话已就绪，等待执行事件…</div>`;
+      return;
+    }
+
+    feed.innerHTML = items
+      .map((it, idx) => {
+        if (it.type === 'user_msg') {
+          return `
+            <div class="chat-msg user">
+              <div class="chat-meta"><span>你</span>${it.steered ? '<span class="badge amber">实时纠偏</span>' : ''}<span class="mono">${escapeHtml(it.ts)}</span></div>
+              <div class="chat-bubble">${escapeHtml(it.content)}${it.target_url ? `\n\nURL: ${escapeHtml(it.target_url)}` : ''}</div>
+            </div>`;
+        }
+        if (it.type === 'assistant_msg') {
+          return `
+            <div class="chat-msg assistant">
+              <div class="chat-meta"><span class="badge sky">AI Agent</span>${it.step ? `<span class="mono">Step ${it.step}</span>` : ''}${it.wrap_up ? '<span class="badge neutral">收尾总结</span>' : ''}<span class="mono">${escapeHtml(it.ts)}</span></div>
+              <div class="chat-bubble">${escapeHtml(it.content)}</div>
+            </div>`;
+        }
+        if (it.type === 'error_msg') {
+          return `
+            <div class="chat-msg error">
+              <div class="chat-meta"><span class="badge rose">运行异常</span><span class="mono">${escapeHtml(it.ts)}</span></div>
+              <div class="chat-bubble">${escapeHtml(it.error)}</div>
+            </div>`;
+        }
+        if (it.type === 'tool') {
+          const key = `${it.call_id}_${idx}`;
+          const isOpen = openKeys.has(key) ? ' open' : '';
+          const statePill = !it.done
+            ? `<span class="badge sky">执行中…</span>`
+            : it.ok
+              ? `<span class="badge emerald">完成</span>`
+              : `<span class="badge rose">失败</span>`;
+          const durTxt = it.duration_ms != null ? `<span class="mono muted-small">${it.duration_ms}ms</span>` : '';
+          const argsJson = JSON.stringify(it.args || {}, null, 2);
+          const resJson = it.done ? JSON.stringify(it.result ?? {}, null, 2) : '等待工具返回…';
+          return `
+            <details class="tool-card" data-call-key="${escapeHtml(key)}"${isOpen}>
+              <summary>
+                <span class="tool-sum-left">
+                  ${statePill}
+                  <span class="tool-name mono">${escapeHtml(it.name)}</span>
+                  <span class="tool-preview mono">${escapeHtml(formatToolPreview(it.args))}</span>
+                </span>
+                <span class="tool-sum-right">
+                  ${durTxt}
+                  <span class="mono muted-small">${escapeHtml(it.ts)}</span>
+                </span>
+              </summary>
+              <div class="tool-body">
+                <div class="tool-sec-label">Arguments</div>
+                <pre class="tool-pre mono">${escapeHtml(argsJson)}</pre>
+                <div class="tool-sec-label">Output</div>
+                <pre class="tool-pre mono">${escapeHtml(resJson)}</pre>
+              </div>
+            </details>`;
+        }
+        return '';
+      })
+      .join('');
+
+    feed.scrollTop = feed.scrollHeight;
+  }
+
+  function closeAgentStream() {
+    if (agentEventSource) {
+      agentEventSource.close();
+      agentEventSource = null;
+    }
+  }
+
+  function handleAgentEvent(ev, isLive) {
+    if (!ev.eof) {
+      agentEvents.push(ev);
+    }
+    if (ev.type === 'plan') {
+      renderAgentPlan(ev.steps || []);
+    } else if (ev.type === 'usage') {
+      renderAgentUsage(ev.session_usage || ev);
+    } else if (ev.type === 'status') {
+      const st = ev.status || 'idle';
+      setAgentRunningState(st === 'running', st);
+      if (isLive && !ev.replay && (st === 'done' || st === 'error' || st === 'stopped')) {
+        closeAgentStream();
+        loadAgentSessions(false);
+        loadAdapters();
+        loadOverview();
+        if (st === 'done') toast('AI 直跑本轮已完成');
+        else if (st === 'stopped') toast('AI 直跑已停止');
+        else if (st === 'error') toast(`AI 直跑报错: ${ev.error || ''}`);
+      }
+    }
+    renderAgentFeed();
+  }
+
+  function attachAgentStream(sessionId) {
+    closeAgentStream();
+    agentEvents = [];
+    setAgentRunningState(true, 'running');
+    const es = new EventSource(`/api/agent/sessions/${encodeURIComponent(sessionId)}/stream`);
+    agentEventSource = es;
+    es.onmessage = (raw) => {
+      try {
+        const ev = JSON.parse(raw.data);
+        handleAgentEvent(ev, true);
+      } catch {}
+    };
+    es.onerror = () => {
+      if (agentEventSource === es) {
+        es.close();
+        agentEventSource = null;
+      }
+      setAgentRunningState(false);
+      loadAgentSessions(false);
+    };
+  }
+
+  async function selectAgentSession(sessionId) {
+    closeAgentStream();
+    activeAgentSessionId = sessionId;
+    syncAgentExportButton();
+    renderAgentSessions();
+    try {
+      const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`);
+      const d = await res.json();
+      if (!d.ok || !d.session) return toast(d.error || '加载会话失败');
+      const s = d.session;
+      $('#agent-chat-title').textContent = s.title || s.id;
+      $('#agent-chat-url').textContent = s.target_url || '';
+      renderAgentPlan(s.plan || []);
+      renderAgentUsage(s.usage || {});
+      agentEvents = s.events || [];
+      setAgentRunningState(s.status === 'running', s.status || 'idle');
+      renderAgentFeed();
+      if (s.status === 'running') {
+        attachAgentStream(s.id);
+      }
+    } catch (e) {
+      toast('读取会话异常: ' + e.message);
+    }
+  }
+
+  async function loadAgentSessions(autoReconnect = false) {
+    try {
+      const res = await fetch('/api/agent/sessions');
+      const d = await res.json();
+      agentSessionsCache = d.sessions || [];
+      const activeId = d.active_session_id || '';
+      if ($('#nav-badge-agent')) {
+        $('#nav-badge-agent').classList.toggle('hidden', !activeId);
+      }
+      renderAgentSessions();
+      if (autoReconnect && activeId) {
+        await selectAgentSession(activeId);
+      } else if (!activeAgentSessionId && agentSessionsCache.length && currentView === 'agent') {
+        await selectAgentSession(agentSessionsCache[0].id);
+      }
+      syncAgentExportButton();
+    } catch {}
+  }
+
+  async function createNewAgentSession(title = '', targetUrl = '') {
+    const res = await fetch('/api/agent/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, target_url: targetUrl }),
+    });
+    const d = await res.json();
+    if (!d.ok || !d.session) throw new Error(d.error || '创建会话失败');
+    activeAgentSessionId = d.session.id;
+    syncAgentExportButton();
+    $('#agent-chat-title').textContent = d.session.title;
+    $('#agent-chat-url').textContent = d.session.target_url || '';
+    agentEvents = [];
+    renderAgentPlan([]);
+    renderAgentUsage({});
+    renderAgentFeed();
+    await loadAgentSessions(false);
+    return d.session;
+  }
+
+  async function dispatchAgentTurn(sessionId, message, targetUrl = '', isSteer = false) {
+    if (!isSteer) setAgentRunningState(true, 'running');
+    try {
+      const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, target_url: targetUrl }),
+      });
+      const d = await res.json();
+      if (!d.ok) {
+        if (!isSteer) setAgentRunningState(false, 'idle');
+        return toast(d.error || '发送指令失败');
+      }
+      if (d.session) {
+        $('#agent-chat-title').textContent = d.session.title || sessionId;
+        $('#agent-chat-url').textContent = d.session.target_url || '';
+      }
+      if (d.steered) {
+        if (!agentEventSource) attachAgentStream(sessionId);
+        toast('已注入实时纠偏，将在当前步骤完成后生效');
+        return;
+      }
+      attachAgentStream(sessionId);
+      loadAgentSessions(false);
+    } catch (e) {
+      if (!isSteer) setAgentRunningState(false, 'error');
+      toast('AI 直跑启动异常: ' + e.message);
+    }
+  }
+
+  $('#btn-agent-new-session')?.addEventListener('click', async () => {
+    try {
+      closeAgentStream();
+      await createNewAgentSession('', $('#agent-target-url')?.value.trim() || '');
+      setAgentRunningState(false, 'idle');
+      toast('已创建新 AI 会话');
+    } catch (e) {
+      toast(e.message);
+    }
+  });
+
+  $('#btn-agent-export')?.addEventListener('click', async () => {
+    if (!activeAgentSessionId) return toast('请先选择要导出的会话');
+    const btn = $('#btn-agent-export');
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/api/agent/sessions/${encodeURIComponent(activeAgentSessionId)}/export`);
+      const d = await res.json();
+      if (!d.ok) return toast(d.error || '导出会话失败');
+      const blob = new Blob([d.markdown || ''], { type: 'text/markdown;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = d.filename || `${activeAgentSessionId}.md`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast(`已导出 ${a.download}`);
+    } catch (e) {
+      toast('导出异常: ' + e.message);
+    } finally {
+      syncAgentExportButton();
+    }
+  });
+
+  $$('[data-agent-chip]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const inp = $('#agent-instruction');
+      if (inp) {
+        inp.value = chip.dataset.agentChip || '';
+        inp.focus();
+      }
+      toast('已填入快捷指令，点击「一键 AI 直跑」开始');
+    });
+  });
+
+  $('#btn-agent-quick-run')?.addEventListener('click', async () => {
+    const url = $('#agent-target-url')?.value.trim() || '';
+    let instr = $('#agent-instruction')?.value.trim() || '';
+    if (!instr && url) {
+      instr = '探测该目标注册页的表单与风控特征，生成符合 BaseSiteAdapter 规范的适配器代码并单线程试跑 1 个号验证结果';
+    }
+    if (!instr) return toast('请输入目标 URL 或一句话指令');
+    try {
+      const sess = await createNewAgentSession('', url);
+      await dispatchAgentTurn(sess.id, instr, url, false);
+    } catch (e) {
+      toast(e.message || '启动失败');
+    }
+  });
+
+  function handleAgentLaunchEnter(e) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
+      e.preventDefault();
+      const btn = $('#btn-agent-quick-run');
+      if (btn && !btn.disabled) btn.click();
+    }
+  }
+  $('#agent-target-url')?.addEventListener('keydown', handleAgentLaunchEnter);
+  $('#agent-instruction')?.addEventListener('keydown', handleAgentLaunchEnter);
+
+  async function sendAgentFollowup() {
+    const inp = $('#agent-followup-input');
+    const text = inp?.value.trim() || '';
+    if (!text) return;
+    inp.value = '';
+    const sendBtn = $('#btn-agent-send');
+    if (sendBtn) sendBtn.disabled = true;
+    try {
+      let sid = activeAgentSessionId;
+      const isSteer = agentRunning && Boolean(sid);
+      if (!sid) {
+        if (agentRunning) {
+          return toast('当前已有运行中的会话，请先选中该会话再发送纠偏');
+        }
+        const sess = await createNewAgentSession('', $('#agent-target-url')?.value.trim() || '');
+        sid = sess.id;
+      }
+      await dispatchAgentTurn(sid, text, '', isSteer);
+    } catch (e) {
+      toast(e.message || '发送失败');
+    } finally {
+      if (sendBtn) sendBtn.disabled = false;
+    }
+  }
+
+  $('#btn-agent-send')?.addEventListener('click', sendAgentFollowup);
+  $('#agent-followup-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
+      e.preventDefault();
+      sendAgentFollowup();
+    }
+  });
+
+  $('#btn-agent-stop')?.addEventListener('click', async () => {
+    if (!activeAgentSessionId) return;
+    try {
+      await fetch(`/api/agent/sessions/${encodeURIComponent(activeAgentSessionId)}/stop`, { method: 'POST' });
+      setAgentRunningState(false, 'stopped');
+      closeAgentStream();
+      toast('已发送 AI 直跑停止指令');
+      loadAgentSessions(false);
+    } catch (e) {
+      toast('停止异常: ' + e.message);
+    }
+  });
+
   // Initial boot
   loadOverview();
   loadDoctor();
   loadAdapters();
   loadJobs(true);
+  loadLlmConfig(false);
+  loadAgentSessions(true);
 })();
