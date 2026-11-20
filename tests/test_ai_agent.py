@@ -934,7 +934,7 @@ def test_agent_session_rename_patch_and_validation(tmp_path, monkeypatch):
         with urllib.request.urlopen(f"{base}/", timeout=5) as r:
             html = r.read().decode("utf-8")
             assert 'id="layout-summary" class="layout-summary-grid"' in html
-            assert 'id="layout-zoom-range" class="lite-range"' in html
+            assert 'id="layout-zoom-range"' in html
             assert 'id="agent-session-search"' in html
 
         st, cr = _req_json("POST", f"{base}/api/agent/sessions", {

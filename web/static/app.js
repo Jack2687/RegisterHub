@@ -1392,27 +1392,34 @@
     });
   }
 
-  function bindLayoutSlotInteractions() {
-    const bindTarget = (el) => {
+  const layoutSlotExitTimers = new Map();
+
+  function bindSlotInteractionOnce(el) {
+    if (!el || el.dataset.boundSlot === '1') return;
+    el.dataset.boundSlot = '1';
+    el.addEventListener('mouseenter', () => {
       const idx = Number(el.dataset.slotIdx);
-      el.addEventListener('mouseenter', () => {
-        layoutHoveredSlotIdx = idx;
+      layoutHoveredSlotIdx = idx;
+      syncLayoutSlotFocus();
+    });
+    el.addEventListener('mouseleave', () => {
+      const idx = Number(el.dataset.slotIdx);
+      if (layoutHoveredSlotIdx === idx) {
+        layoutHoveredSlotIdx = null;
         syncLayoutSlotFocus();
-      });
-      el.addEventListener('mouseleave', () => {
-        if (layoutHoveredSlotIdx === idx) {
-          layoutHoveredSlotIdx = null;
-          syncLayoutSlotFocus();
-        }
-      });
-      el.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        layoutFocusedSlotIdx = layoutFocusedSlotIdx === idx ? null : idx;
-        syncLayoutSlotFocus();
-      });
-    };
-    $$('#layout-canvas .slot-rect[data-slot-idx]').forEach(bindTarget);
-    $$('#layout-slot-list .layout-slot-row.active-slot[data-slot-idx]').forEach(bindTarget);
+      }
+    });
+    el.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const idx = Number(el.dataset.slotIdx);
+      layoutFocusedSlotIdx = layoutFocusedSlotIdx === idx ? null : idx;
+      syncLayoutSlotFocus();
+    });
+  }
+
+  function bindLayoutSlotInteractions() {
+    $$('#layout-canvas .slot-rect[data-slot-idx]').forEach(bindSlotInteractionOnce);
+    $$('#layout-slot-list .layout-slot-row.active-slot[data-slot-idx]').forEach(bindSlotInteractionOnce);
   }
 
   function renderLayoutCanvas() {
@@ -1458,28 +1465,79 @@
     const canvas = $('#layout-canvas');
     canvas.style.aspectRatio = `${waW} / ${waH}`;
     if (!slots.length) {
+      layoutSlotExitTimers.forEach((t) => clearTimeout(t));
+      layoutSlotExitTimers.clear();
       canvas.innerHTML = `<div class="empty-box" style="height:100%;display:flex;align-items:center;justify-content:center">尚未生成视窗配置，点击右上角「一键重算 6 套布局」。</div>`;
     } else {
-      canvas.innerHTML = slots
-        .map((s, i) => {
-          const leftPct = Math.max(0, Math.min(96, ((s.x - waX) / waW) * 100));
-          const topPct = Math.max(0, Math.min(96, ((s.y - waY) / waH) * 100));
-          const wPct = Math.max(8, Math.min(100 - leftPct, (s.width / waW) * 100));
-          const hPct = Math.max(12, Math.min(100 - topPct, (s.height / waH) * 100));
-          const zPct = Math.round((s.zoom || 1) * 100);
-          const colorCls = `c${i % 6}`;
-          return `
-            <div class="slot-rect ${colorCls}" data-slot-idx="${i}" style="left:${leftPct}%;top:${topPct}%;width:${wPct}%;height:${hPct}%;z-index:${10 + i}">
-              <div class="slot-head">
-                <span class="slot-title"><i class="slot-dot ${colorCls}"></i><span>${escapeHtml(s.name || `Slot #${i + 1}`)}</span></span>
-                <span class="slot-zoom mono">${zPct}%</span>
-              </div>
-              <div class="slot-body">
-                <div class="slot-dim mono">${s.width}×${s.height} @ (${s.x},${s.y})</div>
-              </div>
-            </div>`;
-        })
-        .join('');
+      const emptyEl = canvas.querySelector('.empty-box');
+      if (emptyEl) emptyEl.remove();
+
+      const activeKeys = new Set(slots.map((_, i) => String(i)));
+      // Smooth exit for removed slots
+      canvas.querySelectorAll('.slot-rect').forEach((el) => {
+        const key = el.dataset.slotIdx || '';
+        if (!activeKeys.has(key)) {
+          el.classList.remove('is-focused');
+          el.classList.add('slot-exit');
+          if (!layoutSlotExitTimers.has(key)) {
+            const timer = setTimeout(() => {
+              layoutSlotExitTimers.delete(key);
+              el.remove();
+            }, 300);
+            layoutSlotExitTimers.set(key, timer);
+          }
+        }
+      });
+
+      // Reuse DOM nodes in place so CSS transitions glide smoothly across presets
+      slots.forEach((s, i) => {
+        const key = String(i);
+        if (layoutSlotExitTimers.has(key)) {
+          clearTimeout(layoutSlotExitTimers.get(key));
+          layoutSlotExitTimers.delete(key);
+        }
+        const leftPct = Math.max(0, Math.min(96, ((s.x - waX) / waW) * 100));
+        const topPct = Math.max(0, Math.min(96, ((s.y - waY) / waH) * 100));
+        const wPct = Math.max(8, Math.min(100 - leftPct, (s.width / waW) * 100));
+        const hPct = Math.max(12, Math.min(100 - topPct, (s.height / waH) * 100));
+        const zPct = Math.round((s.zoom || 1) * 100);
+        const colorCls = `c${i % 6}`;
+        const titleText = s.name || `Slot #${i + 1}`;
+        const dimText = `${s.width}×${s.height} @ (${s.x},${s.y})`;
+
+        let el = canvas.querySelector(`.slot-rect[data-slot-idx="${key}"]`);
+        const isNew = !el;
+        if (isNew) {
+          el = document.createElement('div');
+          el.dataset.slotIdx = key;
+          el.className = `slot-rect ${colorCls} slot-enter`;
+          el.innerHTML = `<div class="slot-head"><span class="slot-title-text"></span><span class="slot-zoom mono"></span></div><div class="slot-dim mono"></div>`;
+          bindSlotInteractionOnce(el);
+          canvas.appendChild(el);
+        } else {
+          el.classList.remove('slot-exit');
+        }
+
+        el.style.left = `${leftPct}%`;
+        el.style.top = `${topPct}%`;
+        el.style.width = `${wPct}%`;
+        el.style.height = `${hPct}%`;
+        el.style.zIndex = String(10 + i);
+        const tEl = el.querySelector('.slot-title-text');
+        const zEl = el.querySelector('.slot-zoom');
+        const dEl = el.querySelector('.slot-dim');
+        if (tEl) tEl.textContent = titleText;
+        if (zEl) zEl.textContent = `${zPct}%`;
+        if (dEl) dEl.textContent = dimText;
+
+        if (isNew) {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              el.classList.remove('slot-enter');
+            });
+          });
+        }
+      });
     }
 
     const curZoomPct = slots.length ? Math.round((slots[0].zoom || 1) * 100) : 100;
@@ -1488,41 +1546,27 @@
     $('#layout-zoom-val').textContent = `${curZoomPct}%`;
     syncLayoutRangeFill(clampedZoom);
 
-    const fixedRows = [];
-    for (let i = 0; i < 6; i += 1) {
-      if (i < slots.length) {
-        const s = slots[i];
-        const colorCls = `c${i % 6}`;
-        fixedRows.push(`
-          <button type="button" class="layout-slot-row active-slot ${colorCls}" data-slot-idx="${i}" title="悬停或点击置顶预览 ${escapeHtml(s.name || `槽位 #${i + 1}`)}">
-            <span class="slot-row-name"><i class="slot-dot ${colorCls}"></i><span>${escapeHtml(s.name || `槽位 #${i + 1}`)}</span></span>
+    $('#layout-slot-list').innerHTML = slots
+      .map(
+        (s, i) => `
+          <button type="button" class="layout-slot-row active-slot" data-slot-idx="${i}">
+            <span class="slot-row-name">${escapeHtml(s.name || `Slot #${i + 1}`)}</span>
             <span class="slot-row-meta mono">${s.width}×${s.height} · ${Math.round((s.zoom || 1) * 100)}%</span>
-          </button>`);
-      } else {
-        fixedRows.push(`
-          <div class="layout-slot-row inactive-slot" aria-disabled="true">
-            <span class="slot-row-name"><i class="slot-dot muted"></i><span>槽位 #${i + 1}</span></span>
-            <span class="slot-row-meta">当前档位未启用</span>
-          </div>`);
-      }
-    }
-    $('#layout-slot-list').innerHTML = fixedRows.join('');
+          </button>`
+      )
+      .join('');
     bindLayoutSlotInteractions();
     syncLayoutSlotFocus();
 
     const defBtn = $('#btn-set-default-mode');
-    const isCurDef =
-      (layoutPresetKey === 'quad_edge' && activeQuad === 'edge_2x2') ||
-      (layoutPresetKey === 'quad_compact' && activeQuad === 'centered_compact') ||
-      (layoutPresetKey === 'hex_edge' && activeHex === 'edge_3x2') ||
-      (layoutPresetKey === 'hex_wing' && activeHex === 'wing_cascade');
     defBtn.classList.remove('hidden');
     if (meta.applyOpts) {
-      defBtn.disabled = isCurDef;
-      defBtn.textContent = isCurDef ? `「${meta.label}」已是当前默认形态` : `将「${meta.label}」设为默认形态`;
+      defBtn.style.visibility = 'visible';
+      defBtn.disabled = false;
+      defBtn.textContent = `将「${meta.label}」设为默认形态`;
     } else {
+      defBtn.style.visibility = 'hidden';
       defBtn.disabled = true;
-      defBtn.textContent = '该档位为唯一形态（默认生效）';
     }
 
     const grid = $('#layout-summary');
