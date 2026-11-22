@@ -14,6 +14,7 @@ import time
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 _IP_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$|^[0-9a-fA-F:]{3,45}$")
 _CLOUD_KEYWORDS = (
@@ -58,9 +59,17 @@ def _fetch_json(url: str, proxy_url: str = "", timeout: float = 7.0) -> Optional
         return None
 
 
+def _validate_http_url(url: str, *, resolve_dns: bool = False) -> str:
+    from .net_guard import validate_public_http_url
+
+    return validate_public_http_url(url, resolve_dns=resolve_dns)
+
+
 def _probe_target(target_url: str, proxy_url: str = "", timeout: float = 8.0) -> Dict[str, Any]:
-    handlers = [urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})] if proxy_url else []
-    opener = urllib.request.build_opener(*handlers)
+    from .net_guard import build_safe_urllib_opener
+
+    target_url = _validate_http_url(target_url, resolve_dns=True)
+    opener = build_safe_urllib_opener(proxy_url)
     req = urllib.request.Request(
         target_url,
         headers={
@@ -128,34 +137,43 @@ def score_ip(
     """Probe an IP (directly or through proxy_url) and compute a 0–100 purity score."""
     clean_ip = (ip or "").strip()
     clean_proxy = (proxy_url or "").strip()
+    clean_target = _validate_http_url(target_url) if (target_url or "").strip() else ""
     t0 = time.perf_counter()
+    intel_timeout = min(float(timeout), 4.0)
 
-    # Step 1: Resolve exit IP if caller gave proxy_url (or wants current exit IP)
-    if not clean_ip:
-        ip_resp = _fetch_json("https://api.ipify.org?format=json", proxy_url=clean_proxy, timeout=timeout)
-        if ip_resp and ip_resp.get("ip"):
-            clean_ip = str(ip_resp["ip"]).strip()
-
-    # Step 2: Query primary risk intelligence (api.ipapi.is) + fallback (ip-api.com)
-    # Note: when scoring a known IP string, query metadata directly (faster & works even if proxy only permits target)
+    # Step 1 & 2: Query api.ipapi.is (returns exit IP + full intel in 1 RTT) and ip-api.com concurrently
+    # Fallback to ipify ONLY if api.ipapi.is fails and exit IP is still unknown.
     meta_proxy = clean_proxy if not clean_ip else ""
+    ipcom_fields = "status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,mobile,proxy,hosting,query"
     q_ipapi = f"https://api.ipapi.is/?q={clean_ip}" if clean_ip else "https://api.ipapi.is/"
-    d1 = _fetch_json(q_ipapi, proxy_url=meta_proxy, timeout=timeout)
+    q_ipcom = f"http://ip-api.com/json/{clean_ip}?fields={ipcom_fields}" if clean_ip else f"http://ip-api.com/json/?fields={ipcom_fields}"
 
-    if not clean_ip and d1 and d1.get("ip"):
-        clean_ip = str(d1["ip"]).strip()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+        f_d1 = ex.submit(_fetch_json, q_ipapi, meta_proxy, intel_timeout)
+        f_d2 = ex.submit(_fetch_json, q_ipcom, meta_proxy, intel_timeout)
+        d1 = f_d1.result()
+        d2 = f_d2.result()
 
-    q_ipcom = (
-        f"http://ip-api.com/json/{clean_ip}?fields=status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,mobile,proxy,hosting,query"
-        if clean_ip
-        else "http://ip-api.com/json/?fields=status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,mobile,proxy,hosting,query"
-    )
-    d2 = _fetch_json(q_ipcom, proxy_url=meta_proxy, timeout=timeout)
     if d2 and d2.get("status") != "success":
         d2 = None
 
-    if not clean_ip and d2 and d2.get("query"):
-        clean_ip = str(d2["query"]).strip()
+    if not clean_ip:
+        if d1 and d1.get("ip"):
+            clean_ip = str(d1["ip"]).strip()
+            # 轮换代理场景若两次并发命中的出口 IP 不一致，丢弃错位的 d2 防止信号串号
+            if d2 and d2.get("query") and str(d2["query"]).strip() != clean_ip:
+                d2 = None
+        elif d2 and d2.get("query"):
+            clean_ip = str(d2["query"]).strip()
+
+    if not clean_ip and not d1:
+        ip_resp = _fetch_json("https://api.ipify.org?format=json", proxy_url=clean_proxy, timeout=intel_timeout)
+        if ip_resp and ip_resp.get("ip"):
+            clean_ip = str(ip_resp["ip"]).strip()
+            if not d2:
+                d2 = _fetch_json(f"http://ip-api.com/json/{clean_ip}?fields={ipcom_fields}", proxy_url="", timeout=intel_timeout)
+                if d2 and d2.get("status") != "success":
+                    d2 = None
 
     if not clean_ip and not d1 and not d2:
         return {
@@ -240,8 +258,8 @@ def score_ip(
 
     # Optional target-site passability probe
     target_probe: Optional[Dict[str, Any]] = None
-    if target_url.strip():
-        target_probe = _probe_target(target_url.strip(), proxy_url=clean_proxy, timeout=timeout)
+    if clean_target:
+        target_probe = _probe_target(clean_target, proxy_url=clean_proxy, timeout=timeout)
         if target_probe["passed"]:
             factors.append({"label": f"目标站直连放行 ({target_probe['status_code']})", "delta": 0, "tone": "emerald"})
         elif target_probe["status_code"] == 429:
@@ -310,15 +328,16 @@ def score_batch(
     max_workers: int = 6,
 ) -> Dict[str, Any]:
     """Concurrently score up to 24 IPs or proxy URLs, sorted highest score first."""
+    clean_target = _validate_http_url(target_url) if (target_url or "").strip() else ""
     capped = entries[:24]
 
     def _one(ent: Dict[str, str]) -> Dict[str, Any]:
         raw = str(ent.get("value") or ent.get("proxy") or ent.get("ip") or "").strip()
         label = str(ent.get("label") or raw)
         if _IP_RE.fullmatch(raw):
-            res = score_ip(ip=raw, target_url=target_url)
+            res = score_ip(ip=raw, target_url=clean_target)
         else:
-            res = score_ip(proxy_url=raw, target_url=target_url)
+            res = score_ip(proxy_url=raw, target_url=clean_target)
         res["label"] = label
         return res
 

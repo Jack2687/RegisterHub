@@ -325,16 +325,28 @@ class _FormHTMLParser(html.parser.HTMLParser):
 
 
 def tool_probe_url(url: str) -> Dict[str, Any]:
-    """Tool 1: Zero-dependency HTTP/HTML form & anti-bot detection."""
+    """Tool 1: Zero-dependency HTTP/HTML form & anti-bot detection (SSRF guarded)."""
+    from core.net_guard import (
+        PrivateAddressBlockedError,
+        build_safe_urllib_opener,
+        validate_proxy_url,
+        validate_public_http_url,
+    )
+
     target = str(url or "").strip()
     if not target.startswith(("http://", "https://")):
         return {"ok": False, "error": "URL 必须以 http:// 或 https:// 开头"}
 
-    proxy = _read_proxy_from_config()
-    handlers = [urllib.request.ProxyHandler({"http": proxy, "https": proxy})] if proxy else []
-    opener = urllib.request.build_opener(*handlers)
+    try:
+        clean_target = validate_public_http_url(target, resolve_dns=True)
+        raw_px = _read_proxy_from_config()
+        proxy = validate_proxy_url(raw_px) if raw_px else ""
+    except (PrivateAddressBlockedError, ValueError) as exc:
+        return {"ok": False, "url": target, "error": str(exc)}
+
+    opener = build_safe_urllib_opener(proxy=proxy or "")
     req = urllib.request.Request(
-        target,
+        clean_target,
         headers={
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

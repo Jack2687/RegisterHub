@@ -244,10 +244,10 @@ def save_llm_config(updates: Dict[str, Any], config_path: Optional[Path] = None)
             if incoming_key and incoming_key != "***" and incoming_key != existing_hint:
                 cfg["api_key"] = incoming_key
 
-        target.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = target.with_suffix(".json.tmp")
-        tmp_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        os.replace(tmp_path, target)
+        from core.locks import atomic_write_text_safe, interprocess_file_lock
+
+        with interprocess_file_lock(target):
+            atomic_write_text_safe(target, json.dumps(cfg, ensure_ascii=False, indent=2) + "\n")
 
     return to_public_llm_config(cfg)
 

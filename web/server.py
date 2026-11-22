@@ -539,9 +539,10 @@ def save_config_dict(updates: Dict[str, Any]) -> Dict[str, Any]:
         if pw != "***":
             m["imap_password"] = pw
 
-    tmp = CONFIG_FILE.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, CONFIG_FILE)
+    from core.locks import atomic_write_text_safe, interprocess_file_lock
+
+    with interprocess_file_lock(CONFIG_FILE):
+        atomic_write_text_safe(CONFIG_FILE, json.dumps(cfg, ensure_ascii=False, indent=2))
     return load_config_dict()
 
 
@@ -686,21 +687,25 @@ def build_overview_payload() -> Dict[str, Any]:
     jobs = job_manager.list_jobs()
     act = job_manager.active_job()
 
-    # Build 7-day trend from job records & failed.txt dates
+    # Build 7-day trend from job records & failed.txt dates (deduplicate failed job vs failed.txt line)
     today = datetime.date.today()
     days = [(today - datetime.timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
     trend_map = {d: {"date": d[5:], "full_date": d, "done": 0, "failed": 0} for d in days}
+    job_failed_by_day: collections.Counter[str] = collections.Counter()
+    ledger_failed_by_day: collections.Counter[str] = collections.Counter()
     for j in jobs:
         dkey = str(j.get("started_at") or "")[:10]
         if dkey in trend_map:
             if j.get("status") == "done":
                 trend_map[dkey]["done"] += max(1, int(j.get("count") or 1))
             elif j.get("status") == "failed":
-                trend_map[dkey]["failed"] += 1
+                job_failed_by_day[dkey] += 1
     for f in failures:
         dkey = str(f.get("time") or "")[:10]
         if dkey in trend_map:
-            trend_map[dkey]["failed"] += 1
+            ledger_failed_by_day[dkey] += 1
+    for dkey in days:
+        trend_map[dkey]["failed"] = max(job_failed_by_day[dkey], ledger_failed_by_day[dkey])
 
     recent_accounts = []
     for a in reversed(accounts[-8:]):
@@ -768,10 +773,13 @@ def _compute_totp(secret: str) -> Dict[str, Any]:
 
 def _probe_target_page(target_url: str) -> Dict[str, Any]:
     from core.inspector import FormInspector
+    from core.net_guard import validate_proxy_url, validate_public_http_url
     from playwright.sync_api import sync_playwright
 
+    clean_url = validate_public_http_url(target_url, resolve_dns=True)
     cfg = _load_raw_config_dict()
-    proxy = (cfg.get("browser") or {}).get("proxy")
+    raw_px = str((cfg.get("browser") or {}).get("proxy") or "").strip()
+    proxy = validate_proxy_url(raw_px) if raw_px else ""
     t0 = time.perf_counter()
     with sync_playwright() as p:
         kw: Dict[str, Any] = {
@@ -787,8 +795,21 @@ def _probe_target_page(target_url: str) -> Dict[str, Any]:
             br = p.chromium.launch(**kw)
         try:
             ctx = br.new_context()
+
+            def _pw_ssrf_guard(route: Any) -> None:
+                req_url = route.request.url
+                if req_url.startswith(("data:", "blob:", "about:")):
+                    route.continue_()
+                    return
+                try:
+                    validate_public_http_url(req_url, resolve_dns=True)
+                    route.continue_()
+                except Exception:
+                    route.abort("blockedbyclient")
+
+            ctx.route("**/*", _pw_ssrf_guard)
             pg = ctx.new_page()
-            resp = pg.goto(target_url, timeout=20000, wait_until="domcontentloaded")
+            resp = pg.goto(clean_url, timeout=20000, wait_until="domcontentloaded")
             status = resp.status if resp else 0
             title = pg.title()
             final_url = pg.url
@@ -1198,19 +1219,31 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/config/test-proxy":
+            from core.net_guard import (
+                PrivateAddressBlockedError,
+                build_safe_urllib_opener,
+                validate_proxy_url,
+                validate_public_http_url,
+            )
+
             cfg = _load_raw_config_dict()
             px = str(body.get("proxy") if "proxy" in body else (cfg.get("browser") or {}).get("proxy") or "").strip()
             target = str(body.get("target_url") or "https://api.ipify.org?format=json").strip()
             t0 = time.perf_counter()
             try:
-                handlers = [urllib.request.ProxyHandler({"http": px, "https": px})] if px else []
-                opener = urllib.request.build_opener(*handlers)
-                req = urllib.request.Request(target, headers={"User-Agent": "RegisterHub-Lite/2.0"})
+                clean_target = validate_public_http_url(target, resolve_dns=True)
+                clean_px = validate_proxy_url(px) if px else ""
+            except (PrivateAddressBlockedError, ValueError) as e:
+                self._send_json({"ok": False, "proxy": px or "(direct)", "latency_ms": 0.0, "error": str(e)}, status=400)
+                return
+            try:
+                opener = build_safe_urllib_opener(proxy=clean_px or "")
+                req = urllib.request.Request(clean_target, headers={"User-Agent": "RegisterHub-Lite/2.0"})
                 with opener.open(req, timeout=8) as r:
                     txt = r.read(512).decode("utf-8", errors="ignore").strip()
                     self._send_json({
                         "ok": True,
-                        "proxy": px or "(direct)",
+                        "proxy": clean_px or "(direct)",
                         "status_code": r.status,
                         "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
                         "body": txt[:200],
@@ -1218,7 +1251,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({
                     "ok": False,
-                    "proxy": px or "(direct)",
+                    "proxy": clean_px or "(direct)",
                     "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
                     "error": str(e),
                 })
@@ -1332,13 +1365,22 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/api/tools/ip-score":
             from core.ip_scorer import score_ip
+            from core.net_guard import PrivateAddressBlockedError, validate_proxy_url, validate_public_http_url
 
             ip_val = str(body.get("ip") or "").strip()
             px = str(body.get("proxy_url") or "").strip()
+            target_url = str(body.get("target_url") or "").strip()
+            try:
+                if target_url:
+                    target_url = validate_public_http_url(target_url, resolve_dns=True)
+                if px:
+                    px = validate_proxy_url(px)
+            except (PrivateAddressBlockedError, ValueError) as e:
+                self._send_json({"ok": False, "error": str(e)}, status=400)
+                return
             if not ip_val and not px:
                 cfg = _load_raw_config_dict()
                 px = str((cfg.get("browser") or {}).get("proxy") or "").strip()
-            target_url = str(body.get("target_url") or "").strip()
             self._send_json(score_ip(ip=ip_val, proxy_url=px, target_url=target_url))
             return
 
@@ -1373,43 +1415,71 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/accounts/delete":
+            from core.locks import atomic_write_text_safe, interprocess_file_lock
+
             target_email = str(body.get("email") or "").strip().lower()
             target_key = str(body.get("api_key") or "").strip()
+            if not target_email and not target_key:
+                self._send_json({"ok": False, "removed": 0, "error": "缺少删除目标字段"}, status=400)
+                return
             if not ACCOUNTS_FILE.exists():
                 self._send_json({"ok": True, "removed": 0})
                 return
-            lines = ACCOUNTS_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
-            kept: List[str] = []
-            removed = 0
-            for ln in lines:
-                s = ln.strip()
-                if not s:
-                    continue
-                parts = [p.strip() for p in s.split("----")]
-                em = (parts[0] if parts else "").lower()
-                ak = parts[3] if len(parts) >= 4 else ""
-                if removed == 0 and ((target_email and em == target_email) and (not target_key or ak == target_key)):
-                    removed += 1
-                    continue
-                kept.append(ln)
-            if removed > 0:
-                ACCOUNTS_FILE.with_suffix(".txt.bak").write_text("\n".join(lines) + "\n", encoding="utf-8")
-                tmp = ACCOUNTS_FILE.with_suffix(".txt.tmp")
-                tmp.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
-                os.replace(tmp, ACCOUNTS_FILE)
+            with interprocess_file_lock(ACCOUNTS_FILE):
+                if not ACCOUNTS_FILE.exists():
+                    self._send_json({"ok": True, "removed": 0})
+                    return
+                lines = ACCOUNTS_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
+                kept: List[str] = []
+                removed = 0
+                for ln in lines:
+                    s = ln.strip()
+                    if not s or s.startswith("#"):
+                        kept.append(ln)
+                        continue
+                    parts = [p.strip() for p in s.split("----")]
+                    em = (parts[0] if parts else "").lower()
+                    pwd_col = parts[1] if len(parts) > 1 else ""
+                    user_col = parts[2] if len(parts) > 2 else ""
+                    ak = parts[3] if len(parts) >= 4 else ""
+                    if not ak:
+                        if pwd_col.startswith(("hms-", "sk-", "gsk_", "coa_")):
+                            ak = pwd_col
+                        elif len(parts) == 3 and user_col.startswith(("hms-", "sk-", "gsk_", "coa_")):
+                            ak = user_col
+                    email_ok = (not target_email) or (em == target_email)
+                    key_ok = (not target_key) or (ak == target_key)
+                    if removed == 0 and email_ok and key_ok:
+                        removed += 1
+                        continue
+                    kept.append(ln)
+                if removed > 0:
+                    ACCOUNTS_FILE.with_suffix(".txt.bak").write_text("\n".join(lines) + "\n", encoding="utf-8")
+                    atomic_write_text_safe(ACCOUNTS_FILE, "\n".join(kept) + ("\n" if kept else ""))
             self._send_json({"ok": True, "removed": removed})
             return
 
         if path == "/api/accounts/clear":
+            from core.locks import atomic_write_text_safe, interprocess_file_lock
+
             if ACCOUNTS_FILE.exists():
-                ACCOUNTS_FILE.with_suffix(".txt.bak").write_text(
-                    ACCOUNTS_FILE.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8"
-                )
-                ACCOUNTS_FILE.write_text("", encoding="utf-8")
+                with interprocess_file_lock(ACCOUNTS_FILE):
+                    if ACCOUNTS_FILE.exists():
+                        ACCOUNTS_FILE.with_suffix(".txt.bak").write_text(
+                            ACCOUNTS_FILE.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8"
+                        )
+                        atomic_write_text_safe(ACCOUNTS_FILE, "")
             self._send_json({"ok": True})
             return
 
         if path == "/api/accounts/test-key":
+            from core.net_guard import (
+                PrivateAddressBlockedError,
+                build_safe_urllib_opener,
+                validate_proxy_url,
+                validate_public_http_url,
+            )
+
             key_val = str(body.get("key") or "").strip()
             base_url = str(body.get("base_url") or "").strip().rstrip("/")
             if len(key_val) < 8:
@@ -1418,11 +1488,16 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             if not base_url:
                 self._send_json({"ok": True, "detail": "格式校验通过（填写 Base URL 可测在线 /v1/models）"})
                 return
-            models_url = f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
             cfg = _load_raw_config_dict()
-            px = (cfg.get("browser") or {}).get("proxy")
-            handlers = [urllib.request.ProxyHandler({"http": px, "https": px})] if px else []
-            opener = urllib.request.build_opener(*handlers)
+            raw_px = str((cfg.get("browser") or {}).get("proxy") or "").strip()
+            try:
+                clean_base = validate_public_http_url(base_url, resolve_dns=True).rstrip("/")
+                px = validate_proxy_url(raw_px) if raw_px else ""
+            except (PrivateAddressBlockedError, ValueError) as e:
+                self._send_json({"ok": False, "detail": str(e)}, status=400)
+                return
+            models_url = f"{clean_base}/models" if clean_base.endswith("/v1") else f"{clean_base}/v1/models"
+            opener = build_safe_urllib_opener(proxy=px or "")
             req = urllib.request.Request(
                 models_url,
                 headers={"Authorization": f"Bearer {key_val}", "Accept": "application/json", "User-Agent": "RegisterHub-Lite/2.0"},
@@ -1447,9 +1522,13 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/failures/clear":
+            from core.locks import atomic_write_text_safe, interprocess_file_lock
+
             clear_snaps = bool(body.get("clear_snapshots", False))
             if FAILED_FILE.exists():
-                FAILED_FILE.write_text("", encoding="utf-8")
+                with interprocess_file_lock(FAILED_FILE):
+                    if FAILED_FILE.exists():
+                        atomic_write_text_safe(FAILED_FILE, "")
             snaps_removed = 0
             if clear_snaps and SNAPSHOTS_DIR.exists():
                 for fp in SNAPSHOTS_DIR.glob("*.png"):
@@ -1538,45 +1617,43 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/layout/update":
             try:
                 from core.calibrator import auto_generate_layout
+                from core.locks import atomic_write_text_safe, interprocess_file_lock
 
                 key = str(body.get("preset_key") or "").strip().lower()
                 z = round(max(0.40, min(1.50, float(body.get("zoom") or 1.0))), 2)
-                if GEOMETRY_FILE.exists():
+                if not GEOMETRY_FILE.exists():
+                    auto_generate_layout(save_path=GEOMETRY_FILE)
+                with interprocess_file_lock(GEOMETRY_FILE):
                     data = json.loads(GEOMETRY_FILE.read_text(encoding="utf-8"))
-                else:
-                    data = auto_generate_layout(save_path=GEOMETRY_FILE)
-                slots = None
-                if key == "single":
-                    slots = (data.get("single_concurrency") or {}).get("slots")
-                    data["zoom"] = z
-                elif key == "dual":
-                    slots = (data.get("dual_concurrency") or {}).get("slots")
-                elif key == "quad_edge":
-                    slots = ((data.get("quad_presets") or {}).get("edge_2x2") or {}).get("slots")
-                elif key == "quad_compact":
-                    slots = ((data.get("quad_presets") or {}).get("centered_compact") or {}).get("slots")
-                elif key == "hex_edge":
-                    slots = ((data.get("hex_presets") or {}).get("edge_3x2") or {}).get("slots")
-                elif key == "hex_wing":
-                    slots = ((data.get("hex_presets") or {}).get("wing_cascade") or {}).get("slots")
-                else:
-                    self._send_json({"ok": False, "error": f"未知预设键: {key}"}, status=400)
-                    return
-                if not isinstance(slots, list) or not slots:
-                    self._send_json({"ok": False, "error": "缺少槽位数据，请先自动适配屏幕"}, status=400)
-                    return
-                for s in slots:
-                    if isinstance(s, dict):
-                        s["zoom"] = z
-                if key == "quad_edge" and data.get("quad_mode") == "edge_2x2":
-                    data["slots"] = slots
-                elif key == "quad_compact" and data.get("quad_mode") == "centered_compact":
-                    data["slots"] = slots
-                data["calibrated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
-                GEOMETRY_FILE.parent.mkdir(parents=True, exist_ok=True)
-                tmp = GEOMETRY_FILE.with_suffix(".json.tmp")
-                tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-                os.replace(tmp, GEOMETRY_FILE)
+                    slots = None
+                    if key == "single":
+                        slots = (data.get("single_concurrency") or {}).get("slots")
+                        data["zoom"] = z
+                    elif key == "dual":
+                        slots = (data.get("dual_concurrency") or {}).get("slots")
+                    elif key == "quad_edge":
+                        slots = ((data.get("quad_presets") or {}).get("edge_2x2") or {}).get("slots")
+                    elif key == "quad_compact":
+                        slots = ((data.get("quad_presets") or {}).get("centered_compact") or {}).get("slots")
+                    elif key == "hex_edge":
+                        slots = ((data.get("hex_presets") or {}).get("edge_3x2") or {}).get("slots")
+                    elif key == "hex_wing":
+                        slots = ((data.get("hex_presets") or {}).get("wing_cascade") or {}).get("slots")
+                    else:
+                        self._send_json({"ok": False, "error": f"未知预设键: {key}"}, status=400)
+                        return
+                    if not isinstance(slots, list) or not slots:
+                        self._send_json({"ok": False, "error": "缺少槽位数据，请先自动适配屏幕"}, status=400)
+                        return
+                    for s in slots:
+                        if isinstance(s, dict):
+                            s["zoom"] = z
+                    if key == "quad_edge" and data.get("quad_mode") == "edge_2x2":
+                        data["slots"] = slots
+                    elif key == "quad_compact" and data.get("quad_mode") == "centered_compact":
+                        data["slots"] = slots
+                    data["calibrated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                    atomic_write_text_safe(GEOMETRY_FILE, json.dumps(data, ensure_ascii=False, indent=2))
                 self._send_json({"ok": True, "geometry": data})
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, status=400)

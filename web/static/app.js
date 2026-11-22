@@ -712,14 +712,23 @@
       b.addEventListener('click', async () => {
         const r = rows[Number(b.dataset.delRow)];
         if (!r || !window.confirm(`确认删除账号 ${r.email}？（自动创建 .bak 备份）`)) return;
-        await fetch('/api/accounts/delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: r.email, api_key: r.api_key || '' }),
-        });
-        toast(`已移除 ${r.email}`);
-        loadAccounts();
-        loadOverview();
+        try {
+          const resp = await fetch('/api/accounts/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: r.email, api_key: r.api_key || '' }),
+          });
+          const d = await resp.json().catch(() => ({}));
+          if (!resp.ok || !d.ok || !(Number(d.removed || 0) > 0)) {
+            toast(d.error || '删除失败：未匹配到该台账记录');
+            return;
+          }
+          toast(`已移除 ${r.email}`);
+          loadAccounts();
+          loadOverview();
+        } catch (err) {
+          toast('删除请求异常: ' + (err?.message || err));
+        }
       });
     });
   }
@@ -2398,7 +2407,15 @@
     feed.scrollTop = feed.scrollHeight;
   }
 
+  let agentStreamSeq = 0;
+  let agentReconnectTimer = null;
+  let agentReconnectAttempts = 0;
+
   function closeAgentStream() {
+    if (agentReconnectTimer) {
+      clearTimeout(agentReconnectTimer);
+      agentReconnectTimer = null;
+    }
     if (agentEventSource) {
       agentEventSource.close();
       agentEventSource = null;
@@ -2406,6 +2423,9 @@
   }
 
   function handleAgentEvent(ev, isLive) {
+    if (typeof ev.seq === 'number' && ev.seq + 1 > agentStreamSeq) {
+      agentStreamSeq = ev.seq + 1;
+    }
     if (!ev.eof) {
       agentEvents.push(ev);
     }
@@ -2417,6 +2437,7 @@
       const st = ev.status || 'idle';
       setAgentRunningState(st === 'running', st);
       if (isLive && !ev.replay && (st === 'done' || st === 'error' || st === 'stopped')) {
+        agentReconnectAttempts = 0;
         closeAgentStream();
         loadAgentSessions(false);
         loadAdapters();
@@ -2429,22 +2450,56 @@
     renderAgentFeed();
   }
 
-  function attachAgentStream(sessionId) {
+  function attachAgentStream(sessionId, sinceSeq = 0) {
     closeAgentStream();
-    agentEvents = [];
+    if (!sinceSeq) {
+      agentEvents = [];
+      agentStreamSeq = 0;
+      agentReconnectAttempts = 0;
+    }
     setAgentRunningState(true, 'running');
-    const es = new EventSource(`/api/agent/sessions/${encodeURIComponent(sessionId)}/stream`);
+    const qs = sinceSeq > 0 ? `?since=${encodeURIComponent(String(sinceSeq))}` : '';
+    const es = new EventSource(`/api/agent/sessions/${encodeURIComponent(sessionId)}/stream${qs}`);
     agentEventSource = es;
+    es.onopen = () => {
+      agentReconnectAttempts = 0;
+    };
     es.onmessage = (raw) => {
       try {
         const ev = JSON.parse(raw.data);
+        if (typeof ev.seq === 'number' && ev.seq < agentStreamSeq) {
+          return;
+        }
         handleAgentEvent(ev, true);
       } catch {}
     };
     es.onerror = () => {
-      if (agentEventSource === es) {
-        es.close();
-        agentEventSource = null;
+      if (agentEventSource !== es) return;
+      es.close();
+      agentEventSource = null;
+      if (activeAgentSessionId === sessionId && agentReconnectAttempts < 4) {
+        const attempt = ++agentReconnectAttempts;
+        const delayMs = Math.min(5000, 800 * Math.pow(2, attempt - 1));
+        agentReconnectTimer = setTimeout(async () => {
+          agentReconnectTimer = null;
+          if (activeAgentSessionId !== sessionId) return;
+          try {
+            const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`);
+            const d = await res.json();
+            if (d?.ok && d.session?.status === 'running') {
+              attachAgentStream(sessionId, agentStreamSeq);
+              return;
+            }
+            if (d?.ok && d.session) {
+              agentEvents = d.session.events || agentEvents;
+              setAgentRunningState(false, d.session.status || 'idle');
+              renderAgentFeed();
+            }
+          } catch {}
+          setAgentRunningState(false);
+          loadAgentSessions(false);
+        }, delayMs);
+        return;
       }
       setAgentRunningState(false);
       loadAgentSessions(false);

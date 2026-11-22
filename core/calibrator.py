@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import sys
 import time
+from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -25,32 +27,43 @@ except ImportError:
             "Chrome/134.0.0.0 Safari/537.36"
         )
 
+from .locks import atomic_write_text_safe, interprocess_file_lock, load_json_dict_strict
+
+
+@contextmanager
+def _managed_playwright(factory, browsers, unregister):
+    """在 Playwright 停止前关闭已登记浏览器，异常时也不丢进程白名单。"""
+    with factory() as playwright:
+        try:
+            yield playwright
+        finally:
+            for browser in browsers:
+                try:
+                    browser.close()
+                except Exception:
+                    pass
+                else:
+                    unregister(browser)
+
 
 def build_zoom_init_script(zoom: float = 0.85) -> str:
-    """生成无死锁的动态等比防切割缩放 init script，供 BrowserContext 根级注入。"""
+    """生成根级动态 zoom 脚本；Playwright 仅在实际启动标定时延迟导入。"""
     z = round(max(0.4, min(1.5, float(zoom))), 2)
     return f"""
     (() => {{
         const DEFAULT_ZOOM = {z};
         function getTargetZoom() {{
-            if (typeof window.__AGENT_TARGET_ZOOM === 'number' && window.__AGENT_TARGET_ZOOM >= 0.4 && window.__AGENT_TARGET_ZOOM <= 1.5) {{
-                return window.__AGENT_TARGET_ZOOM;
-            }}
+            if (typeof window.__AGENT_TARGET_ZOOM === 'number' && window.__AGENT_TARGET_ZOOM >= 0.4 && window.__AGENT_TARGET_ZOOM <= 1.5) return window.__AGENT_TARGET_ZOOM;
             try {{
                 const saved = parseFloat(sessionStorage.getItem('__agent_zoom') || '');
-                if (!isNaN(saved) && saved >= 0.4 && saved <= 1.5) {{
-                    window.__AGENT_TARGET_ZOOM = saved;
-                    return saved;
-                }}
+                if (!isNaN(saved) && saved >= 0.4 && saved <= 1.5) {{ window.__AGENT_TARGET_ZOOM = saved; return saved; }}
             }} catch (e) {{}}
             window.__AGENT_TARGET_ZOOM = DEFAULT_ZOOM;
             return DEFAULT_ZOOM;
         }}
         function enforce() {{
             const cur = String(getTargetZoom());
-            if (document.documentElement && document.documentElement.style.zoom !== cur) {{
-                document.documentElement.style.setProperty('zoom', cur, 'important');
-            }}
+            if (document.documentElement && document.documentElement.style.zoom !== cur) document.documentElement.style.setProperty('zoom', cur, 'important');
         }}
         enforce();
         document.addEventListener('DOMContentLoaded', enforce);
@@ -60,6 +73,21 @@ def build_zoom_init_script(zoom: float = 0.85) -> str:
 
 DEFAULT_GEOMETRY_PATH = Path("config/window_geometry.json")
 _OS_DPI_CACHE: float | None = None
+
+
+def _geometry_locked(save_arg_index: int):
+    """把窗口几何的完整读改写包进跨进程锁。"""
+    def decorator(fn):
+        @wraps(fn)
+        def wrapped(*args, **kwargs):
+            save_path = kwargs.get("save_path")
+            if save_path is None and len(args) > save_arg_index:
+                save_path = args[save_arg_index]
+            target = Path(save_path) if save_path else DEFAULT_GEOMETRY_PATH
+            with interprocess_file_lock(target, timeout=10.0):
+                return fn(*args, **kwargs)
+        return wrapped
+    return decorator
 
 
 def _get_os_dpi_scale() -> float:
@@ -339,6 +367,7 @@ def build_auto_layout(
     }
 
 
+@_geometry_locked(0)
 def auto_generate_layout(
     save_path: Path | str | None = None,
     quad_mode: str | None = None,
@@ -352,15 +381,11 @@ def auto_generate_layout(
     existing_q_mode = "centered_compact"
     existing_h_mode = "wing_cascade"
     if target_path.exists():
-        try:
-            old = json.loads(target_path.read_text(encoding="utf-8"))
-            if isinstance(old, dict):
-                if old.get("quad_mode") in ("edge_2x2", "centered_compact"):
-                    existing_q_mode = old["quad_mode"]
-                if old.get("hex_mode") in ("edge_3x2", "wing_cascade"):
-                    existing_h_mode = old["hex_mode"]
-        except Exception:
-            pass
+        old = load_json_dict_strict(target_path)
+        if old.get("quad_mode") in ("edge_2x2", "centered_compact"):
+            existing_q_mode = old["quad_mode"]
+        if old.get("hex_mode") in ("edge_3x2", "wing_cascade"):
+            existing_h_mode = old["hex_mode"]
 
     wa = get_logical_work_area()
     payload = build_auto_layout(
@@ -377,10 +402,7 @@ def auto_generate_layout(
         bottom_pad=7 if sys.platform == "win32" else 0,
     )
 
-    tmp_path = Path(str(target_path) + ".tmp")
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False)
-    tmp_path.replace(target_path)
+    atomic_write_text_safe(target_path, json.dumps(payload, indent=2, ensure_ascii=False))
 
     print("\n" + "=" * 68)
     print(f"🖥️  [跨分辨率自动布局生成器] 已适配本机屏幕: {payload['screen_resolution']}")
@@ -595,8 +617,7 @@ def get_window_layout(
     cfg_file = Path(config_path) if config_path else DEFAULT_GEOMETRY_PATH
     if cfg_file.exists():
         try:
-            with open(cfg_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data = load_json_dict_strict(cfg_file)
 
             if total_slots <= 1 and "single_concurrency" in data:
                 single_slots = data["single_concurrency"].get("slots", [])
@@ -624,6 +645,19 @@ def get_window_layout(
                         "dpr": _safe_float(s.get("dpr"), 1.0, "dpr"),
                     }
 
+            if total_slots == 6 and "hex_concurrency" in data:
+                hex_slots = data["hex_concurrency"].get("slots", [])
+                if len(hex_slots) > slot_id:
+                    s = hex_slots[slot_id]
+                    return {
+                        "x": _safe_int(s.get("x"), 0, "x"),
+                        "y": _safe_int(s.get("y"), 0, "y"),
+                        "width": _safe_int(s.get("width"), 524, "width"),
+                        "height": _safe_int(s.get("height"), 439, "height"),
+                        "zoom": _safe_float(s.get("zoom"), 0.65, "zoom"),
+                        "dpr": _safe_float(s.get("dpr"), 1.25, "dpr"),
+                    }
+
             if total_slots == 6 and "hex_presets" in data:
                 h_mode = data.get("hex_mode", "wing_cascade")
                 h_slots = (data["hex_presets"].get(h_mode) or {}).get("slots", [])
@@ -638,16 +672,16 @@ def get_window_layout(
                         "dpr": _safe_float(s.get("dpr"), 1.25, "dpr"),
                     }
 
-            if total_slots == 6 and "hex_concurrency" in data:
-                hex_slots = data["hex_concurrency"].get("slots", [])
-                if len(hex_slots) > slot_id:
-                    s = hex_slots[slot_id]
+            if total_slots == 4 and "quad_concurrency" in data:
+                quad_slots = data["quad_concurrency"].get("slots", [])
+                if len(quad_slots) > slot_id:
+                    s = quad_slots[slot_id]
                     return {
                         "x": _safe_int(s.get("x"), 0, "x"),
                         "y": _safe_int(s.get("y"), 0, "y"),
-                        "width": _safe_int(s.get("width"), 524, "width"),
+                        "width": _safe_int(s.get("width"), 782, "width"),
                         "height": _safe_int(s.get("height"), 439, "height"),
-                        "zoom": _safe_float(s.get("zoom"), 0.65, "zoom"),
+                        "zoom": _safe_float(s.get("zoom"), 0.70, "zoom"),
                         "dpr": _safe_float(s.get("dpr"), 1.25, "dpr"),
                     }
 
@@ -718,8 +752,7 @@ def get_window_geometry(
     cfg_file = Path(config_path) if config_path else DEFAULT_GEOMETRY_PATH
     if cfg_file.exists():
         try:
-            with open(cfg_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data = load_json_dict_strict(cfg_file)
 
             if total_slots <= 1 and "single_concurrency" in data:
                 single_slots = data["single_concurrency"].get("slots", [])
@@ -743,6 +776,17 @@ def get_window_geometry(
                         _safe_int(s.get("height"), default_h, "height"),
                     )
 
+            if total_slots == 6 and "hex_concurrency" in data:
+                hex_slots = data["hex_concurrency"].get("slots", [])
+                if len(hex_slots) > slot_id:
+                    s = hex_slots[slot_id]
+                    return (
+                        _safe_int(s.get("x"), 0, "x"),
+                        _safe_int(s.get("y"), 0, "y"),
+                        _safe_int(s.get("width"), default_w, "width"),
+                        _safe_int(s.get("height"), default_h, "height"),
+                    )
+
             if total_slots == 6 and "hex_presets" in data:
                 h_mode = data.get("hex_mode", "wing_cascade")
                 h_slots = (data["hex_presets"].get(h_mode) or {}).get("slots", [])
@@ -755,10 +799,10 @@ def get_window_geometry(
                         _safe_int(s.get("height"), default_h, "height"),
                     )
 
-            if total_slots == 6 and "hex_concurrency" in data:
-                hex_slots = data["hex_concurrency"].get("slots", [])
-                if len(hex_slots) > slot_id:
-                    s = hex_slots[slot_id]
+            if total_slots == 4 and "quad_concurrency" in data:
+                quad_slots = data["quad_concurrency"].get("slots", [])
+                if len(quad_slots) > slot_id:
+                    s = quad_slots[slot_id]
                     return (
                         _safe_int(s.get("x"), 0, "x"),
                         _safe_int(s.get("y"), 0, "y"),
@@ -857,9 +901,16 @@ def calibrate_window(
     print("=" * 68 + "\n", flush=True)
 
     from playwright.sync_api import sync_playwright
+    try:
+        from .browser import _register_browser_proc, _unregister_browser_proc
+    except ImportError:
+        def _register_browser_proc(_b: Any) -> None:
+            pass
 
-    with sync_playwright() as p:
-        browsers = []
+        def _unregister_browser_proc(_b: Any) -> None:
+            pass
+    browsers = []
+    with _managed_playwright(sync_playwright, browsers, _unregister_browser_proc) as p:
         pages = []
 
         for item in slots_cfg:
@@ -868,13 +919,14 @@ def calibrate_window(
                 f"--window-size={item['init_w']},{item['init_h']}",
             ]
             b = p.chromium.launch(headless=False, args=launch_args)
+            _register_browser_proc(b)
+            browsers.append(b)
             ctx = b.new_context(
                 no_viewport=True,
                 locale="en-US",
                 user_agent=desktop_chrome_ua(),
             )
             pg = ctx.new_page()
-            browsers.append(b)
             pages.append(pg)
 
         # 页面加载：优先本地瞬启，若有 URL 则带短超时快速探测
@@ -1074,83 +1126,64 @@ def calibrate_window(
         #   那会静默覆盖掉此前可用的标定，且下游会拿这套假几何去摆窗口。
         if not slots_data:
             print("\n❌ 标定失败：所有通道的窗口几何均未采集到，未写入任何配置（保留原文件）。")
-            for b in browsers:
-                try:
-                    b.close()
-                except Exception:
-                    pass
             return None
 
-        # 读取旧配置并合并保留其它并发档位，避免标定 4 并发时覆盖掉 1/2 并发
-        existing: dict[str, Any] = {}
-        if target_path.exists():
-            try:
-                existing = json.loads(target_path.read_text(encoding="utf-8"))
-                if not isinstance(existing, dict):
-                    existing = {}
-            except Exception:
-                existing = {}
+        # 读取-合并-写入必须是同一事务，避免并发标定互相覆盖档位。
+        with interprocess_file_lock(target_path):
+            # 读取旧配置并合并保留其它并发档位，避免标定 4 并发时覆盖掉 1/2 并发
+            existing: dict[str, Any] = load_json_dict_strict(target_path) if target_path.exists() else {}
 
-        # 组装持久化结构，同时维护单窗口、双并发与四分屏
-        final_payload: dict[str, Any] = dict(existing)
-        final_payload.update({
-            "calibrated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "description": "多窗口自适应几何与防切割等比缩放规范",
-            "screen_resolution": existing.get("screen_resolution", "1920x1080"),
-            "total_slots": len(slots_data),
-            "slots": slots_data,
-            "x": slots_data[0]["x"] if slots_data else 0,
-            "y": slots_data[0]["y"] if slots_data else 0,
-            "width": slots_data[0]["width"] if slots_data else 960,
-            "height": slots_data[0]["height"] if slots_data else 520,
-            "zoom": slots_data[0]["zoom"] if slots_data else 0.85,
-            "dpr": slots_data[0]["dpr"] if slots_data else 1.0,
-        })
-
-        if total_windows <= 1:
-            final_payload["single_concurrency"] = {
-                "total_slots": 1,
-                "description": "单并发全屏规范",
-                "slots": slots_data,
-            }
-        elif total_windows == 2:
-            final_payload["dual_concurrency"] = {
-                "total_slots": 2,
-                "description": "双并发左右并排全屏防切割规范",
-                "slots": slots_data,
-            }
-        elif total_windows >= 6:
-            final_payload["hex_concurrency"] = {
+            # 组装持久化结构，同时维护单窗口、双并发与四分屏
+            final_payload: dict[str, Any] = dict(existing)
+            final_payload.update({
+                "calibrated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "description": "多窗口自适应几何与防切割等比缩放规范",
+                "screen_resolution": existing.get("screen_resolution", "1920x1080"),
                 "total_slots": len(slots_data),
-                "description": "六并发标定规范",
                 "slots": slots_data,
-            }
-            # 保留原有 4 并发 slots 不被 6 并发覆盖
-            if "slots" in existing:
-                final_payload["slots"] = existing["slots"]
-                final_payload["total_slots"] = existing.get("total_slots", len(existing["slots"]))
-        elif total_windows >= 4:
-            final_payload["quad_concurrency"] = {
-                "total_slots": len(slots_data),
-                "description": "四并发标定规范",
-                "slots": slots_data,
-            }
+                "x": slots_data[0]["x"] if slots_data else 0,
+                "y": slots_data[0]["y"] if slots_data else 0,
+                "width": slots_data[0]["width"] if slots_data else 960,
+                "height": slots_data[0]["height"] if slots_data else 520,
+                "zoom": slots_data[0]["zoom"] if slots_data else 0.85,
+                "dpr": slots_data[0]["dpr"] if slots_data else 1.0,
+            })
 
-        # 原子写入：先写 .tmp 再 replace，避免写到一半崩溃把旧标定截断损坏。
-        tmp_path = Path(str(target_path) + ".tmp")
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(final_payload, f, indent=2, ensure_ascii=False)
-        tmp_path.replace(target_path)
+            if total_windows <= 1:
+                final_payload["single_concurrency"] = {
+                    "total_slots": 1,
+                    "description": "单并发全屏规范",
+                    "slots": slots_data,
+                }
+            elif total_windows == 2:
+                final_payload["dual_concurrency"] = {
+                    "total_slots": 2,
+                    "description": "双并发左右并排全屏防切割规范",
+                    "slots": slots_data,
+                }
+            elif total_windows >= 6:
+                final_payload["hex_concurrency"] = {
+                    "total_slots": len(slots_data),
+                    "description": "六并发标定规范",
+                    "slots": slots_data,
+                }
+                # 保留原有 4 并发 slots 不被 6 并发覆盖
+                if "slots" in existing:
+                    final_payload["slots"] = existing["slots"]
+                    final_payload["total_slots"] = existing.get("total_slots", len(existing["slots"]))
+            elif total_windows >= 4:
+                final_payload["quad_concurrency"] = {
+                    "total_slots": len(slots_data),
+                    "description": "四并发标定规范",
+                    "slots": slots_data,
+                }
+
+            # 原子写入：先写 .tmp 再 replace，避免写到一半崩溃把旧标定截断损坏。
+            atomic_write_text_safe(target_path, json.dumps(final_payload, indent=2, ensure_ascii=False))
 
         print(f"\n✅ 视窗几何与防切割配置已成功持久化至: {target_path}")
         for s in slots_data:
             print(f"   - 通道 #{s['slot']} [{s['name']}]: X={s['x']}, Y={s['y']}, 尺寸={s['width']}×{s['height']}, 缩放比={int(s['zoom']*100)}%")
-
-        for b in browsers:
-            try:
-                b.close()
-            except Exception:
-                pass
 
         return final_payload
 
@@ -1193,7 +1226,14 @@ def demo_layouts(
     hold_sec = max(1, int(hold_sec))
 
     from playwright.sync_api import sync_playwright
+    try:
+        from .browser import _register_browser_proc, _unregister_browser_proc
+    except ImportError:
+        def _register_browser_proc(_b: Any) -> None:
+            pass
 
+        def _unregister_browser_proc(_b: Any) -> None:
+            pass
     with sync_playwright() as p:
         for stage_idx, (title, slots) in enumerate(stages, 1):
             print(f"\n=== [{stage_idx}/{len(stages)}] {title} ({len(slots)} 窗, 停留 {hold_sec}s) ===", flush=True)
@@ -1206,6 +1246,8 @@ def demo_layouts(
                         f"--window-size={s['width']},{s['height']}",
                     ]
                     b = p.chromium.launch(headless=False, args=args)
+                    _register_browser_proc(b)
+                    browsers.append(b)
                     ctx = b.new_context(no_viewport=True, locale="zh-CN")
                     pg = ctx.new_page()
                     pg.set_content(LOCAL_PLAYGROUND_HTML)
@@ -1233,7 +1275,6 @@ def demo_layouts(
                             "z": z, "c1": c1, "c2": c2, "holdSec": hold_sec,
                         },
                     )
-                    browsers.append(b)
                     pages.append(pg)
 
                 for left in range(hold_sec, 0, -1):
@@ -1251,6 +1292,8 @@ def demo_layouts(
                         b.close()
                     except Exception:
                         pass
+                    else:
+                        _unregister_browser_proc(b)
                 time.sleep(0.4)
 
     print(f"\n✅ 全部 {len(shown)} 套视窗布局演示完毕！", flush=True)

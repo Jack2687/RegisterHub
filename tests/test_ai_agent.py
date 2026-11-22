@@ -240,6 +240,7 @@ def test_probe_url_and_read_failures(tmp_path, monkeypatch):
 
     opener = _FakeOpener(lambda req: _FakeHTTPResponse(sample_html, status=200, url="https://example.com/signup", headers={"Server": "cloudflare"}))
     monkeypatch.setattr(urllib.request, "build_opener", lambda *a, **kw: opener)
+    monkeypatch.setattr("socket.getaddrinfo", lambda *a, **kw: [(2, 1, 6, "", ("93.184.216.34", 443))])
     monkeypatch.setattr(ai_agent, "CONFIG_FILE", tmp_path / "missing_config.json")
 
     res = ai_agent.tool_probe_url("https://example.com/signup")
