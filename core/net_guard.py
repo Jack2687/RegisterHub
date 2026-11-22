@@ -40,6 +40,8 @@ _BLOCKED_HOST_SUFFIXES = (
 )
 _NUMERIC_DOT_QUAD_RE = re.compile(r"^[0-9xXa-fA-F.]+$")
 _ALLOWED_PROXY_SCHEMES = frozenset({"http", "https", "socks5", "socks5h"})
+# Clash / Mihomo / Sing-box TUN 模式对公网域名统一分配 RFC 2544 (198.18.0.0/15) Fake-IP 虚拟映射
+_FAKE_IP_BENCHMARK_NET = ipaddress.ip_network("198.18.0.0/15")
 
 
 def _is_public_ip(ip_obj: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -112,6 +114,9 @@ def validate_public_http_url(url: str, *, resolve_dns: bool = True) -> str:
             raise PrivateAddressBlockedError(f"禁止访问内网/回环/元数据保留 IP: {ip_literal}")
         return clean
 
+    if "." not in host:
+        raise PrivateAddressBlockedError(f"禁止访问无公网顶级域的单标签内网主机名: {host}")
+
     if resolve_dns:
         eff_port = port or (443 if scheme == "https" else 80)
         try:
@@ -130,6 +135,8 @@ def validate_public_http_url(url: str, *, resolve_dns: bool = True) -> str:
             except ValueError as exc:
                 raise PrivateAddressBlockedError(f"DNS 返回异常地址 {raw_ip!r}") from exc
             if not _is_public_ip(resolved_ip):
+                if isinstance(resolved_ip, ipaddress.IPv4Address) and resolved_ip in _FAKE_IP_BENCHMARK_NET:
+                    continue
                 raise PrivateAddressBlockedError(
                     f"目标域名 {host} 解析到受限内网/回环/元数据地址 {resolved_ip}，已安全阻断"
                 )
