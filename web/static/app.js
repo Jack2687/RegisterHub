@@ -2521,10 +2521,15 @@
       renderAgentPlan(s.plan || []);
       renderAgentUsage(s.usage || {});
       agentEvents = s.events || [];
+      agentStreamSeq = typeof s.next_seq === 'number'
+        ? s.next_seq
+        : (agentEvents.length
+          ? Math.max(...agentEvents.map((e, idx) => (typeof e.seq === 'number' ? e.seq + 1 : idx + 1)))
+          : 0);
       setAgentRunningState(s.status === 'running', s.status || 'idle');
       renderAgentFeed();
       if (s.status === 'running') {
-        attachAgentStream(s.id);
+        attachAgentStream(s.id, agentStreamSeq);
       }
     } catch (e) {
       toast('读取会话异常: ' + e.message);

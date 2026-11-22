@@ -1116,6 +1116,12 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                 since = max(0, int((qs.get("since") or ["0"])[0]))
             except Exception:
                 since = 0
+            last_id_hdr = (self.headers.get("Last-Event-ID") or "").strip()
+            if since == 0 and last_id_hdr:
+                try:
+                    since = max(0, int(last_id_hdr) + 1)
+                except Exception:
+                    pass
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
@@ -1125,15 +1131,21 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             sent_live_terminal = False
             last_error = ""
             try:
+                max_seen_seq = sess.next_seq - 1
                 for idx, item in enumerate(hist):
+                    raw_seq = item.get("seq")
+                    ev_seq = raw_seq if isinstance(raw_seq, int) and not isinstance(raw_seq, bool) else idx
+                    if ev_seq > max_seen_seq:
+                        max_seen_seq = ev_seq
                     if item.get("type") == "status":
                         last_error = str(item.get("error") or "")
-                    if idx < since:
+                    if ev_seq < since:
                         continue
-                    chunk = f"data: {json.dumps({**item, 'seq': idx, 'replay': True}, ensure_ascii=False)}\n\n"
+                    payload_json = json.dumps({**item, "seq": ev_seq, "replay": True}, ensure_ascii=False)
+                    chunk = f"id: {ev_seq}\ndata: {payload_json}\n\n"
                     self.wfile.write(chunk.encode("utf-8"))
                 self.wfile.flush()
-                seq_cursor = len(hist)
+                seq_cursor = max(max_seen_seq + 1, sess.next_seq)
                 while True:
                     try:
                         ev = sub_q.get(timeout=12.0)
@@ -1143,30 +1155,38 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                         continue
                     if ev is None:
                         if not sent_live_terminal:
+                            end_seq = max(seq_cursor, sess.next_seq)
                             end_ev = {
                                 "type": "status",
                                 "ts": time.strftime("%H:%M:%S"),
                                 "status": sess.status,
                                 "error": last_error if sess.status in ("error", "stopped") else "",
-                                "seq": seq_cursor,
+                                "seq": end_seq,
                                 "replay": False,
                                 "eof": True,
                             }
-                            self.wfile.write(f"data: {json.dumps(end_ev, ensure_ascii=False)}\n\n".encode("utf-8"))
+                            chunk = f"id: {end_seq}\ndata: {json.dumps(end_ev, ensure_ascii=False)}\n\n"
+                            self.wfile.write(chunk.encode("utf-8"))
                             self.wfile.flush()
                         break
+                    raw_ev_seq = ev.get("seq")
+                    ev_seq = raw_ev_seq if isinstance(raw_ev_seq, int) and not isinstance(raw_ev_seq, bool) else seq_cursor
+                    if ev_seq < since:
+                        continue
+                    seq_cursor = max(seq_cursor, ev_seq + 1)
                     if ev.get("type") == "status":
                         last_error = str(ev.get("error") or "")
                         if ev.get("status") in ("done", "error", "stopped"):
                             sent_live_terminal = True
-                    chunk = f"data: {json.dumps({**ev, 'seq': seq_cursor, 'replay': False}, ensure_ascii=False)}\n\n"
-                    seq_cursor += 1
+                    payload_json = json.dumps({**ev, "seq": ev_seq, "replay": False}, ensure_ascii=False)
+                    chunk = f"id: {ev_seq}\ndata: {payload_json}\n\n"
                     self.wfile.write(chunk.encode("utf-8"))
                     self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
             finally:
                 sess.unsubscribe(sub_q)
+                self.close_connection = True
             return
 
         m_ag_export = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/export", path)

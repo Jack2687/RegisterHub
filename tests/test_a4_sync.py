@@ -10,7 +10,7 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from core.ai_agent import tool_probe_url
+from core.ai_agent import AgentSession, agent_manager, tool_probe_url
 import web.server as comm_server
 
 
@@ -99,3 +99,56 @@ def test_app_js_checks_removed_and_reconnects_sse() -> None:
     assert "Number(d.removed || 0) > 0" in app_js
     assert "?since=" in app_js
     assert "agentReconnectAttempts" in app_js
+
+
+def test_sse_reconnect_monotonic_seq_past_500_events(monkeypatch) -> None:
+    sess = AgentSession(session_id="sess_over_500", title="Long Run", status="running")
+    for i in range(520):
+        ev = sess.emit("step_log", message=f"evt-{i}")
+    # Window truncated at 501st event to 400 (seq 101..500), plus 19 more -> 419 events (seq 101..519)
+    assert len(sess.events) == 419
+    assert ev["seq"] == 519
+    assert sess.next_seq == 520
+    assert sess.events[0]["seq"] == 101
+    assert sess.events[-1]["seq"] == 519
+
+    monkeypatch.setattr(agent_manager, "_sessions", {"sess_over_500": sess})
+
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), comm_server.LiteRequestHandler)
+    port = httpd.server_address[1]
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    base = f"http://127.0.0.1:{port}"
+
+    def _finish_shortly() -> None:
+        import time as _t
+
+        deadline = _t.time() + 2.0
+        while _t.time() < deadline:
+            with sess._lock:
+                if len(sess._subs) >= 1:
+                    break
+            _t.sleep(0.01)
+        sess.emit("assistant_msg", content="Final answer after 520")
+        with sess._lock:
+            sess.status = "done"
+        sess.emit("status", status="done", error="")
+        sess.close_streams()
+
+    threading.Thread(target=_finish_shortly, daemon=True).start()
+    try:
+        with urllib.request.urlopen(f"{base}/api/agent/sessions/sess_over_500/stream?since=517", timeout=5) as resp:
+            raw_sse = resp.read().decode("utf-8")
+        events = [
+            json.loads(ln[len("data: ") :])
+            for ln in raw_sse.splitlines()
+            if ln.startswith("data: ")
+        ]
+        seqs = [e["seq"] for e in events]
+        # Must replay 517, 518, 519 and deliver live 520 (assistant_msg) + 521 (status=done), all >= 517!
+        assert seqs[:5] == [517, 518, 519, 520, 521]
+        assert any(e.get("type") == "assistant_msg" and e.get("seq") == 520 for e in events)
+        assert any(e.get("type") == "status" and e.get("status") == "done" and e.get("seq") == 521 for e in events)
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

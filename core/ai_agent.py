@@ -935,6 +935,7 @@ class AgentSession:
         usage: Optional[Dict[str, int]] = None,
         events: Optional[List[Dict[str, Any]]] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
+        next_seq: Optional[int] = None,
     ) -> None:
         now_s = time.strftime("%Y-%m-%d %H:%M:%S")
         self.id = session_id
@@ -950,7 +951,28 @@ class AgentSession:
             "completion_tokens": int((usage or {}).get("completion_tokens") or 0),
             "total_tokens": int((usage or {}).get("total_tokens") or 0),
         }
-        self.events: List[Dict[str, Any]] = list(events or [])
+        norm_events: List[Dict[str, Any]] = []
+        max_seq = -1
+        for idx, raw_ev in enumerate(events or []):
+            if not isinstance(raw_ev, dict):
+                continue
+            ev_copy = dict(raw_ev)
+            raw_seq = ev_copy.get("seq")
+            if isinstance(raw_seq, int) and not isinstance(raw_seq, bool) and raw_seq >= 0:
+                s_val = raw_seq
+            else:
+                s_val = max_seq + 1 if max_seq >= 0 else idx
+                ev_copy["seq"] = s_val
+            if s_val > max_seq:
+                max_seq = s_val
+            norm_events.append(ev_copy)
+        self.events: List[Dict[str, Any]] = norm_events
+        computed_next = max_seq + 1
+        self._next_seq: int = (
+            max(int(next_seq), computed_next)
+            if isinstance(next_seq, int) and not isinstance(next_seq, bool)
+            else computed_next
+        )
         self.messages: List[Dict[str, Any]] = list(messages or [])
 
         self._lock = threading.Lock()
@@ -1024,13 +1046,21 @@ class AgentSession:
             self._active_tool_name = None
             self._active_tool_started_at = None
 
-    def emit(self, event_type: str, **payload: Any) -> Dict[str, Any]:
-        ev = {
-            "type": event_type,
-            "ts": time.strftime("%H:%M:%S"),
-            **payload,
-        }
+    @property
+    def next_seq(self) -> int:
         with self._lock:
+            return self._next_seq
+
+    def emit(self, event_type: str, **payload: Any) -> Dict[str, Any]:
+        with self._lock:
+            seq = self._next_seq
+            self._next_seq += 1
+            ev = {
+                "type": event_type,
+                "ts": time.strftime("%H:%M:%S"),
+                **payload,
+                "seq": seq,
+            }
             self.updated_at = time.strftime("%Y-%m-%d %H:%M:%S")
             self.events.append(ev)
             if len(self.events) > 500:
@@ -1106,7 +1136,8 @@ class AgentSession:
                 "updated_at": self.updated_at,
                 "plan": list(self.plan),
                 "usage": dict(self.usage),
-                "event_count": len(self.events),
+                "event_count": self._next_seq,
+                "next_seq": self._next_seq,
             }
 
     def to_detail(self) -> Dict[str, Any]:
@@ -1121,6 +1152,7 @@ class AgentSession:
                 "updated_at": self.updated_at,
                 "plan": list(self.plan),
                 "usage": dict(self.usage),
+                "next_seq": self._next_seq,
                 "events": list(self.events),
             }
 
@@ -1256,6 +1288,7 @@ class AgentSession:
                 "updated_at": self.updated_at,
                 "plan": list(self.plan),
                 "usage": dict(self.usage),
+                "next_seq": self._next_seq,
                 "events": list(self.events),
                 "messages": trimmed_msgs,
             }
@@ -1275,6 +1308,7 @@ class AgentSession:
             # Recovered from disk after process restart; never falsely claim running
             status = "stopped"
         raw_msgs = data.get("messages") if isinstance(data.get("messages"), list) else []
+        raw_next_seq = data.get("next_seq")
         return cls(
             session_id=str(data["id"]),
             title=str(data.get("title") or ""),
@@ -1287,6 +1321,7 @@ class AgentSession:
             usage=data.get("usage") if isinstance(data.get("usage"), dict) else None,
             events=data.get("events") if isinstance(data.get("events"), list) else [],
             messages=_repair_dangling_tool_calls(raw_msgs),
+            next_seq=raw_next_seq if isinstance(raw_next_seq, int) and not isinstance(raw_next_seq, bool) else None,
         )
 
 
