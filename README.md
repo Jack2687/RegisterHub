@@ -13,10 +13,11 @@
   <a href="https://opencv.org/"><img src="https://img.shields.io/badge/OpenCV-CV%20Engine-5C3EE8.svg?style=flat-square&logo=opencv&logoColor=white" alt="OpenCV"></a>
   <a href="tests/"><img src="https://img.shields.io/badge/Tests-Passing-brightgreen.svg?style=flat-square" alt="Tests"></a>
   <a href="https://bitwarden.com/"><img src="https://img.shields.io/badge/Export-Bitwarden%2FCSV-175DDC.svg?style=flat-square&logo=bitwarden&logoColor=white" alt="Bitwarden Export"></a>
+  <a href="https://waw666waw666.github.io/registerhub-demo/"><img src="https://img.shields.io/badge/Live%20Demo-Web%20Workbench-10b981.svg?style=flat-square" alt="Live Demo"></a>
 </p>
 
 <p align="center">
-  <a href="./README.md">简体中文</a> | <a href="./README_EN.md">English</a>
+  <a href="./README.md">简体中文</a> | <a href="./README_EN.md">English</a> | <a href="https://waw666waw666.github.io/registerhub-demo/">🌐 在线交互演示 (Live Demo)</a>
 </p>
 
 ---
