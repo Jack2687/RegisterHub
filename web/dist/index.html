@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN" data-palette="graphite">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/favicon-community.png?v=userbolt2" />
+    <link rel="icon" type="image/svg+xml" href="/logo-community.svg?v=userbolt2" />
+    <link rel="shortcut icon" type="image/x-icon" href="/favicon.ico?v=userbolt2" />
+    <title>RegisterHub Lite · 开源社区工作台</title>
+    <meta name="license" content="Apache License 2.0" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('ar_studio_theme') || 'dark';
+          var dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var doc = document.documentElement;
+          if (dark) doc.classList.add('dark');
+          doc.style.colorScheme = dark ? 'dark' : 'light';
+          var pal = localStorage.getItem('ar_studio_palette') || 'graphite';
+          var rawPrefs = localStorage.getItem('ar_studio_prefs_v1');
+          if (rawPrefs) {
+            var p = JSON.parse(rawPrefs);
+            if (p && (p.density === 'compact' || p.density === 'comfortable')) {
+              doc.dataset.density = p.density;
+            }
+            if (p && typeof p.palette === 'string' && p.palette) {
+              pal = p.palette;
+            }
+          }
+          if (pal === 'gruvbox') pal = 'sakura';
+          doc.dataset.palette = pal;
+        } catch (e) {}
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-Ri6bqAYx.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/react-DIei6r0b.js">
+    <link rel="modulepreload" crossorigin href="/assets/icons-CeakT1c8.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-Dzq6VXbG.css">
+  </head>
+  <body class="antialiased selection:bg-zinc-800 selection:text-white dark:selection:bg-zinc-200 dark:selection:text-zinc-900">
+    <div id="root"></div>
+  </body>
+</html>

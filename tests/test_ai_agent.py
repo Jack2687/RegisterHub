@@ -330,15 +330,18 @@ def test_server_llm_and_agent_endpoints_with_sse_and_lifecycle(tmp_path, monkeyp
 
     srv, base = _start_ephemeral()
     try:
-        # 1. UI HTML includes new AI Direct-Run & LLM Config views, models & export buttons
+        # 1. Studio SPA serves on / with community meta, and legacy fallback stays intact on /static/index.html
         with urllib.request.urlopen(f"{base}/", timeout=5) as r:
             html = r.read().decode("utf-8")
-            assert 'id="view-agent"' in html
-            assert 'id="view-llm"' in html
-            assert 'id="nav-badge-agent"' in html
-            assert 'id="btn-llm-models"' in html
-            assert 'id="btn-agent-export"' in html
-            assert "一键 AI 直跑" in html
+            assert 'id="root"' in html
+            assert "/assets/" in html
+        st_m, cmeta = _req_json("GET", f"{base}/api/console/meta")
+        assert st_m == 200 and cmeta["edition"] == "community" and cmeta["features"]["ai_agent"] is True
+        with urllib.request.urlopen(f"{base}/static/index.html", timeout=5) as r:
+            legacy_html = r.read().decode("utf-8")
+            assert 'id="view-agent"' in legacy_html
+            assert 'id="view-llm"' in legacy_html
+            assert 'id="btn-agent-export"' in legacy_html
 
         # 2. LLM config GET / POST / key masking / test endpoint
         st, cfg0 = _req_json("GET", f"{base}/api/llm/config")
@@ -931,12 +934,15 @@ def test_agent_session_rename_patch_and_validation(tmp_path, monkeypatch):
 
     srv, base = _start_ephemeral()
     try:
-        # Verify Layout Workbench & Agent UI polish hooks exist in served HTML
+        # Verify Studio SPA + Layout presets API + legacy HTML fallback hooks exist
         with urllib.request.urlopen(f"{base}/", timeout=5) as r:
             html = r.read().decode("utf-8")
-            assert 'id="layout-summary" class="layout-summary-grid"' in html
-            assert 'id="layout-zoom-range"' in html
-            assert 'id="agent-session-search"' in html
+            assert 'id="root"' in html
+        with urllib.request.urlopen(f"{base}/static/index.html", timeout=5) as r:
+            legacy_html = r.read().decode("utf-8")
+            assert 'id="layout-summary" class="layout-summary-grid"' in legacy_html
+            assert 'id="layout-zoom-range"' in legacy_html
+            assert 'id="agent-session-search"' in legacy_html
 
         st, cr = _req_json("POST", f"{base}/api/agent/sessions", {
             "title": "初始会话名",

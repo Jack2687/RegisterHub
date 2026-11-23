@@ -46,8 +46,10 @@ if str(ROOT_DIR) not in sys.path:
 
 from core import llm_client
 from core.ai_agent import agent_manager
+from web import studio_bridge
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+DIST_DIR = Path(__file__).resolve().parent / "dist"
 RESULTS_DIR = ROOT_DIR / "results"
 ACCOUNTS_FILE = RESULTS_DIR / "accounts.txt"
 FAILED_FILE = RESULTS_DIR / "failed.txt"
@@ -896,10 +898,17 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         clean = rel_path.lstrip("/") or "index.html"
         self._serve_file(STATIC_DIR / clean, STATIC_DIR)
 
+    def _serve_dist(self, rel_path: str) -> None:
+        clean = rel_path.lstrip("/") or "index.html"
+        self._serve_file(DIST_DIR / clean, DIST_DIR)
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path
         qs = parse_qs(parsed.query)
+
+        if studio_bridge.handle_studio_get(self, sys.modules[__name__], path, qs):
+            return
 
         if path == "/api/meta":
             self._send_json({
@@ -950,7 +959,12 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/api/jobs":
             act = job_manager.active_job()
-            self._send_json({"jobs": job_manager.list_jobs(), "active_job": act.to_dict() if act else None})
+            jobs_enriched = [
+                {**j, "project": j.get("adapter") or "demo", "concurrency": 1}
+                for j in job_manager.list_jobs()
+            ]
+            act_d = {**act.to_dict(), "project": act.adapter, "concurrency": 1} if act else None
+            self._send_json({"jobs": jobs_enriched, "active_job": act_d})
             return
 
         m_log = re.fullmatch(r"/api/jobs/([A-Za-z0-9_.-]+)/log", path)
@@ -1101,7 +1115,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/api/agent/sessions":
             self._send_json({
-                "sessions": agent_manager.list_sessions(),
+                "sessions": [studio_bridge.enrich_agent_summary(s) for s in agent_manager.list_sessions()],
                 "active_session_id": agent_manager.active_session_id(),
             })
             return
@@ -1113,7 +1127,10 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                 self._send_json({"error": "Agent session not found"}, status=404)
                 return
             try:
-                since = max(0, int((qs.get("since") or ["0"])[0]))
+                if "after_seq" in qs:
+                    since = max(0, int((qs.get("after_seq") or ["0"])[0]) + 1)
+                else:
+                    since = max(0, int((qs.get("since") or ["0"])[0]))
             except Exception:
                 since = 0
             last_id_hdr = (self.headers.get("Last-Event-ID") or "").strip()
@@ -1204,31 +1221,45 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             if not sess:
                 self._send_json({"error": "Agent session not found"}, status=404)
                 return
-            self._send_json({"ok": True, "session": sess.to_detail()})
+            self._send_json({"ok": True, "session": studio_bridge.enrich_agent_detail(sess.to_detail())})
             return
 
         if path.startswith("/api/"):
             self._send_json({"error": "API endpoint not found"}, status=404)
             return
 
+        has_dist = (DIST_DIR / "index.html").is_file()
         if path == "/favicon.ico":
             if (STATIC_DIR / "favicon.ico").exists():
                 self._serve_static("favicon.ico")
+            elif has_dist and (DIST_DIR / "favicon-community.png").exists():
+                self._serve_dist("favicon-community.png")
             else:
                 self._serve_static("logo.svg")
             return
 
-        if path == "/" or path == "/index.html":
-            self._serve_static("index.html")
-            return
         if path.startswith("/static/"):
             self._serve_static(path[len("/static/"):])
+            return
+
+        if has_dist:
+            if path.startswith("/assets/") or path in ("/logo-community.svg", "/favicon-community.png"):
+                self._serve_dist(path.lstrip("/"))
+                return
+            self._serve_dist("index.html")
+            return
+
+        if path == "/" or path == "/index.html":
+            self._serve_static("index.html")
             return
         self._serve_static("index.html")
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
         body = self._read_json()
+
+        if studio_bridge.handle_studio_post(self, sys.modules[__name__], path, body):
+            return
 
         if path == "/api/config":
             try:
@@ -1378,7 +1409,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/tools/totp":
             secret = str(body.get("secret") or "").strip()
             try:
-                self._send_json({"ok": True, **_compute_totp(secret)})
+                self._send_json({"ok": True, "period": 30, **_compute_totp(secret)})
             except Exception as e:
                 self._send_json({"ok": False, "error": f"无效 Base32 密钥: {e}"}, status=400)
             return
@@ -1425,17 +1456,76 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                 cards.append({
                     "brand": bname,
                     "card_number": num,
+                    "card_number_formatted": fmt,
                     "formatted": fmt,
+                    "bin_prefix": prefix,
                     "exp": f"{mm}/{yy[-2:]}",
+                    "exp_formatted": f"{mm}/{yy[-2:]}",
                     "exp_month": mm,
                     "exp_year": yy,
                     "cvv": cvv,
+                    "cardholder_name": "Alex Morgan",
                 })
             self._send_json({"ok": True, "count": len(cards), "cards": cards})
             return
 
         if path == "/api/accounts/delete":
             from core.locks import atomic_write_text_safe, interprocess_file_lock
+
+            raw_items = body.get("items")
+            if isinstance(raw_items, list) and raw_items:
+                targets = [
+                    (
+                        str(it.get("email") or "").strip().lower(),
+                        str(it.get("credential") or it.get("api_key") or "").strip(),
+                    )
+                    for it in raw_items
+                    if isinstance(it, dict) and (it.get("email") or it.get("credential") or it.get("api_key"))
+                ]
+                if not targets:
+                    self._send_json({"ok": False, "removed": 0, "error": "缺少删除目标字段"}, status=400)
+                    return
+                if not ACCOUNTS_FILE.exists():
+                    self._send_json({"ok": True, "removed": 0})
+                    return
+                with interprocess_file_lock(ACCOUNTS_FILE):
+                    if not ACCOUNTS_FILE.exists():
+                        self._send_json({"ok": True, "removed": 0})
+                        return
+                    lines = ACCOUNTS_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
+                    kept: List[str] = []
+                    removed = 0
+                    remaining = list(targets)
+                    for ln in lines:
+                        s = ln.strip()
+                        if not s or s.startswith("#"):
+                            kept.append(ln)
+                            continue
+                        parts = [p.strip() for p in s.split("----")]
+                        em = (parts[0] if parts else "").lower()
+                        pwd_col = parts[1] if len(parts) > 1 else ""
+                        user_col = parts[2] if len(parts) > 2 else ""
+                        ak = parts[3] if len(parts) >= 4 else ""
+                        if not ak:
+                            if pwd_col.startswith(("hms-", "sk-", "gsk_", "coa_")):
+                                ak = pwd_col
+                            elif len(parts) == 3 and user_col.startswith(("hms-", "sk-", "gsk_", "coa_")):
+                                ak = user_col
+                        hit_idx = None
+                        for ti, (te, tk) in enumerate(remaining):
+                            if ((not te) or em == te) and ((not tk) or ak == tk):
+                                hit_idx = ti
+                                break
+                        if hit_idx is not None:
+                            remaining.pop(hit_idx)
+                            removed += 1
+                            continue
+                        kept.append(ln)
+                    if removed > 0:
+                        ACCOUNTS_FILE.with_suffix(".txt.bak").write_text("\n".join(lines) + "\n", encoding="utf-8")
+                        atomic_write_text_safe(ACCOUNTS_FILE, "\n".join(kept) + ("\n" if kept else ""))
+                self._send_json({"ok": True, "removed": removed})
+                return
 
             target_email = str(body.get("email") or "").strip().lower()
             target_key = str(body.get("api_key") or "").strip()
@@ -1588,7 +1678,9 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                 out_path = scaffold_site(site_name, target_url or None, detected_fields=detected_fields)
                 self._send_json({
                     "ok": True,
+                    "success": True,
                     "site": clean,
+                    "project_name": clean,
                     "path": str(out_path),
                     "probed": bool(detected_fields),
                     "message": f"生成成功: {out_path}{probed_msg}",
@@ -1737,13 +1829,13 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             title = str(body.get("title") or "").strip()
             target_url = str(body.get("target_url") or "").strip()
             sess = agent_manager.create_session(title=title, target_url=target_url)
-            self._send_json({"ok": True, "session": sess.to_summary()})
+            self._send_json({"ok": True, "session": studio_bridge.enrich_agent_detail(sess.to_detail())})
             return
 
         m_ag_msg = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/message", path)
         if m_ag_msg:
             sid = m_ag_msg.group(1)
-            msg_text = str(body.get("message") or "").strip()
+            msg_text = str(body.get("message") or body.get("content") or "").strip()
             target_url = str(body.get("target_url") or "").strip()
             try:
                 res = agent_manager.send_message(sid, msg_text, target_url=target_url)
@@ -1767,6 +1859,25 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
 
         self._send_json({"error": "Not Found"}, status=404)
 
+    def do_PUT(self) -> None:
+        path = urlparse(self.path).path
+        body = self._read_json()
+
+        m_prof = re.fullmatch(r"/api/llm/profiles/([^/]+)", path)
+        if m_prof:
+            try:
+                saved = llm_client.save_llm_config(body)
+                self._send_json({"ok": True, "id": m_prof.group(1), "config": saved})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, status=400)
+            return
+
+        if path == "/api/agent/config":
+            self._send_json({"ok": True, "note": "开源社区版单线程 Agent 使用固定安全工具集"})
+            return
+
+        self._send_json({"error": "Not Found"}, status=404)
+
     def do_PATCH(self) -> None:
         path = urlparse(self.path).path
         body = self._read_json()
@@ -1774,19 +1885,29 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         m_ag_patch = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)", path)
         if m_ag_patch:
             sid = m_ag_patch.group(1)
-            raw_title = body.get("title")
-            if not isinstance(raw_title, str):
-                self._send_json({"ok": False, "error": "会话标题不能为空"}, status=400)
+            if "title" in body:
+                raw_title = body.get("title")
+                if not isinstance(raw_title, str):
+                    self._send_json({"ok": False, "error": "会话标题不能为空"}, status=400)
+                    return
+                try:
+                    summary = agent_manager.rename_session(sid, raw_title)
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, status=400)
+                    return
+                if summary is None:
+                    self._send_json({"ok": False, "error": "Agent session not found"}, status=404)
+                    return
+                self._send_json({"ok": True, "session": studio_bridge.enrich_agent_summary(summary)})
                 return
-            try:
-                summary = agent_manager.rename_session(sid, raw_title)
-            except ValueError as ve:
-                self._send_json({"ok": False, "error": str(ve)}, status=400)
+            if any(k in body for k in ("llm_model", "llm_profile_id", "pinned", "target_url")):
+                sess = agent_manager.get_session(sid)
+                if not sess:
+                    self._send_json({"ok": False, "error": "Agent session not found"}, status=404)
+                    return
+                self._send_json({"ok": True, "session": studio_bridge.enrich_agent_summary(sess.to_summary())})
                 return
-            if summary is None:
-                self._send_json({"ok": False, "error": "Agent session not found"}, status=404)
-                return
-            self._send_json({"ok": True, "session": summary})
+            self._send_json({"ok": False, "error": "会话标题不能为空"}, status=400)
             return
 
         self._send_json({"error": "Not Found"}, status=404)
