@@ -13,11 +13,16 @@ import datetime
 import json
 import random
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+_HEALTH_CACHE_LOCK = threading.Lock()
+_HEALTH_CACHE: Dict[str, Any] = {"ts": 0.0, "payload": None}
+_HEALTH_CACHE_TTL_S = 30.0
 
 
 COMMUNITY_META: Dict[str, Any] = {
@@ -304,6 +309,13 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
 
     if path == "/api/services/health":
         force = (qs.get("force") or ["0"])[0] in ("1", "true", "yes")
+        now = time.time()
+        if not force:
+            with _HEALTH_CACHE_LOCK:
+                cached = _HEALTH_CACHE.get("payload")
+                if cached is not None and (now - float(_HEALTH_CACHE.get("ts") or 0.0)) < _HEALTH_CACHE_TTL_S:
+                    handler._send_json(cached)
+                    return True
         report = srv.collect_doctor_report(include_network=force)
         checks = report.get("checks") or []
         services = []
@@ -326,7 +338,7 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
                 "metrics": {},
                 "detail": f"{detail} ({hint})" if hint else detail,
             })
-        handler._send_json({
+        payload = {
             "checked_at": report.get("checked_at") or time.strftime("%H:%M:%S"),
             "summary": {
                 "total": len(services),
@@ -335,7 +347,11 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
                 "all_core_ready": bool(report.get("ready")),
             },
             "services": services,
-        })
+        }
+        with _HEALTH_CACHE_LOCK:
+            _HEALTH_CACHE["ts"] = time.time()
+            _HEALTH_CACHE["payload"] = payload
+        handler._send_json(payload)
         return True
 
     if path == "/api/fleet":
