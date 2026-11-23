@@ -10,6 +10,29 @@ from datetime import datetime
 from typing import Dict, Any, Type, Optional
 from playwright.sync_api import sync_playwright, Page
 
+_ORIG_PLAYWRIGHT_SYNC = sync_playwright
+
+try:
+    from patchright.sync_api import sync_playwright as _patchright_sync_playwright
+    HAS_PATCHRIGHT = True
+except ImportError:
+    _patchright_sync_playwright = None
+    HAS_PATCHRIGHT = False
+
+
+def resolve_browser_engine(stealth_backend: str = "auto", use_chrome_channel: bool = True, cdp_endpoint: Optional[str] = None):
+    """Resolve sync_playwright factory, preferring Patchright (zero Runtime.enable) when installed."""
+    # Respect unit-test monkeypatches on core.runner.sync_playwright
+    if sync_playwright is not _ORIG_PLAYWRIGHT_SYNC:
+        return "playwright", sync_playwright
+    eff = (os.environ.get("REGISTERHUB_BROWSER_BACKEND") or stealth_backend or "auto").strip().lower()
+    if eff == "playwright" or cdp_endpoint:
+        return "playwright", sync_playwright
+    if eff in ("auto", "patchright") and HAS_PATCHRIGHT and _patchright_sync_playwright is not None:
+        if eff == "patchright" or use_chrome_channel:
+            return "patchright", _patchright_sync_playwright
+    return "playwright", sync_playwright
+
 from core.adapter import BaseSiteAdapter
 from core.stealth import apply_stealth_to_context, connect_fingerprint_browser
 
@@ -43,6 +66,7 @@ class StandardRunner:
         self.timeout_ms = max(5000, int(browser_cfg.get("timeout", 30000) or 30000))
         self.enable_stealth = browser_cfg.get("enable_stealth", True)
         self.use_chrome_channel = browser_cfg.get("use_chrome_channel", True)
+        self.stealth_backend = str(browser_cfg.get("stealth_backend", "auto") or "auto")
         self.proxy_server = browser_cfg.get("proxy") or os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
         self.cdp_endpoint = cdp_endpoint or browser_cfg.get("cdp_endpoint")
         self.output_dir = Path(config.get("output_dir", "./results"))
@@ -141,9 +165,14 @@ class StandardRunner:
     def execute_adapter(self, adapter_cls: Type[BaseSiteAdapter], count: int = 1) -> int:
         success_count = 0
         mode_desc = f"external CDP ({self.cdp_endpoint})" if self.cdp_endpoint else f"desktop browser (headless={self.headless})"
-        self.log("info", f"Starting automation session (target count: {count}, mode: {mode_desc}, stealth: {self.enable_stealth})...")
+        engine_name, pw_factory = resolve_browser_engine(
+            stealth_backend=self.stealth_backend,
+            use_chrome_channel=self.use_chrome_channel,
+            cdp_endpoint=self.cdp_endpoint,
+        )
+        self.log("info", f"Starting automation session (target count: {count}, mode: {mode_desc}, engine: {engine_name}, stealth: {self.enable_stealth})...")
 
-        with sync_playwright() as p:
+        with pw_factory() as p:
             if self.cdp_endpoint:
                 self.log("info", f"Connecting to external fingerprint browser at {self.cdp_endpoint}...")
                 browser = connect_fingerprint_browser(p, self.cdp_endpoint)

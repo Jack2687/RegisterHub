@@ -2,7 +2,7 @@
 
 Strictly single-thread safe for Community Edition:
   - Only one agent turn (and one adapter subprocess) may run at a time.
-  - Up to 8 LLM/tool steps per user turn, cleanly cancellable via `stop()`.
+  - Up to 16 LLM/tool steps per user turn, cleanly cancellable via `stop()`.
   - Persists session history, plan steps, tool calls, and token usage to
     `results/agent_sessions/<id>.json` with atomic writes.
   - Exposes 7 real tools to any OpenAI-compatible LLM via Function Calling:
@@ -49,7 +49,7 @@ FAILED_FILE = RESULTS_DIR / "failed.txt"
 CONFIG_FILE = ROOT_DIR / "config.json"
 AGENT_SESSIONS_DIR = RESULTS_DIR / "agent_sessions"
 
-MAX_STEPS_PER_TURN = 8
+MAX_STEPS_PER_TURN = 16
 RUN_ADAPTER_TIMEOUT_S = 120
 
 _SAFE_SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")

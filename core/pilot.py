@@ -37,7 +37,7 @@ def human_type(page: Page, target: Union[str, Locator], text: str, min_delay: fl
     Type text character-by-character with natural human cadence,
     including slight keystroke jitter, to defeat basic keystroke dynamics bot detection.
     """
-    loc = page.locator(target) if isinstance(target, str) else target
+    loc = page.locator(target).first if isinstance(target, str) else target
     loc.wait_for(state="visible", timeout=10000)
     loc.scroll_into_view_if_needed()
     loc.click()
@@ -61,7 +61,7 @@ def smart_click(page: Page, target: Union[str, Locator], timeout: int = 15000) -
     """
     Click an element after ensuring it is visible, in viewport, and enabled (not disabled).
     """
-    loc = page.locator(target) if isinstance(target, str) else target
+    loc = page.locator(target).first if isinstance(target, str) else target
     try:
         loc.wait_for(state="visible", timeout=timeout)
         loc.scroll_into_view_if_needed()

@@ -148,16 +148,19 @@ class QuanticdataAdapter(BaseSiteAdapter):
         """Fill registration form fields and solve captcha if requested."""
         print(f"[*] [quanticdata] Starting form filling for {identity['email']}...")
         try:
-            # 1. Fill email and password (avoiding honeypots)
-            email_selector = '#f-email, input[type="email"]'
-            password_selector = '#f-pass, input[type="password"]'
-
-            self.page.wait_for_selector(email_selector, state="visible", timeout=15000)
-            human_type(self.page, email_selector, identity["email"])
+            # 1. Fill email and password (scoped to signup form to avoid footer newsletter inputs)
+            email_loc = self.page.locator('#f-email')
+            if email_loc.count() == 0:
+                email_loc = self.page.locator('form input[type="email"], input[type="email"]').first
+            email_loc.wait_for(state="visible", timeout=15000)
+            human_type(self.page, email_loc, identity["email"])
             time.sleep(0.3)
 
-            self.page.wait_for_selector(password_selector, state="visible", timeout=10000)
-            human_type(self.page, password_selector, identity["password"])
+            pass_loc = self.page.locator('#f-pass')
+            if pass_loc.count() == 0:
+                pass_loc = self.page.locator('form input[type="password"], input[type="password"]').first
+            pass_loc.wait_for(state="visible", timeout=10000)
+            human_type(self.page, pass_loc, identity["password"])
             time.sleep(0.5)
 
             # 2. Check if captcha puzzle is active

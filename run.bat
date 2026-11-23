@@ -22,10 +22,11 @@ echo   [5] 输入目标网址直接探测 (--url)
 echo   [6] 一键生成新站适配器模板 (--scaffold)
 echo   [7] 导出账号资产 (CSV / JSON / Bitwarden 密码本)
 echo   [8] 运行自动化测试套件 (Pytest)
+echo   [9] 启动 RegisterHub Lite 零依赖 Web 工作台 + AI 直跑 (--web)
 echo   [0] 退出
 echo.
 echo ======================================================
-set /p choice="请输入选项 [0-8]: "
+set /p choice="请输入选项 [0-9]: "
 
 if "%choice%"=="1" (
     echo.
@@ -89,6 +90,13 @@ if "%choice%"=="8" (
     echo.
     echo [*] 正在运行自动化单元测试套件...
     pytest tests/ -v
+    pause
+    goto MENU
+)
+if "%choice%"=="9" (
+    echo.
+    echo [*] 正在启动 RegisterHub Lite Web 工作台 (http://127.0.0.1:18886)...
+    python main.py --web --port 18886
     pause
     goto MENU
 )

@@ -27,10 +27,11 @@ RegisterHub 是一个面向工程研发的现代化 Web 自动化框架，旨在
 
 ### 核心工程支柱
 
-- **运行环境自洽性 (Runtime Environment Parity)**：通过原生 Chrome 二进制接入与底层自动化特征消除，保持 JavaScript 原型链纯净（`[native code]`），消除自动化标记对现代 Web 应用的异常干扰。
+- **运行环境自洽性 (Runtime Environment Parity)**：通过原生 Chrome 二进制接入与底层自动化特征消除，支持可选安装 **`patchright`** 实现零 `Runtime.enable` CDP 隐匿（自动检测并优先启用，未安装平滑回退 Playwright），保持 JavaScript 原型链纯净（`[native code]`）。
+- **零依赖 Web 可视化工作台 + 内置 AI 直跑 (RegisterHub Lite Web Workbench)**：纯 Python 标准库 HTTP/SSE 驱动（免装 Node/FastAPI），双击 `run_web.bat` 或运行 `python main.py --web` 即可打开 11 大面板（总览仪表盘、AI 直跑、单站试跑、账号与 Key 管理、失败黑匣子快照、站点工坊、视窗标定、临时邮箱/TOTP/Luhn 工具箱、环境诊断、运行与 LLM 配置）。
 - **离线视觉算法求解器 (Algorithmic Vision Solver)**：内置双通 Canny 边缘轮廓计算与三次贝塞尔拟人手部动力学模型，纯本地离线执行，零第三方付费 API 依赖。
 - **CDP 会话桥接架构 (CDP Bridge Architecture)**：深度支持外部指纹浏览器（AdsPower、比特浏览器等）与本地已登录 Chrome 会话无缝接入，复用既有干净住宅网络与登录状态。
-- **AI 代理原生集成规范 (Agentic Co-Pilot Protocol)**：仓库根目录内置工业级 `AGENTS.md` 交互契约，深度适配 Cursor、Claude Code、Windsurf 与 Gemini CLI，支持 AI 自主嗅探表单、装配适配器并完成闭环验证。
+- **AI 代理原生集成规范 (Agentic Co-Pilot Protocol)**：仓库根目录内置工业级 `AGENTS.md` 交互契约，既可在内置 Web「AI 直跑」接入任意 OpenAI 兼容大模型自主写适配器并实测，也深度适配 Cursor、Claude Code、Windsurf 与 Gemini CLI。
 
 ---
 
@@ -58,11 +59,15 @@ RegisterHub/
 │   ├── coarena.py         # 谷歌登录后纯协议注册与提 Key 适配器
 │   ├── milionseek.py      # 100milionseek 每日 1 亿 Token 一键领 Key 与 Turnstile 穿透适配器
 │   └── automation_exercise.py # 国际两步式向导交互基准适配器
+├── web/                   # 零依赖 RegisterHub Lite Web 可视化工作台与内置 AI 直跑
+│   ├── server.py          # 纯标准库 HTTP/SSE 后端（免额外依赖）
+│   └── static/            # 11 面板前端界面
 ├── tests/                 # 单元与回归自动化测试套件
-├── config.json            # 全局浏览器运行配置
+├── config.example.json    # 运行配置模板（首次运行可按需复制为 config.json）
 ├── pytest.ini             # Pytest 测试隔离规范
-├── main.py                # 统一命令行调度入口
+├── main.py                # 统一命令行与 Web 调度入口
 ├── run.bat                # Windows 交互引导脚本 (CRLF 规范)
+├── run_web.bat            # Windows 一键启动 Web 可视化工作台 (:18886)
 └── requirements.txt       # 核心生产依赖清单
 ```
 
@@ -111,7 +116,7 @@ cd RegisterHub
 # 安装 Python 生产依赖
 pip install -r requirements.txt
 
-# 安装 Playwright 浏览器内核
+# 安装 Playwright 浏览器内核（可选再装 `pip install patchright` 自动开启零 Runtime.enable 隐匿内核）
 playwright install chromium
 ```
 
@@ -121,12 +126,18 @@ playwright install chromium
 
 ```bash
 python main.py doctor
+# 也支持带横杠写法：python main.py --doctor
 ```
 
-### 3. 基线自测验证
+### 3. 启动可视化 Web 工作台（推荐）或基线自测
 
-执行内置离线靶场（无需外部网络或代理配置）：
+**方式 A：一键打开零依赖 Web 工作台 + 内置 AI 直跑（推荐）**
+```bash
+python main.py --web
+# 或在 Windows 直接双击 run_web.bat，浏览器访问 http://127.0.0.1:18886
+```
 
+**方式 B：命令行 3 秒跑通内置离线靶场（无需外部网络或代理）**
 ```bash
 python main.py --run demo
 ```

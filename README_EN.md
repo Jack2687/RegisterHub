@@ -27,10 +27,11 @@ RegisterHub is an engineering-first automation framework designed to eliminate t
 
 ### Engineering Core Pillars
 
-- **Runtime Environment Parity**: Eliminates synthetic automation signatures via native Chrome runtime integration, strict prototype preservation (`[native code]`), and clean JavaScript execution context.
+- **Runtime Environment Parity**: Eliminates synthetic automation signatures via native Chrome runtime integration, strict prototype preservation (`[native code]`), and optional zero-`Runtime.enable` **`patchright`** auto-acceleration (gracefully falling back to Playwright when not installed).
+- **Zero-Dependency Web Workbench & Built-in AI Agent (`RegisterHub Lite`)**: Pure Python stdlib HTTP/SSE server (no Node.js or FastAPI required). Launch via `python main.py --web` or `run_web.bat` for 11 live views including Dashboard, Built-in AI Agent, Single-Site Runner, Accounts/Keys, Failure Snapshots, Adapter Workbench, Window Calibration, Utility Toolbox (Disposable Mail / TOTP / Luhn Cards), Doctor, and LLM Settings.
 - **Algorithmic Vision Solver**: Built-in computer vision pipeline featuring dual-pass Canny edge detection and human-kinetic Bezier curve trajectory generation, executing offline with zero cloud API dependencies.
 - **CDP Bridge Architecture**: Native integration with enterprise fingerprint browsers (AdsPower, BitBrowser) and local Chrome instances, allowing seamless reuse of clean residential IPs and persistent user sessions.
-- **Agentic Automation Protocol**: Natively integrated with `AGENTS.md`, enabling autonomous AI agents (Cursor, Claude Code, Windsurf, Gemini CLI) to probe DOM targets, generate adapters, and execute end-to-end verification.
+- **Agentic Automation Protocol**: Natively integrated with `AGENTS.md` and the built-in AI Agent workbench, supporting any OpenAI-compatible LLM as well as Cursor, Claude Code, Windsurf, and Gemini CLI.
 
 ---
 
@@ -64,11 +65,15 @@ RegisterHub/
 │   ├── coarena.py         # Post-Google OAuth pure protocol registration & API key minting
 │   ├── milionseek.py      # 100milionseek 100M tokens/day key harvester & Turnstile solver
 │   └── automation_exercise.py # Multi-step wizard workflow adapter
+├── web/                   # Zero-dependency RegisterHub Lite Web Workbench & built-in AI Agent
+│   ├── server.py          # Stdlib HTTP/SSE backend
+│   └── static/            # 11-panel visual frontend
 ├── tests/                 # Unit & regression test suite
-├── config.json            # Global runtime configuration
+├── config.example.json    # Runtime configuration template
 ├── pytest.ini             # Test runner isolation rules
-├── main.py                # Unified CLI entry point
+├── main.py                # Unified CLI & Web entry point
 ├── run.bat                # Windows interactive execution bootstrap (CRLF)
+├── run_web.bat            # Windows 1-click Web Workbench launcher (:18886)
 ├── calibrate.bat          # Windows interactive window layout calibrator & preview launcher
 └── requirements.txt       # Core dependency manifest
 ```
@@ -118,7 +123,7 @@ cd RegisterHub
 # Install core dependencies
 pip install -r requirements.txt
 
-# Install Playwright browser binaries
+# Install Playwright browser binaries (optional: `pip install patchright` for zero-Runtime.enable stealth)
 playwright install chromium
 ```
 
@@ -128,12 +133,18 @@ Verify host configuration, proxy availability, and dependency health:
 
 ```bash
 python main.py doctor
+# Also accepts flag form: python main.py --doctor
 ```
 
-### 3. Baseline Verification
+### 3. Launch Web Workbench (Recommended) or Baseline Demo
 
-Execute the self-contained offline verification target (requires no network or proxy):
+**Option A: Zero-Dependency Web Workbench & Built-in AI Agent (Recommended)**
+```bash
+python main.py --web
+# Or double-click run_web.bat on Windows, then open http://127.0.0.1:18886
+```
 
+**Option B: Self-Contained 3s Offline Baseline Verification**
 ```bash
 python main.py --run demo
 ```

@@ -176,6 +176,7 @@ def main():
     parser = argparse.ArgumentParser(description="RegisterHub Automation Engine")
     parser.add_argument("--run", type=str, default=None, help="Target site adapter name (e.g. demo, quanticdata, deepgram)")
     parser.add_argument("--list", action="store_true", help="List all available site adapters")
+    parser.add_argument("--doctor", action="store_true", help="Run environment diagnostics (same as `python main.py doctor`)")
     parser.add_argument("--scaffold", type=str, default=None, help="Scaffold a new site adapter template (e.g. twitter, github)")
     parser.add_argument("--count", type=int, default=1, help="Number of accounts to generate")
     parser.add_argument("--url", type=str, default=None, help="Inspect URL or target URL for scaffolding")
@@ -215,7 +216,7 @@ def main():
         calibrate_window(url=args.calibrate_url or (args.url or ""), total_windows=max(1, args.concurrency))
         return
 
-    if args.command == "doctor":
+    if args.doctor or args.command == "doctor":
         # Exit non-zero when blocking issues are found, so CI and wrapper
         # scripts can gate on the real environment state.
         ok = run_doctor()
@@ -277,7 +278,9 @@ def main():
     adapter_name = target_name.lower().replace("-", "_")
     
     if adapter_name in adapters:
-        runner.execute_adapter(adapters[adapter_name], count=args.count)
+        ok_count = runner.execute_adapter(adapters[adapter_name], count=args.count)
+        if ok_count <= 0:
+            sys.exit(1)
     else:
         available = ", ".join(sorted(adapters.keys()))
         print(f"[-] Unknown adapter '{adapter_name}'. Available discovered adapters: {available}")
