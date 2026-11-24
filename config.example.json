@@ -15,5 +15,11 @@
     "country": "US",
     "password_length": 14,
     "use_disposable_mail": true
+  },
+  "mail": {
+    "imap_server": "",
+    "imap_port": 993,
+    "imap_user": "",
+    "imap_password": ""
   }
 }
