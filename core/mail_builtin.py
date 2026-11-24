@@ -387,17 +387,425 @@ def _decode_mime_header(raw: str | None) -> str:
     return "".join(out).strip()
 
 
+_INVISIBLE_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060\u034f\u00ad\ufeff]+")
+_BLOCK_TAG_RE = re.compile(
+    r"</?(?:br|p|div|tr|td|th|li|ul|ol|h[1-6]|section|article|header|footer|hr|blockquote|pre|table)\b[^>]*>",
+    re.I,
+)
+_RAW_MIME_DETECT_RE = re.compile(
+    r"(?:^|\r?\n)(?:MIME-Version:\s*1\.0|Content-Transfer-Encoding:\s*(?:quoted-printable|base64)|Received:\s+from\s+)",
+    re.I,
+)
+
+_OTP_KEYWORDS_RE = re.compile(
+    r"验证码|驗證碼|校验码|校驗碼|动态码|動態碼|安全码|安全碼|确认码|確認碼|一次性(?:密码|密碼|码|碼)"
+    r"|verification|verify|passcode|one[- ]?time|(?<![a-z])otp(?![a-z])|(?<![a-z])pin(?![a-z])|security\s+code|login\s+code|sign[- ]?in\s+code|auth(?:entication)?\s+code|(?<![a-z])code(?![a-z])",
+    re.I,
+)
+_OTP_STRONG_SUBJECT_RE = re.compile(
+    r"验证码|驗證碼|校验码|校驗碼|动态码|動態碼|安全码|安全碼|确认码|確認碼"
+    r"|verification|verify|passcode|one[- ]?time|(?<![a-z])otp(?![a-z])|(?<![a-z])pin(?![a-z])|(?<![a-z])code(?![a-z])|login|sign[- ]?in|confirm",
+    re.I,
+)
+_OTP_LINK_KEYWORDS_RE = re.compile(
+    r"verify|confirm|activate|token|click|validate|magic|login|auth|reset|onboard|invite",
+    re.I,
+)
+_OTP_LINK_BLOCKLIST_RE = re.compile(
+    r"unsubscribe|privacy|terms|policy|help|support|preferences|manage[-_]subscription"
+    r"|twitter\.com|x\.com/|facebook\.com|linkedin\.com|instagram\.com|youtube\.com|tiktok\.com"
+    r"|fonts\.googleapis|gstatic\.com|\.(?:png|jpe?g|gif|svg|webp|ico|css|js|woff2?)(?:\?|$)",
+    re.I,
+)
+_OTP_YEAR_RE = re.compile(r"^(?:19\d\d|20\d\d)$")
+_OTP_PHONE_CTX_RE = re.compile(r"phone|电话|電話|手机|手機|(?<![a-z])tel(?![a-z])|fax|mobile|call\s+us", re.I)
+_OTP_MONEY_CTX_RE = re.compile(r"[$¥€£]|价格|價格|金额|金額|amount|price|total|fee|余额|餘額|usd|eur|cny|invoice", re.I)
+_OTP_FOOTER_LINE_RE = re.compile(
+    r"unsubscribe|manage\s+(?:your\s+)?(?:email\s+)?preferences|all\s+rights\s+reserved|©\s*(?:19|20)\d\d"
+    r"|copyright\s+(?:©\s*)?(?:19|20)\d\d|you\s+(?:are\s+receiving|received)\s+this\s+email"
+    r"|privacy\s+policy\s*[|·•/]\s*terms|mailing\s+address|退订|退訂|取消订阅|取消訂閱|版权所有|版權所有",
+    re.I,
+)
+_US_STATES_RE_STR = (
+    r"(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)"
+)
+_STREET_AFTER_RE = re.compile(
+    r"^\s+(?:[A-Za-z0-9'.-]+\s+){0,3}"
+    r"(?:street|st\.?|avenue|ave\.?|road|rd\.?|boulevard|blvd\.?|drive|dr\.?|lane|ln\.?|way|court|ct\.?|place|pl\.?|square|sq\.?|parkway|pkwy\.?|broadway|highway|hwy\.?|terrace|ter\.?|circle|cir\.?)\b",
+    re.I,
+)
+_UNIT_BEFORE_RE = re.compile(
+    r"(?:#|suite|ste\.?|apt\.?|apartment|unit|floor|fl\.?|room|rm\.?|p\.?\s*o\.?\s*box|box|bldg\.?|building)\s*$",
+    re.I,
+)
+_STATE_ZIP_BEFORE_RE = re.compile(rf"(?:\b{_US_STATES_RE_STR}[,\s]+|(?:[Zz][Ii][Pp]|[Pp]ostal|[Pp]ostcode|邮编|郵編)\s*[:：#]?\s*)$")
+_UNIT_AFTER_RE = re.compile(
+    r"^\s*(?:px|pt|em|rem|vh|vw|ms|sec|secs|second|seconds|min|mins|minute|minutes|hr|hrs|hour|hours|day|days|week|weeks|month|months|year|years|kb|mb|gb|tb|%|美元|元|小时|小時|分钟|分鐘|秒|天)\b",
+    re.I,
+)
+_NON_CODE_ALNUM_RE = re.compile(
+    r"^(?:"
+    r"\d+(?:px|pt|em|rem|vh|vw|ms|hr|hrs|min|mins|sec|secs|h|m|s|d|w|k|kb|mb|gb|tb|bit|th|st|nd|rd)"
+    r"|v\d+[a-z0-9]*|h[1-6]|utf8|utf16|sha\d+|md5|crc\d+|base64|base32|oauth\d?|http\d?|https\d?"
+    r"|tls\d+|ssl\d+|ipv[46]|win\d+|x64|x86|arm\d+|html5|css3|es\d+|mp[34]|pdf\d*|rfc\d+|iso\d+"
+    r"|rgb\d*|rgba\d*|2fa|3fa|mfa\d*|w3c|b2b|b2c|i18n|l10n|k8s|a11y"
+    r")$",
+    re.I,
+)
+
+_SUBJ_LEADING_CODE_RE = re.compile(
+    r"^\s*(?:\[[^\]]{1,30}\]\s*)?([A-Za-z0-9]{4,10}|\d{3}[-\s]\d{3}|[A-Za-z0-9]{3,5}-[A-Za-z0-9]{3,5})\s+(?:is\s+your|is\s+the|是您的|为您的|為您的)\b",
+    re.I,
+)
+_FORWARD_CUE_CODE_RE = re.compile(
+    r"(?:verification\s+code|security\s+code|login\s+code|sign[- ]?in\s+code|confirm(?:ation)?\s+code"
+    r"|auth(?:entication)?\s+code|one[- ]?time\s+(?:code|passcode|password)|passcode|(?<![a-z])otp(?![a-z])|pin\s+code"
+    r"|(?<![a-z])code|验证码|驗證碼|校验码|校驗碼|动态码|動態碼|安全码|安全碼|确认码|確認碼|一次性(?:密码|密碼|码|碼))"
+    r"\s*(?:is|为|為|是)?\s*[:：]?\s*(?:[【\[\(「『]\s*)?"
+    r"(\d{3}[-\s]\d{3}|[A-Za-z0-9]{3,5}-[A-Za-z0-9]{3,5}|[A-Za-z0-9]{4,10})(?![0-9A-Za-z_/:])(?!\.\d)(?!-[0-9A-Za-z])",
+    re.I,
+)
+_REVERSE_CUE_CODE_RE = re.compile(
+    r"(?<![0-9A-Za-z_#/-])(?<!\d:)(?<!\d\.)(\d{3}[-\s]\d{3}|[A-Za-z0-9]{3,5}-[A-Za-z0-9]{3,5}|[A-Za-z0-9]{4,10})"
+    r"\s+(?:is\s+your|is\s+the|是您的|为您的|為您的)\s+[^\n]{0,36}?"
+    r"(?:verification|verify|code|otp|pin|passcode|验证码|驗證碼|校验码|安全码|动态码)",
+    re.I,
+)
+_STANDALONE_LINE_CODE_RE = re.compile(
+    r"^(?:\d{4,8}|\d{3}[-\s]\d{3}|[0-9a-f]{6,8}|[A-Z0-9]{4,8}|[A-Za-z0-9]{3,5}-[A-Za-z0-9]{3,5})$"
+)
+
+
+def _clean_invisible(text: str) -> str:
+    return _INVISIBLE_RE.sub("", text or "")
+
+
 def _strip_html_excerpt(html_text: str) -> str:
-    """剔除 style/script/注释与标签并反转义实体，避免 CSS 源码泄漏进摘要。"""
+    """剔除 style/script/注释与标签并反转义实体，同步清除零宽字符避免 CSS/预读填充污染摘要。"""
     if not html_text:
         return ""
     s = re.sub(r"<!--[\s\S]*?-->", " ", html_text)
     s = re.sub(r"<style\b[^>]*>[\s\S]*?</style>", " ", s, flags=re.I)
     s = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", " ", s, flags=re.I)
     s = re.sub(r"<head\b[^>]*>[\s\S]*?</head>", " ", s, flags=re.I)
+    s = re.sub(r"<svg\b[^>]*>[\s\S]*?</svg>", " ", s, flags=re.I)
     s = re.sub(r"<[^>]+>", " ", s)
-    s = _stdlib_html.unescape(s)
+    s = _clean_invisible(_stdlib_html.unescape(s))
     return re.sub(r"\s+", " ", s).strip()
+
+
+def _html_to_structured_text(html_text: str) -> str:
+    """把 HTML 邮件转成保留块级换行的干净纯文本，让独立成行的验证码不被粘连。"""
+    if not html_text:
+        return ""
+    s = re.sub(r"<!--[\s\S]*?-->", "\n", html_text)
+    s = re.sub(r"<head\b[^>]*>[\s\S]*?</head>", "\n", s, flags=re.I)
+    s = re.sub(r"<style\b[^>]*>[\s\S]*?</style>", "\n", s, flags=re.I)
+    s = re.sub(r"<script\b[^>]*>[\s\S]*?</script>", "\n", s, flags=re.I)
+    s = re.sub(r"<noscript\b[^>]*>[\s\S]*?</noscript>", "\n", s, flags=re.I)
+    s = re.sub(r"<svg\b[^>]*>[\s\S]*?</svg>", "\n", s, flags=re.I)
+    s = _BLOCK_TAG_RE.sub("\n", s)
+    s = re.sub(r"<[^>]+>", " ", s)
+    s = _clean_invisible(_stdlib_html.unescape(s))
+    lines = [re.sub(r"[ \t\r]+", " ", ln).strip() for ln in s.splitlines()]
+    out_lines: list[str] = []
+    prev_empty = False
+    for ln in lines:
+        if not ln:
+            if not prev_empty and out_lines:
+                out_lines.append("")
+                prev_empty = True
+            continue
+        out_lines.append(ln)
+        prev_empty = False
+    return "\n".join(out_lines).strip()
+
+
+def _unwrap_raw_mime_fields(subject: str, text: str, html: str) -> tuple[str, str, str]:
+    raw_src = text if (text and _RAW_MIME_DETECT_RE.search(text)) else (html if (html and _RAW_MIME_DETECT_RE.search(html)) else "")
+    if not raw_src:
+        return subject, text, html
+    cleaned = re.sub(r"^\s*<pre[^>]*>|</pre>\s*$", "", raw_src, flags=re.I).lstrip()
+    try:
+        msg = _stdlib_email.message_from_string(cleaned)
+    except Exception:
+        return subject, text, html
+    dec_subj = _decode_mime_header(msg.get("Subject")) or subject
+    plain_parts: list[str] = []
+    html_parts: list[str] = []
+    for part in msg.walk():
+        if part.is_multipart():
+            continue
+        if "attachment" in str(part.get("Content-Disposition") or "").lower():
+            continue
+        ctype = (part.get_content_type() or "").lower()
+        if ctype not in ("text/plain", "text/html"):
+            continue
+        payload = part.get_payload(decode=True)
+        if not payload:
+            continue
+        charset = part.get_content_charset() or "utf-8"
+        try:
+            body_str = payload.decode(charset, errors="replace")
+        except LookupError:
+            body_str = payload.decode("utf-8", errors="replace")
+        if ctype == "text/plain":
+            plain_parts.append(body_str)
+        else:
+            html_parts.append(body_str)
+    if plain_parts or html_parts:
+        return dec_subj, "\n".join(plain_parts).strip(), "\n".join(html_parts).strip()
+    return dec_subj, text, html
+
+
+def _classify_code_token(raw: str) -> tuple[str, str] | None:
+    """校验并归类候选验证码，严格拒绝纯英文单词与技术计量单位。返回 (kind, clean_value) 或 None。"""
+    val = re.sub(r"\s+", " ", (raw or "").strip())
+    if not val:
+        return None
+    if re.fullmatch(r"\d{3}[-\s]\d{3}", val) or re.fullmatch(r"\d{4}[-\s]\d{4}", val):
+        return ("numeric", val)
+    if re.fullmatch(r"\d{4,8}", val):
+        return ("numeric", val)
+    if re.fullmatch(r"[A-Za-z0-9]{3,5}-[A-Za-z0-9]{3,5}", val):
+        compact = val.replace("-", "")
+        if any(c.isdigit() for c in compact) and any(c.isalpha() for c in compact):
+            return ("alphanumeric", val)
+        return None
+    if re.fullmatch(r"[A-Za-z0-9]{4,10}", val):
+        has_d = any(c.isdigit() for c in val)
+        has_a = any(c.isalpha() for c in val)
+        if has_d and has_a and not _NON_CODE_ALNUM_RE.fullmatch(val):
+            return ("alphanumeric", val)
+    return None
+
+
+def _is_address_or_noise_match(src: str, start: int, end: int, val: str, *, strict_year: bool = True) -> bool:
+    before = src[max(0, start - 28):start]
+    after = src[end:min(len(src), end + 36)]
+    near = src[max(0, start - 20):min(len(src), end + 20)]
+    if _OTP_YEAR_RE.fullmatch(val):
+        if strict_year and not _OTP_KEYWORDS_RE.search(src[max(0, start - 40):min(len(src), end + 40)]):
+            return True
+    if _OTP_PHONE_CTX_RE.search(near) or _OTP_MONEY_CTX_RE.search(near):
+        return True
+    if _UNIT_BEFORE_RE.search(before):
+        return True
+    if _STREET_AFTER_RE.search(after):
+        return True
+    if len(val) == 5 and _STATE_ZIP_BEFORE_RE.search(before):
+        return True
+    if _UNIT_AFTER_RE.search(after):
+        return True
+    return False
+
+
+def _split_main_and_footer(body_text: str) -> str:
+    """切分邮件正文主体与底部页脚/版权/邮寄地址区，防止页脚门牌号与邮编污染验证码。"""
+    if not body_text:
+        return ""
+    lines = body_text.splitlines()
+    for idx, ln in enumerate(lines):
+        if idx == 0:
+            continue
+        low_ln = ln.strip()
+        if not low_ln:
+            continue
+        if _OTP_FOOTER_LINE_RE.search(low_ln):
+            return "\n".join(lines[:idx]).strip()
+        # 独立地址行（例如 "2261 Market Street #5245, San Francisco, CA 94114"）
+        if re.search(rf"\b{_US_STATES_RE_STR}[,\s]+\d{{5}}(?:-\d{{4}})?\b", low_ln) and re.search(
+            r"\b(?:street|st\.?|avenue|ave\.?|road|rd\.?|blvd\.?|drive|dr\.?|suite|ste\.?|#|san\s+francisco|new\s+york|austin|seattle|wilmington)\b",
+            low_ln,
+            re.I,
+        ):
+            return "\n".join(lines[:idx]).strip()
+    return body_text
+
+
+def extract_verification_candidates(
+    subject: str,
+    text: str = "",
+    html: str = "",
+    *,
+    drop_low_noise: bool = True,
+) -> list[dict[str, Any]]:
+    """工业级自包含验证码与验证链接提取引擎（零外部依赖，三仓对齐）。
+
+    策略：
+    1. 剥离原始 RFC822 MIME 信头与零宽填充字符（\\u200c 等），HTML 邮件优先用结构化文本（修复 Graph 255 字截断）；
+    2. 切分正文与页脚地址区，并过滤美标街道门牌 / #单元号 / 州+邮编 / 电话 / 金额 / 年份 / 技术单位；
+    3. 四级置信度提取：主题前置码(0.99) ➔ 显式语境码(0.95-0.98) ➔ 正文独立行码(0.92) ➔ 严格边界上下文回退(0.32-0.94)；
+    4. 子串压制（防从十六进制码 eb29380e 切出 29380）+ 高置信度胜者压制低分噪音 + 大小写归一去重。
+    """
+    subject, text, html = _unwrap_raw_mime_fields(subject or "", text or "", html or "")
+    clean_subj = re.sub(r"\s+", " ", _clean_invisible(subject)).strip()
+    clean_text = "\n".join(
+        re.sub(r"[ \t\r]+", " ", ln).strip() for ln in _clean_invisible(text).splitlines()
+    ).strip()
+    clean_html_text = _html_to_structured_text(html) if html else ""
+
+    # Graph API 的 text 常为 255 字符截断的 bodyPreview，若 HTML 结构化正文更完整或 text 为省略预览则以 HTML 为准
+    if clean_html_text and (
+        not clean_text
+        or len(clean_html_text) >= len(clean_text)
+        or clean_text.endswith(("...", "…"))
+    ):
+        body_text = clean_html_text
+    else:
+        body_text = clean_text or clean_html_text
+
+    main_body = _split_main_and_footer(body_text)
+    is_verify_mail = bool(_OTP_KEYWORDS_RE.search(clean_subj) or _OTP_KEYWORDS_RE.search(main_body[:600]))
+
+    raw_codes: list[tuple[str, str, float, int]] = []  # (kind, value, conf, order)
+    seq = 0
+
+    def _add_code(kind: str, val: str, conf: float) -> None:
+        nonlocal seq
+        seq += 1
+        raw_codes.append((kind, val, min(round(conf, 2), 1.0), seq))
+
+    # --- Tier 1A: 主题前置验证码（如 "d84f5f86 is your URnetwork verification code"）---
+    if clean_subj and _OTP_STRONG_SUBJECT_RE.search(clean_subj):
+        m_lead = _SUBJ_LEADING_CODE_RE.match(clean_subj)
+        if m_lead:
+            cls = _classify_code_token(m_lead.group(1))
+            if cls is not None:
+                _add_code(cls[0], cls[1], 0.99)
+
+    # --- Tier 1B: 主题与正文显式语境匹配（前置关键词 / 后置 is your ... code）---
+    for zone_src, base_bonus in ((clean_subj, 0.02), (main_body, 0.0)):
+        if not zone_src:
+            continue
+        for m in _REVERSE_CUE_CODE_RE.finditer(zone_src):
+            cls = _classify_code_token(m.group(1))
+            if cls is None:
+                continue
+            if _is_address_or_noise_match(zone_src, m.start(1), m.end(1), cls[1], strict_year=False):
+                continue
+            _add_code(cls[0], cls[1], 0.97 + base_bonus)
+        for m in _FORWARD_CUE_CODE_RE.finditer(zone_src):
+            cls = _classify_code_token(m.group(1))
+            if cls is None:
+                continue
+            if _is_address_or_noise_match(zone_src, m.start(1), m.end(1), cls[1], strict_year=False):
+                continue
+            _add_code(cls[0], cls[1], 0.95 + base_bonus)
+
+    # --- Tier 1C: 验证邮件中独立成行的验证码（大号居中展示块）---
+    if is_verify_mail and main_body:
+        body_lines = main_body.splitlines()
+        for idx, ln in enumerate(body_lines):
+            tok = ln.strip().strip("【】[]()「」『』")
+            if not tok or len(tok) > 12 or not _STANDALONE_LINE_CODE_RE.fullmatch(tok):
+                continue
+            cls = _classify_code_token(tok)
+            if cls is None:
+                continue
+            prev_ln = body_lines[idx - 1] if idx > 0 else ""
+            if _OTP_YEAR_RE.fullmatch(cls[1]) and not _OTP_KEYWORDS_RE.search(prev_ln):
+                continue
+            _add_code(cls[0], cls[1], 0.92)
+
+    # --- Tier 2: 严格边界通用扫描（仅扫描主题 + 正文主体，不扫页脚）---
+    full_main = f"{clean_subj}\n{main_body}".strip()
+    if full_main:
+        # 2A. 纯数字码（4~8 位，严格排除字母/符号/路径/小数/日期时间，允许句末标点且绝不从十六进制串切片）
+        for m in re.finditer(r"(?<![0-9A-Za-z_#/-])(?<!\d:)(?<!\d\.)(\d{4,8})(?![0-9A-Za-z_/:])(?!\.\d)(?!-[0-9A-Za-z])", full_main):
+            val = m.group(1)
+            if _is_address_or_noise_match(full_main, m.start(1), m.end(1), val, strict_year=True):
+                continue
+            ctx = full_main[max(0, m.start(1) - 55):min(len(full_main), m.end(1) + 55)]
+            conf = 0.32
+            if _OTP_KEYWORDS_RE.search(ctx):
+                conf = 0.88
+            if len(val) == 6:
+                conf += 0.05
+            if re.search(r"[:：]\s*\d", full_main[max(0, m.start(1) - 8):m.end(1)]):
+                conf += 0.04
+            _add_code("numeric", val, conf)
+
+        # 2B. 字母数字混合码（含 6~8 位 Hex，必须处于验证码语境下）
+        for m in re.finditer(r"(?<![0-9A-Za-z_#/-])(?<!\d:)(?<!\d\.)([A-Za-z0-9]{4,10})(?![0-9A-Za-z_/:])(?!\.\d)(?!-[0-9A-Za-z])", full_main):
+            raw_tok = m.group(1)
+            cls = _classify_code_token(raw_tok)
+            if cls is None or cls[0] != "alphanumeric":
+                continue
+            ctx = full_main[max(0, m.start(1) - 55):min(len(full_main), m.end(1) + 55)]
+            if not _OTP_KEYWORDS_RE.search(ctx):
+                continue
+            is_hex = bool(re.fullmatch(r"[0-9a-fA-F]{6,8}", cls[1]))
+            _add_code("alphanumeric", cls[1], 0.86 if is_hex else 0.78)
+
+    # --- Tier 3: 验证 / 激活链接提取 ---
+    raw_links: list[tuple[str, float, int]] = []
+    link_seq = 0
+
+    def _consider_url(url_raw: str) -> None:
+        nonlocal link_seq
+        url = _stdlib_html.unescape((url_raw or "").strip()).rstrip(".,;)>]\"'")
+        if not url.lower().startswith(("http://", "https://")):
+            return
+        if _OTP_LINK_BLOCKLIST_RE.search(url):
+            return
+        if not _OTP_LINK_KEYWORDS_RE.search(url):
+            return
+        parsed = urllib.parse.urlsplit(url)
+        if (not parsed.path or parsed.path == "/") and not parsed.query:
+            return
+        conf = 0.65
+        if re.search(r"verify|confirm|activate", url, re.I):
+            conf = 0.86
+        elif re.search(r"magic|login|auth", url, re.I):
+            conf = 0.80
+        if re.search(r"(?:token|code|key|oobCode)=", url, re.I):
+            conf += 0.10
+        link_seq += 1
+        raw_links.append((url, min(round(conf, 2), 1.0), link_seq))
+
+    if html:
+        for m_href in re.finditer(r'href=["\']([^"\']+)["\']', html, re.I):
+            _consider_url(m_href.group(1))
+    if main_body:
+        for m_url in re.finditer(r'https?://[^\s<>"\'\)]+', main_body, re.I):
+            _consider_url(m_url.group(0))
+
+    # --- Tier 4: 排序、去重、子串压制与高置信度胜者过滤 ---
+    raw_codes.sort(key=lambda item: (-item[2], item[3]))
+    dedup_codes: list[dict[str, Any]] = []
+    seen_codes: set[str] = set()
+    for kind, val, conf, _ in raw_codes:
+        norm = val.lower()
+        if norm in seen_codes:
+            continue
+        seen_codes.add(norm)
+        dedup_codes.append({"kind": kind, "value": val, "confidence": conf})
+
+    # 子串压制：若已有高置信度混合码（如 eb29380e），剔除其内部数字切片（如 29380）
+    strong_alnums = [c["value"].lower() for c in dedup_codes if c["kind"] == "alphanumeric" and c["confidence"] >= 0.80]
+    if strong_alnums:
+        dedup_codes = [
+            c
+            for c in dedup_codes
+            if not (c["kind"] == "numeric" and any(c["value"].lower() in a and c["value"].lower() != a for a in strong_alnums))
+        ]
+
+    # 高置信度胜者压制：一旦锁定真验证码(>=0.85)，剔除低分裸数字噪音(<0.70)
+    if drop_low_noise and any(c["confidence"] >= 0.85 for c in dedup_codes):
+        dedup_codes = [c for c in dedup_codes if c["confidence"] >= 0.70]
+
+    raw_links.sort(key=lambda item: (-item[1], item[2]))
+    dedup_links: list[dict[str, Any]] = []
+    seen_links: set[str] = set()
+    for url, conf, _ in raw_links:
+        if url in seen_links:
+            continue
+        seen_links.add(url)
+        dedup_links.append({"kind": "link", "value": url, "confidence": conf})
+
+    merged = sorted(dedup_codes[:3] + dedup_links[:3], key=lambda item: -item["confidence"])
+    return merged[:6]
 
 
 def _parse_rfc822_message(msg_id: str, raw_bytes: bytes) -> dict[str, Any]:
@@ -1426,14 +1834,21 @@ class BuiltinMailStore:
             content = str(body_obj.get("content") or "")
             from_obj = m.get("from") if isinstance(m.get("from"), dict) else {}
             from_addr = ((from_obj.get("emailAddress") or {}) if isinstance(from_obj.get("emailAddress"), dict) else {}).get("address", "")
+            raw_preview = re.sub(r"\s+", " ", _clean_invisible(str(m.get("bodyPreview") or ""))).strip()
+            if ctype == "html":
+                full_text = _html_to_structured_text(content) or raw_preview
+                clean_excerpt = (raw_preview if len(raw_preview) >= 32 else re.sub(r"\s+", " ", full_text))[:240]
+            else:
+                full_text = _clean_invisible(content) or raw_preview
+                clean_excerpt = (re.sub(r"\s+", " ", full_text) or raw_preview)[:240]
             out.append({
                 "id": str(m.get("id") or ""),
                 "from": str(from_addr or ""),
-                "subject": str(m.get("subject") or ""),
+                "subject": _clean_invisible(str(m.get("subject") or "")).strip(),
                 "receivedAt": str(m.get("receivedDateTime") or ""),
-                "excerpt": str(m.get("bodyPreview") or "")[:240],
+                "excerpt": clean_excerpt,
                 "html": content if ctype == "html" else "",
-                "text": content if ctype != "html" else str(m.get("bodyPreview") or ""),
+                "text": full_text,
             })
         return out
 
@@ -1756,27 +2171,7 @@ class BuiltinMailStore:
 
     @staticmethod
     def _extract_cands(subj: str, txt: str, htm: str) -> list[dict[str, Any]]:
-        extractor = None
-        try:
-            from .mail import extract_candidates as _ext  # type: ignore[attr-defined]
-            extractor = _ext
-        except Exception:
-            extractor = None
-
-        if callable(extractor):
-            return [
-                {"kind": c.kind, "value": c.value, "confidence": round(float(c.confidence), 2)}
-                for c in extractor(subj, txt, htm)[:6]
-            ]
-        plain = f"{subj}\n{txt}\n{_strip_html_excerpt(htm)}"
-        cands: list[dict[str, Any]] = []
-        for m_code in re.finditer(r"(?<!\d)(\d{4,8})(?!\d)", plain):
-            val = m_code.group(1)
-            if not re.fullmatch(r"20[23]\d", val):
-                cands.append({"kind": "numeric", "value": val, "confidence": 0.8})
-                if len(cands) >= 6:
-                    break
-        return cands
+        return extract_verification_candidates(subj, txt, htm, drop_low_noise=True)
 
     @staticmethod
     def _format_ts(ts_raw: Any) -> str:

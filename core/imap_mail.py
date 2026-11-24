@@ -197,20 +197,29 @@ class BuiltinPoolMailClient:
         since_ts: Optional[float] = None,
     ) -> Optional[str]:
         """Poll verification code from the leased mailbox via BuiltinMailStore."""
+        from core.mail_builtin import extract_verification_candidates
+
         if not self.email:
             raise RuntimeError("尚未从内置邮箱池租借邮箱，请先调用 create_mailbox()")
         cutoff = float(since_ts if since_ts is not None else (self._leased_at or time.time())) - 120.0
         deadline = time.time() + max(5, int(timeout_secs))
+        use_smart = not pattern or pattern == r"\b\d{4,8}\b"
         while time.time() < deadline:
             try:
                 msgs = self.store.list_messages(self.email, top=10, since=cutoff)
                 for msg in msgs:
                     subj = str(msg.get("subject") or "")
                     txt = str(msg.get("text") or "")
-                    htm = re.sub(r"<[^>]+>", " ", str(msg.get("html") or ""))
-                    m = re.search(pattern, f"{subj}\n{txt}\n{htm}")
-                    if m:
-                        return m.group(0)
+                    htm = str(msg.get("html") or "")
+                    if use_smart:
+                        cands = [c for c in extract_verification_candidates(subj, txt, htm) if c["kind"] in ("numeric", "alphanumeric")]
+                        if cands and float(cands[0].get("confidence", 0)) >= 0.70:
+                            return str(cands[0]["value"])
+                    else:
+                        plain_htm = re.sub(r"<[^>]+>", " ", htm)
+                        m = re.search(pattern, f"{subj}\n{txt}\n{plain_htm}")
+                        if m:
+                            return m.group(1) if m.lastindex else m.group(0)
             except Exception:
                 pass
             time.sleep(4)

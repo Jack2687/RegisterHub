@@ -297,3 +297,27 @@ def test_settings_config_and_agent_builtin_tools(tmp_path, monkeypatch):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_community_otp_extractor_hex_dedupe_and_footer_guard():
+    """Verify community BuiltinMailStore._extract_cands handles 8-char hex OTP, dedupe, and US address filtering."""
+    from core.mail_builtin import BuiltinMailStore
+
+    ur_html = (
+        "<html><body><p>Enter this code to verify your email. It expires in 4 hours.</p>"
+        "<div>eb29380e</div>"
+        "<p>2261 Market Street #5245, San Francisco, CA 94114</p></body></html>"
+    )
+    c_ur = BuiltinMailStore._extract_cands(
+        "eb29380e is your URnetwork verification code",
+        "Enter this code to verify your email. It expires in 4 hours." + ("\u200c " * 40),
+        ur_html,
+    )
+    assert [c["value"] for c in c_ur] == ["eb29380e"]
+
+    c_th = BuiltinMailStore._extract_cands(
+        "Your Token Harbor verification code",
+        "Enter this 6-digit code: 684156. Expires in 5 minutes.",
+        "<p>Enter this 6-digit code:</p><b>684156</b>",
+    )
+    assert [c["value"] for c in c_th] == ["684156"]
