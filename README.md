@@ -47,22 +47,20 @@ RegisterHub/
 │   ├── inspector.py       # 启发式 DOM 表单探测器 (FormInspector)
 │   ├── solver.py          # OpenCV 缺口匹配计算与贝塞尔轨迹规划器
 │   ├── identity.py        # 高熵多国身份与合规密码发生器
-│   ├── mail_client.py     # 毫秒级自适应退避邮箱轮询客户端
+│   ├── mail_client.py     # 毫秒级自适应退避临时邮箱轮询客户端
+│   ├── imap_mail.py       # 零依赖标准库单账号 IMAP 验证码拉取客户端
+│   ├── ip_scorer.py       # 出口 IP 住宅属性与风控纯净度评分器
 │   ├── runner.py          # 调度引擎、黑匣子快照抓取与原子台账持久化
-│   ├── scaffold.py        # 适配器自动派生与预装配代码生成引擎
+│   ├── scaffold.py        # 适配器自动派生与预装配代码生成引擎（自动联动临时邮 / IMAP）
 │   └── exporter.py        # Bitwarden、1Password、CSV 及 JSON 资产导出器
 ├── sites/                 # 业务与示范适配器池
-│   ├── _template.py       # 工业级标准适配器实现模板
+│   ├── _template.py       # 工业级标准适配器实现模板（支持 tempmail / IMAP 自动切换）
 │   ├── demo_site.py       # 自包含离线 Base64 靶场适配器
-│   ├── quanticdata.py     # OpenCV 拼图滑块与贝塞尔拖拽验证适配器
-│   ├── deepgram.py        # Deepgram $200 免费额度与 API Key 直出适配器
-│   ├── amd.py             # AMD AI 开发者计划官方注册适配器
-│   ├── coarena.py         # 谷歌登录后纯协议注册与提 Key 适配器
-│   ├── milionseek.py      # 100milionseek 每日 1 亿 Token 一键领 Key 与 Turnstile 穿透适配器
-│   └── automation_exercise.py # 国际两步式向导交互基准适配器
-├── web/                   # 零依赖 RegisterHub Lite Web 可视化工作台与内置 AI 直跑
+│   └── automation_exercise.py # 国际两步式向导交互基准靶场适配器
+├── web/                   # 零依赖 RegisterHub Web 可视化工作台与内置 AI 直跑
 │   ├── server.py          # 纯标准库 HTTP/SSE 后端（免额外依赖）
-│   └── static/            # 11 面板前端界面
+│   ├── studio_bridge.py   # Studio 控制平面协议桥接层
+│   └── dist/              # Studio 风格单页工作台构建产物
 ├── tests/                 # 单元与回归自动化测试套件
 ├── config.example.json    # 运行配置模板（首次运行可按需复制为 config.json）
 ├── pytest.ini             # Pytest 测试隔离规范
@@ -76,32 +74,13 @@ RegisterHub/
 
 ## 内置示范适配器矩阵
 
-RegisterHub 开箱内置涵盖不同前端技术栈与复杂交互范式的经典实战适配器：
+RegisterHub 开箱内置纯本地与公开测试靶场示范适配器，零第三方商业站点硬编码，开箱即可验证完整生命周期或作为新站派生基准：
 
-| 适配器标识 | 目标应用 | 技术实现特性 | 核心评测与验证重点 |
+| 适配器标识 | 目标环境 | 技术实现特性 | 核心评测与验证重点 |
 | :--- | :--- | :--- | :--- |
-| `demo` | 内置离线 Base64 靶场 | 零配置全离线管道 | 3 秒快速环境自洽性与生命周期端到端自检 |
-| `quanticdata` | Quantic Data 服务 | OpenCV 缺口识别 + 贝塞尔动力学 | 纯本地算子秒破拼图滑块挑战，零第三方打码依赖 |
-| `deepgram` | Deepgram 语音 AI 平台 | 谷歌人机主动穿透 + REST 协议闭环 | 官方赠送 $200 免费额度，100ms 原子直出 40 位 API Key |
-| `amd` | AMD AI 开发者计划 | Akamai 遥测自洽 + OneTrust 穿透 | 顶级大厂官方 AI 算力开发者计划注册与凭据获取 |
-| `coarena` | Coarena AI 平台 | **谷歌登录后纯协议注册与提 Key** | 示范 Google OAuth 会话捕获后 100% 协议确认条款并秒级直出 Key |
-| `milionseek` | 100milionseek 平台 | **每日 1 亿 Token 免费算力** + Turnstile 穿透 | 填邮箱秒级直出 Key（免收激活信），内置母号裂变接力管理 |
-| `automation_exercise` | 标准测试基准靶场 | 多阶段向导向注册流 | 复杂下拉联动与多选框状态硬断言 |
-
----
-
-## 官方独立开箱即用衍生工程 (Standalone Showcase Ecosystem)
-
-> **矩阵互联与互相引流说明**：  
-> 为了方便仅需针对**单一特定平台**进行自动化落地的开发者，本项目特将核心高频实战案例**全量解耦为 100% 自包含的独立 GitHub 开源工程**。  
-> 每个独立工程均自带 Windows 一键启动引导 `run.bat`、专属 `main.py` 调度入口与自包含运行底座，无需配置母港即可独立运行。你也可以直接在本主框架中通过 `python main.py --run <site>` 统一调度：
-
-| 独立开源项目 | 核心福利与架构亮点 | 独立工程直达 |
-| :--- | :--- | :--- |
-| **[Deepgram Register](https://github.com/waw666waw666/deepgram-register)** | 官方赠送 **$200 美元真金使用额度** + 谷歌 reCAPTCHA v2 主动穿透 + 纯 REST 协议秒级提 Key | [GitHub 仓库](https://github.com/waw666waw666/deepgram-register) |
-| **[100MilionSeek Register](https://github.com/waw666waw666/100milionseek-register)** | **每天免费 1 亿 Tokens** + Turnstile 穿透 + 免收信页面卡片秒出 Key + 母号裂变接力 | [GitHub 仓库](https://github.com/waw666waw666/100milionseek-register) |
-| **[AMD AI Dev Register](https://github.com/waw666waw666/amd-register)** | AMD 官方 AI 开发者计划注册 + Akamai 遥测自洽 + OneTrust 模态弹窗穿透 | [GitHub 仓库](https://github.com/waw666waw666/amd-register) |
-| **[Coarena Register](https://github.com/waw666waw666/coarena-register)** | **谷歌登录后 100% 协议提 Key** + OAuth 会话捕获 + 条款签署与每日额度秒验 | [GitHub 仓库](https://github.com/waw666waw666/coarena-register) |
+| `demo` | 内置离线 Base64 靶场 | 零配置全离线管道 | 3 秒快速验证环境自洽、浏览器启动、SSE 日志与账号落盘 |
+| `automation_exercise` | 国际公开自动化测试靶场 | 多阶段向导式注册流 | 复杂表单字段、下拉联动与多选框状态硬断言 |
+| `_template` | 工业级标准适配器模板 | 自动联动临时邮 / IMAP 接码 | 通过 `--scaffold` 或 Web「AI 对话」一键派生自定义站点适配器 |
 
 ---
 
@@ -180,25 +159,18 @@ AI 将直接对照你跑通的真实人类行为路径进行精确代码装配�
 
 ---
 
-## 关于邮箱与验证码接收策略 (Email Strategies)
+## 关于代理与邮箱接码配置 (Proxy & Email Strategies)
 
-不同目标平台对注册邮箱的风控规则各异，RegisterHub 为开发者提供了三级透明收信策略：
+在 Web 工作台 **「系统设置」** 面板（或根目录 `config.json`）中，开源版支持开箱即用的单代理与双邮箱源，并提供一键连通性自检：
 
-1. **零收信门槛站点（即时秒出，新手首选）**：
-   - 示范项目：`100milionseek`
-   - **完全不需要接收任何验证码或激活信**！填入任意合规格式邮箱，过完 Turnstile 人机验证后，页面卡片 10 秒内直接渲染出明文 API Key。
-
-2. **协议接管站点（OAuth 凭据换票）**：
-   - 示范项目：`coarena`
-   - 依托真机 Chrome 捕获 Google 登录态，浏览器仅充当瞬态取票器；会话捕获后 100% 纯协议签署条款、签发 API Key 并验活额度。
-
-3. **需收码 / 高风控大额站点（如 Deepgram $200 美元真金赠金、AMD 开发者计划）**：
-   - **默认方式（公网免费临时邮箱，全自动）**：
-     默认 `use_disposable_mail: true`，框架通过三通道公网接口（mail.tm 等）全自动接收 6 位验证码。适合轻量功能验证。
-   - **自备真实邮箱模式（强烈推荐，100% 成功保底）**：
-     Deepgram、AMD 等官方大厂具备反欺诈黑名单库，公网部分免费临时域名可能被拦截。**强烈建议在 `config.json` 中填入自备的 Outlook / Hotmail / Gmail 个人邮箱**。脚本自动完成表单装配与人机穿透，并在终端提示输入验证码，回车即可 **100% 稳稳领走 $200 满额 API Key**！
-   - **工业级自建中枢（高级扩展）**：
-     支持开发者挂载自建 MailHub 容器池、Cloudflare Email Routing (Catch-all) 或 IMAP 协议，实现多通道批量无人值守收信。
+1. **代理出口接入**：
+   - 支持 **直连 / 系统代理（`direct`）**、**单条 HTTP / SOCKS5 代理（`proxy`）**（含带账密的住宅代理网关）以及 **外部指纹浏览器 CDP 桥接**；
+   - 配置后可直接在 **「系统设置」→「测试代理连通」** 或 **「IP 纯净度」** 面板实测出口延迟与住宅纯净分。
+2. **默认免费临时邮箱（`tempmail`，零配置）**：
+   - 默认 `defaults.use_disposable_mail: true`，框架通过内置 `DisposableMailClient` 自动申请公共临时邮箱并轮询验证码，适合快速功能验证与测试靶场。
+3. **自备单账号 IMAP 接码（`imap`，推荐应对严格风控站）**：
+   - 遇到屏蔽公共临时域的目标站时，在「系统设置」切换为 **单账号自有 IMAP**，填入 Gmail / Outlook / QQ / 163 / 自建域的 IMAP 服务器、端口（993）、邮箱与授权码，点击 **「测试 IMAP 登录」** 验证通过后保存；
+   - 脚手架 `--scaffold` 生成的新适配器与内置「AI 对话」均会自动读取 `config.json` 并无缝切换至 `SingleImapMailClient` 无损收码（`BODY.PEEK[]`）。
 
 ---
 

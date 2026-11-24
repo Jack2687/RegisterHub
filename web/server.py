@@ -67,11 +67,6 @@ _ADAPTER_TIERS: Dict[str, str] = {
     "demo": "demo",
     "demo_site": "demo",
     "automation_exercise": "demo",
-    "coarena": "oauth",
-    "amd": "verified",
-    "deepgram": "verified",
-    "milionseek": "verified",
-    "quanticdata": "verified",
 }
 
 

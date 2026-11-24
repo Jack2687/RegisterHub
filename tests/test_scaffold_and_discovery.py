@@ -36,24 +36,32 @@ def test_scaffold_and_discovery(tmp_path):
             out_file.unlink()
 
 
-def test_ref_pool_corrupt_json_guard_and_atomic_save(tmp_path):
-    from sites.milionseek import RefPoolManager
+def test_scaffold_auto_wires_single_imap_client():
+    from core.imap_mail import SingleImapMailClient
 
-    pool_file = tmp_path / "nested" / "ref_pool.json"
-    mgr = RefPoolManager(pool_file)
-    mgr.record_invite("BASE", "CHILD1", "a@b.com", "sk-test-123456")
-    assert pool_file.exists()
-    assert not pool_file.with_suffix(".json.tmp").exists()
-    assert mgr.get_active_code() == "BASE"
-
-    # Corrupt file must NOT be overwritten with empty state
-    corrupt_raw = "{corrupt json"
-    pool_file.write_text(corrupt_raw, encoding="utf-8")
-    loaded = mgr.load()
-    assert loaded == {"active_code": None, "nodes": {}}
-    assert mgr._loaded_corrupt is True
-    mgr.save({"active_code": "OVERWRITE", "nodes": {}})
-    assert pool_file.read_text(encoding="utf-8") == corrupt_raw
+    test_site_name = "unit_test_imap_wire"
+    out_file = scaffold_site(test_site_name, target_url="https://demo.example.com/signup")
+    try:
+        adapters = discover_adapters()
+        cls = adapters[test_site_name]
+        cfg = {
+            "defaults": {"use_disposable_mail": False, "country": "US", "password_length": 14},
+            "mail": {
+                "imap_server": "imap.example.com",
+                "imap_port": 993,
+                "imap_user": "alice@example.com",
+                "imap_password": "app-password-demo",
+            },
+        }
+        inst = cls(page=None, context=None, config=cfg)
+        ident = inst.prepare_identity()
+        assert ident["email"] == "alice@example.com"
+        assert isinstance(inst.mail_client, SingleImapMailClient)
+        assert inst.mail_client.server == "imap.example.com"
+        assert inst.mail_client.port == 993
+    finally:
+        if out_file.exists():
+            out_file.unlink()
 
 
 def test_mail_client_list_html_and_excerpt_fallback():

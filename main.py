@@ -174,7 +174,7 @@ def run_scaffold(site_name: str, target_url: str = None):
 
 def main():
     parser = argparse.ArgumentParser(description="RegisterHub Automation Engine")
-    parser.add_argument("--run", type=str, default=None, help="Target site adapter name (e.g. demo, quanticdata, deepgram)")
+    parser.add_argument("--run", type=str, default=None, help="Target site adapter name (e.g. demo, automation_exercise)")
     parser.add_argument("--list", action="store_true", help="List all available site adapters")
     parser.add_argument("--doctor", action="store_true", help="Run environment diagnostics (same as `python main.py doctor`)")
     parser.add_argument("--scaffold", type=str, default=None, help="Scaffold a new site adapter template (e.g. twitter, github)")

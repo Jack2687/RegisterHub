@@ -74,7 +74,7 @@ def _classify_key(val: str) -> str:
     s = str(val or "").strip()
     if not s:
         return "普通账号"
-    if s.startswith(("sk-", "dg_", "hms-", "gsk_", "coa_", "ca_")):
+    if s.startswith(("sk-", "gsk_", "rk_", "pk_", "api_")):
         return "API Key"
     if s.startswith("eyJ") and s.count(".") == 2:
         return "JWT Token"
@@ -82,14 +82,7 @@ def _classify_key(val: str) -> str:
 
 
 def _infer_project_from_account(acc: Dict[str, Any], adapters: List[Dict[str, Any]]) -> str:
-    ak = str(acc.get("api_key") or "").strip().lower()
-    if ak.startswith("hms-") or "milion" in ak:
-        return "milionseek"
-    if ak.startswith(("coa_", "ca_")):
-        return "coarena"
-    if len(ak) == 40 and re.fullmatch(r"[0-9a-f]{40}", ak):
-        return "deepgram"
-    return adapters[0]["name"] if adapters else "community"
+    return adapters[0]["name"] if adapters else "demo"
 
 
 def enrich_agent_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
@@ -812,11 +805,17 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
 
         cfg = srv._load_raw_config_dict()
         mc = cfg.get("mail") or {}
+        raw_pw = str(body.get("imap_password") or "")
+        eff_pw = str(mc.get("imap_password") or "") if (not raw_pw or raw_pw == "***") else raw_pw
+        try:
+            eff_port = int(body.get("imap_port") or mc.get("imap_port") or 993)
+        except Exception:
+            eff_port = 993
         client = SingleImapMailClient(
-            server=str(mc.get("imap_server") or ""),
-            port=int(mc.get("imap_port") or 993),
-            user=str(mc.get("imap_user") or ""),
-            password=str(mc.get("imap_password") or ""),
+            server=str(body.get("imap_server") or mc.get("imap_server") or "").strip(),
+            port=max(1, min(65535, eff_port)),
+            user=str(body.get("imap_user") or mc.get("imap_user") or "").strip(),
+            password=eff_pw,
         )
         handler._send_json(client.test_connection())
         return True

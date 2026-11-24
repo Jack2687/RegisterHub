@@ -8,6 +8,7 @@ from core.adapter import BaseSiteAdapter
 from core.identity import generate_identity
 from core.pilot import human_type, smart_click, smart_agree_tos
 from core.mail_client import DisposableMailClient
+from core.imap_mail import SingleImapMailClient
 
 
 class SiteTemplateAdapter(BaseSiteAdapter):
@@ -18,7 +19,7 @@ class SiteTemplateAdapter(BaseSiteAdapter):
 
     def __init__(self, page, context, config=None):
         super().__init__(page, context, config)
-        self.mail_client: Optional[DisposableMailClient] = None
+        self.mail_client: Optional[Any] = None
 
     def target_url(self) -> str:
         """
@@ -30,15 +31,33 @@ class SiteTemplateAdapter(BaseSiteAdapter):
         """
         [TODO]: Customize synthetic identity generation.
         Supports locale switching: generate_identity(locale='US'|'UK'|'DE')
+        Automatically switches between DisposableMailClient and SingleImapMailClient via config.json.
         """
-        use_disposable = self.config.get("use_disposable_mail", True)
-        
-        # 1. Optionally hook up public disposable mailbox if email verification is enforced
+        defaults = self.config.get("defaults") or {}
+        mail_cfg = self.config.get("mail") or {}
+        use_disposable = defaults.get("use_disposable_mail", self.config.get("use_disposable_mail", True))
+        locale = defaults.get("country", "US")
+        pwd_len = int(defaults.get("password_length", 14) or 14)
+
+        # 1. Hook up public disposable mailbox or single-account IMAP based on config.json
         if use_disposable:
             self.mail_client = DisposableMailClient()
-            ident = generate_identity(locale="US", mail_client=self.mail_client)
+            ident = generate_identity(locale=locale, mail_client=self.mail_client, password_length=pwd_len)
         else:
-            ident = generate_identity(locale="US")
+            ident = generate_identity(locale=locale, password_length=pwd_len)
+            imap_server = str(mail_cfg.get("imap_server") or "").strip()
+            imap_user = str(mail_cfg.get("imap_user") or "").strip()
+            imap_password = str(mail_cfg.get("imap_password") or "")
+            if imap_server and imap_user and imap_password:
+                self.mail_client = SingleImapMailClient(
+                    server=imap_server,
+                    port=int(mail_cfg.get("imap_port") or 993),
+                    user=imap_user,
+                    password=imap_password,
+                )
+                ident["email"] = imap_user
+            elif self.config.get("email"):
+                ident["email"] = str(self.config["email"]).strip()
 
         self.account_data = ident
         return self.account_data

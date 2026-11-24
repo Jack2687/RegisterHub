@@ -15,18 +15,17 @@ echo           RegisterHub CLI Runner
 echo ======================================================
 echo.
 echo   [1] 运行开箱 Demo 演示 (本地离线靶场)
-echo   [2] 运行 QuanticData 滑块验证测试 (OpenCV 视觉与贝塞尔拟人拖拽)
+echo   [2] 启动 RegisterHub 零依赖 Web 工作台 + AI 直跑 (--web)
 echo   [3] 运行全球通用注册靶场测试 (AutomationExercise 实战)
 echo   [4] 运行系统环境诊断 (Doctor)
 echo   [5] 输入目标网址直接探测 (--url)
 echo   [6] 一键生成新站适配器模板 (--scaffold)
 echo   [7] 导出账号资产 (CSV / JSON / Bitwarden 密码本)
 echo   [8] 运行自动化测试套件 (Pytest)
-echo   [9] 启动 RegisterHub Lite 零依赖 Web 工作台 + AI 直跑 (--web)
 echo   [0] 退出
 echo.
 echo ======================================================
-set /p choice="请输入选项 [0-9]: "
+set /p choice="请输入选项 [0-8]: "
 
 if "%choice%"=="1" (
     echo.
@@ -37,8 +36,8 @@ if "%choice%"=="1" (
 )
 if "%choice%"=="2" (
     echo.
-    echo [*] 正在启动 QuanticData 滑块视觉求解测试...
-    python main.py --run quanticdata
+    echo [*] 正在启动 RegisterHub Web 工作台 (http://127.0.0.1:18886)...
+    python main.py --web --port 18886
     pause
     goto MENU
 )
@@ -90,13 +89,6 @@ if "%choice%"=="8" (
     echo.
     echo [*] 正在运行自动化单元测试套件...
     pytest tests/ -v
-    pause
-    goto MENU
-)
-if "%choice%"=="9" (
-    echo.
-    echo [*] 正在启动 RegisterHub Lite Web 工作台 (http://127.0.0.1:18886)...
-    python main.py --web --port 18886
     pause
     goto MENU
 )

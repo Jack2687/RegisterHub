@@ -49,26 +49,24 @@ RegisterHub/
 │   ├── inspector.py       # Heuristic DOM form inspector (FormInspector)
 │   ├── solver.py          # OpenCV puzzle gap detector & Bezier trajectory planner
 │   ├── identity.py        # High-entropy synthetic persona & credential generator
-│   ├── mail_client.py     # Adaptive polling mailbox synchronization client
+│   ├── mail_client.py     # Adaptive polling disposable mailbox client
+│   ├── imap_mail.py       # Zero-dependency stdlib single-account IMAP client
+│   ├── ip_scorer.py       # Exit IP residential attribution & risk purity scorer
 │   ├── runner.py          # Deterministic task execution, snapshot logger & ledger writer
-│   ├── scaffold.py        # Automated adapter scaffolding & code generation engine
+│   ├── scaffold.py        # Automated adapter scaffolding (auto-wires tempmail / IMAP)
 │   └── exporter.py        # Bitwarden, 1Password, CSV & JSON credential exporter
 ├── config/
 │   └── window_geometry.json # Calibrated multi-window layout & zoom presets
 ├── docs/
 │   └── WINDOW_CALIBRATION.md # Cross-resolution window calibration & preview guide
-├── sites/                 # Production & reference adapters
-│   ├── _template.py       # Standard adapter implementation template
+├── sites/                 # Clean reference adapters & scaffold template
+│   ├── _template.py       # Standard adapter template (auto-switches tempmail / IMAP)
 │   ├── demo_site.py       # Self-contained offline Base64 reference target
-│   ├── quanticdata.py     # Slider puzzle & Bezier drag verification adapter
-│   ├── deepgram.py        # Deepgram $200 USD allowance & key harvesting adapter
-│   ├── amd.py             # AMD AI Developer Program onboarding adapter
-│   ├── coarena.py         # Post-Google OAuth pure protocol registration & API key minting
-│   ├── milionseek.py      # 100milionseek 100M tokens/day key harvester & Turnstile solver
-│   └── automation_exercise.py # Multi-step wizard workflow adapter
-├── web/                   # Zero-dependency RegisterHub Lite Web Workbench & built-in AI Agent
+│   └── automation_exercise.py # Public multi-step automation benchmark adapter
+├── web/                   # Zero-dependency RegisterHub Web Workbench & built-in AI Agent
 │   ├── server.py          # Stdlib HTTP/SSE backend
-│   └── static/            # 11-panel visual frontend
+│   ├── studio_bridge.py   # Studio control-plane API bridge
+│   └── dist/              # Studio-aligned SPA frontend bundle
 ├── tests/                 # Unit & regression test suite
 ├── config.example.json    # Runtime configuration template
 ├── pytest.ini             # Test runner isolation rules
@@ -81,34 +79,15 @@ RegisterHub/
 
 ---
 
-## Showcase Adapters
+## Reference Adapters
 
-RegisterHub includes reference implementations covering diverse architectural paradigms:
+RegisterHub ships exclusively with clean local & public benchmark adapters—zero hardcoded commercial targets—ready out of the box to verify the full lifecycle or serve as blueprints for new adapters:
 
 | Adapter Key | Target Environment | Technical Characteristics | Primary Evaluation Target |
 | :--- | :--- | :--- | :--- |
-| `demo` | Embedded Base64 Target | Zero-configuration offline pipeline | Rapid 3s runtime environment verification |
-| `quanticdata` | Quantic Data Service | OpenCV edge detection + Bezier kinematics | Local slider puzzle resolution & reactive inputs |
-| `deepgram` | Deepgram Voice AI | Google reCAPTCHA v2 active penetration | $200 USD free credit allowance & API key extraction |
-| `amd` | AMD AI Developer Program | Akamai telemetry parity + OneTrust clearance | Big Tech AI developer registration & token acquisition |
-| `coarena` | Coarena AI Platform | **Post-Google OAuth Protocol Registration & Key Minting** | Demonstrates OAuth session capture, pure REST terms acceptance & instant API key minting |
-| `milionseek` | 100milionseek Platform | **100M Tokens/day Free Compute** + Turnstile Clearance | Instant on-page key generation (no mail verification needed) + referral cascade pool |
-| `automation_exercise` | Standard Benchmark Portal | Multi-stage registration wizard | Complex dropdown cascading & checkbox grids |
-
----
-
-## Standalone Showcase Ecosystem
-
-> **Standalone Decoupling & Reciprocal Funnel Notice**:  
-> For developers interested in automating a **single specific service**, we have decoupled our primary production workflows into **100% self-contained standalone GitHub repositories**.  
-> Each independent repository includes its own Windows `run.bat` launcher, dedicated `main.py` entry point, and embedded runtime engine without requiring the full framework. You can also run them within this unified engine via `python main.py --run <site>`:
-
-| Standalone Project | Key Features & Free Benefits | Repository Direct Link |
-| :--- | :--- | :--- |
-| **[Deepgram Register](https://github.com/waw666waw666/deepgram-register)** | Official **$200 USD Free Credit Allowance** + reCAPTCHA v2 Penetration + Pure REST Protocol Key Extraction | [GitHub Repo](https://github.com/waw666waw666/deepgram-register) |
-| **[100MilionSeek Register](https://github.com/waw666waw666/100milionseek-register)** | **100M Tokens/day Free Allowance** + Turnstile Clearance + Instant Card Key Harvester + Referral Pool | [GitHub Repo](https://github.com/waw666waw666/100milionseek-register) |
-| **[AMD AI Dev Register](https://github.com/waw666waw666/amd-register)** | Official AMD AI Developer Program + Akamai Telemetry Parity + OneTrust Modal Penetration | [GitHub Repo](https://github.com/waw666waw666/amd-register) |
-| **[Coarena Register](https://github.com/waw666waw666/coarena-register)** | **Post-OAuth Pure REST Protocol Key Minting** + Session Capture + Terms Acceptance & Quota Validation | [GitHub Repo](https://github.com/waw666waw666/coarena-register) |
+| `demo` | Embedded Base64 Target | Zero-configuration offline pipeline | Rapid 3s verification of browser launch, SSE logs, and ledger persistence |
+| `automation_exercise` | Public Automation Benchmark | Multi-stage registration wizard | Complex form fields, dropdown cascading & checkbox assertions |
+| `_template` | Standard Adapter Blueprint | Auto-wires tempmail / IMAP mail clients | Scaffold new adapters via `--scaffold` or Web **AI Chat** |
 
 ---
 
@@ -187,25 +166,18 @@ The AI will precisely map and automate your verified human interaction chain, el
 
 ---
 
-## Email Verification & Mailbox Strategies
+## Proxy & Email Verification Configuration
 
-Target platforms maintain diverse risk-control rules for signup mailboxes. RegisterHub provides three flexible tiers:
+Configure egress proxies and email verification directly in the Web Workbench **Settings** panel (atomically persisted to `config.json`), complete with 1-click live connectivity self-tests:
 
-1. **Zero-Email-Verification Targets (Instant Minting)**:
-   - Showcase Target: `100milionseek`
-   - Requires **no verification emails or confirmation links whatsoever**. Enter any standard email format, resolve Turnstile, and the API key is minted directly on the page within 10 seconds.
-
-2. **Session Capture Targets (OAuth Handoff)**:
-   - Showcase Target: `coarena`
-   - Leverages genuine Chrome solely for Google OAuth token acquisition; subsequent terms consent, key minting, and quota validation are executed 100% via background REST protocol.
-
-3. **High-Value / Strict Risk Targets (e.g. Deepgram $200 USD Allowance, AMD)**:
-   - **Default Mode (Public Disposable Email, Automated)**:
-     With `use_disposable_mail: true`, the engine automatically polls tri-channel public APIs (mail.tm, etc.) for 6-digit codes.
-   - **Custom Mailbox Mode (Recommended, 100% Success Guarantee)**:
-     Platforms like Deepgram and AMD dynamically blacklist public temporary email domains. **We strongly recommend supplying your own Outlook, Hotmail, Gmail, or custom domain address** in `config.json` (`"email": "your_email@outlook.com"`). The script automatically completes form submission and reCAPTCHA penetration, prompts for the 6-digit code in the terminal, and guarantees minting of your **$200 USD API key**!
-   - **Enterprise MailHub Hub (Advanced)**:
-     Easily integrates with self-hosted MailHub Docker containers, Cloudflare Catch-all Email Routing, or IMAP protocols for multi-worker headless automation.
+1. **Proxy Egress Modes**:
+   - Supports **Direct / System Proxy (`direct`)**, **Custom HTTP / SOCKS5 Proxy (`proxy`)** (including authenticated residential gateways), and **External Anti-Detect Browser CDP Bridge**;
+   - Verify latency and residential purity right from **Settings → Test Proxy** or the **IP Purity** view.
+2. **Default Public Disposable Mail (`tempmail`, Zero-Config)**:
+   - With `defaults.use_disposable_mail: true`, `DisposableMailClient` provisions temporary mailboxes and polls OTP codes automatically for rapid testing.
+3. **Single-Account Custom IMAP (`imap`, Recommended for Strict Targets)**:
+   - Switch to **Custom IMAP** in Settings and provide your Gmail / Outlook / QQ / 163 / custom-domain IMAP host, port (`993`), address, and app password, then click **Test IMAP Login**;
+   - Both `--scaffold` generated adapters and the built-in **AI Agent** automatically read `config.json` and switch to non-destructive `SingleImapMailClient` (`BODY.PEEK[]`) polling.
 
 ---
 

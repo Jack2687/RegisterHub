@@ -28,8 +28,8 @@ def parse_accounts_file(filepath: Path) -> List[Dict[str, str]]:
             pwd = parts[1].strip() if len(parts) > 1 else ""
             user = parts[2].strip() if len(parts) > 2 else ""
             api_key = parts[3].strip() if len(parts) > 3 else ""
-            # Backward-compat for legacy milionseek 3-col lines where api_key was stored in pwd
-            if not api_key and pwd.startswith(("hms-", "sk-", "gsk_", "coa_")):
+            # Backward-compat for legacy 3-col lines where api_key was stored in pwd
+            if not api_key and pwd.startswith(("sk-", "gsk_", "rk_", "api_")):
                 api_key = pwd
             accounts.append({
                 "email": email,
