@@ -90,18 +90,32 @@ def enrich_agent_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
     usage = out.get("usage") if isinstance(out.get("usage"), dict) else {}
     in_tok = int(usage.get("prompt_tokens") or usage.get("input_tokens") or out.get("input_tokens") or 0)
     out_tok = int(usage.get("completion_tokens") or usage.get("output_tokens") or out.get("output_tokens") or 0)
-    out.setdefault("input_tokens", in_tok)
-    out.setdefault("output_tokens", out_tok)
+    cr_tok = int(out.get("cache_read_tokens") or usage.get("cache_read_tokens") or 0)
+    cw_tok = int(out.get("cache_write_tokens") or usage.get("cache_write_tokens") or 0)
+    ctx_tok = int(out.get("context_tokens") or usage.get("context_tokens") or 0)
+    last_tok_s = float(out.get("last_tok_s") or usage.get("last_tok_s") or 0.0)
+    last_ttft_ms = float(out.get("last_ttft_ms") or usage.get("last_ttft_ms") or 0.0)
+    out["input_tokens"] = in_tok
+    out["output_tokens"] = out_tok
+    out["cache_read_tokens"] = cr_tok
+    out["cache_write_tokens"] = cw_tok
+    out["context_tokens"] = ctx_tok
+    out["last_tok_s"] = last_tok_s
+    out["last_ttft_ms"] = last_ttft_ms
+    out.setdefault("model", "")
     out.setdefault("steps_count", int(out.get("steps") or out.get("steps_count") or 0))
+    out.setdefault("queued_count", len(out.get("queued_messages") or []))
+    out.setdefault("goal_active", False)
     return out
 
 
 def enrich_agent_detail(detail: Dict[str, Any]) -> Dict[str, Any]:
-    """Add Studio AgentSessionDetail fields (`messages`, `plan_steps`, `last_seq`) while keeping Lite fields."""
+    """Add Studio AgentSessionDetail fields (`messages`, `plan_steps`, `last_seq`, telemetry, compaction, /btw, queue, goal)."""
     out = enrich_agent_summary(detail)
     events = out.get("events") if isinstance(out.get("events"), list) else []
     messages: List[Dict[str, Any]] = []
     tool_by_call: Dict[str, Dict[str, Any]] = {}
+    approval_by_id: Dict[str, Dict[str, Any]] = {}
     max_seq = 0
 
     for idx, ev in enumerate(events):
@@ -114,23 +128,73 @@ def enrich_agent_detail(detail: Dict[str, Any]) -> Dict[str, Any]:
         ts = str(ev.get("ts") or "")
         if et == "user_msg":
             messages.append({
-                "id": f"m_u_{idx}",
+                "id": str(ev.get("id") or f"m_u_{idx}"),
                 "role": "user",
                 "content": str(ev.get("content") or ""),
                 "steered": bool(ev.get("steered")),
+                "goal": bool(ev.get("goal")),
                 "ts": ts,
             })
         elif et == "assistant_msg":
-            messages.append({
-                "id": f"m_a_{idx}",
+            msg_item: Dict[str, Any] = {
+                "id": str(ev.get("id") or f"m_a_{idx}"),
                 "role": "assistant",
                 "content": str(ev.get("content") or ""),
                 "ts": ts,
+            }
+            if ev.get("thinking"):
+                msg_item["thinking"] = str(ev["thinking"])
+            if isinstance(ev.get("metrics"), dict):
+                msg_item["metrics"] = ev["metrics"]
+                if ev["metrics"].get("model"):
+                    msg_item["model"] = str(ev["metrics"]["model"])
+            messages.append(msg_item)
+        elif et == "compaction":
+            item = ev.get("item") if isinstance(ev.get("item"), dict) else ev
+            messages.append({
+                "id": str(item.get("id") or f"m_cmp_{idx}"),
+                "role": "compaction",
+                "content": str(item.get("content") or ""),
+                "tokens_before": int(item.get("tokens_before") or 0),
+                "tokens_after": int(item.get("tokens_after") or 0),
+                "dropped_messages": int(item.get("dropped_messages") or 0),
+                "kept_messages": int(item.get("kept_messages") or 0),
+                "touched_sites": item.get("touched_sites") or [],
+                "touched_files": item.get("touched_files") or [],
+                "auto": bool(item.get("auto", False)),
+                "custom_instructions": str(item.get("custom_instructions") or ""),
+                "model": str(item.get("model") or ""),
+                "ts": str(item.get("ts") or ts),
             })
+        elif et == "system_msg":
+            messages.append({
+                "id": f"m_sys_{idx}",
+                "role": "system",
+                "content": str(ev.get("content") or ""),
+                "ts": ts,
+            })
+        elif et == "approval_required":
+            aid = str(ev.get("approval_id") or f"app_{idx}")
+            app_msg = {
+                "id": aid,
+                "approval_id": aid,
+                "role": "approval",
+                "tool_name": str(ev.get("tool_name") or ""),
+                "rule_name": str(ev.get("rule_name") or ""),
+                "tool_args": ev.get("tool_args") if isinstance(ev.get("tool_args"), dict) else {},
+                "status": str(ev.get("status") or "pending"),
+                "ts": ts,
+            }
+            approval_by_id[aid] = app_msg
+            messages.append(app_msg)
+        elif et == "approval_resolved":
+            aid = str(ev.get("approval_id") or "")
+            if aid and aid in approval_by_id:
+                approval_by_id[aid]["status"] = str(ev.get("status") or "rejected")
         elif et == "tool_start":
             cid = str(ev.get("call_id") or f"tc_{idx}")
             entry = {
-                "id": f"m_t_{cid}",
+                "id": cid,
                 "role": "tool",
                 "tool_call_id": cid,
                 "call_id": cid,
@@ -146,16 +210,21 @@ def enrich_agent_detail(detail: Dict[str, Any]) -> Dict[str, Any]:
             res_obj = ev.get("result")
             res_str = res_obj if isinstance(res_obj, str) else json.dumps(res_obj or {}, ensure_ascii=False, indent=2)
             ok = ev.get("ok", True) is not False
+            cp_id = str(ev.get("checkpoint_id") or (res_obj.get("checkpoint_id") if isinstance(res_obj, dict) else "") or "")
             existing = tool_by_call.get(cid)
             if existing is not None:
                 existing["status"] = "done" if ok else "failed"
                 existing["ok"] = ok
                 existing["duration_ms"] = ev.get("duration_ms")
                 existing["tool_result"] = res_str
+                if ev.get("thinking"):
+                    existing["thinking"] = str(ev["thinking"])
+                if cp_id:
+                    existing["checkpoint_id"] = cp_id
                 if not ok:
                     existing["error"] = res_str[:300]
             else:
-                messages.append({
+                t_entry: Dict[str, Any] = {
                     "id": f"m_t_{cid}_{idx}",
                     "role": "tool",
                     "tool_call_id": cid,
@@ -165,7 +234,12 @@ def enrich_agent_detail(detail: Dict[str, Any]) -> Dict[str, Any]:
                     "duration_ms": ev.get("duration_ms"),
                     "tool_result": res_str,
                     "ts": ts,
-                })
+                }
+                if ev.get("thinking"):
+                    t_entry["thinking"] = str(ev["thinking"])
+                if cp_id:
+                    t_entry["checkpoint_id"] = cp_id
+                messages.append(t_entry)
 
     raw_plan = out.get("plan") if isinstance(out.get("plan"), list) else []
     plan_steps = []
@@ -179,20 +253,31 @@ def enrich_agent_detail(detail: Dict[str, Any]) -> Dict[str, Any]:
                 "status": mapped_s,
             })
 
-    usage = out.get("usage") if isinstance(out.get("usage"), dict) else {}
-    in_tok = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
-    out_tok = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+    in_tok = int(out.get("input_tokens") or 0)
+    out_tok = int(out.get("output_tokens") or 0)
+    cr_tok = int(out.get("cache_read_tokens") or 0)
+    cw_tok = int(out.get("cache_write_tokens") or 0)
+    ctx_tok = int(out.get("context_tokens") or 0)
+    last_tok_s = float(out.get("last_tok_s") or 0.0)
+    last_ttft_ms = float(out.get("last_ttft_ms") or 0.0)
     out["messages"] = messages
     out["plan_steps"] = plan_steps
     out["last_seq"] = max(max_seq, int(out.get("next_seq") or len(events)))
-    out["input_tokens"] = in_tok
-    out["output_tokens"] = out_tok
+    out.setdefault("side_questions", [])
+    out.setdefault("uploads", [])
+    out.setdefault("queued_messages", [])
+    out.setdefault("goal_state", None)
     out["usage"] = {
         "prompt_tokens": in_tok,
         "completion_tokens": out_tok,
         "input_tokens": in_tok,
         "output_tokens": out_tok,
         "total_tokens": in_tok + out_tok,
+        "cache_read_tokens": cr_tok,
+        "cache_write_tokens": cw_tok,
+        "context_tokens": ctx_tok,
+        "last_tok_s": last_tok_s,
+        "last_ttft_ms": last_ttft_ms,
     }
     return out
 
@@ -648,24 +733,23 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
         return True
 
     if path == "/api/agent/config":
-        from core.ai_agent import TOOL_SCHEMAS, load_agent_config
+        from core.ai_agent import get_available_tools_meta, load_agent_config
 
-        tools = [
-            {
-                "name": t["function"]["name"],
-                "label": t["function"]["name"],
-                "description": t["function"]["description"],
-                "risk": "exec" if "run_" in t["function"]["name"] else "write" if "write_" in t["function"]["name"] else "read",
-            }
-            for t in TOOL_SCHEMAS
-        ]
         handler._send_json({
             "agent": load_agent_config(),
-            "available_tools": tools,
+            "available_tools": get_available_tools_meta(),
             "skills": [],
-            "guard_rules": [],
-            "approvals": [],
+            "guard_rules": srv.agent_manager.list_guard_rules(),
+            "approvals": srv.agent_manager.list_approvals(),
         })
+        return True
+
+    m_ag_cps = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/checkpoints", path)
+    if m_ag_cps:
+        try:
+            handler._send_json(srv.agent_manager.list_checkpoints(m_ag_cps.group(1)))
+        except KeyError as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=404)
         return True
 
     m_ag_evs = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/events", path)
@@ -1153,9 +1237,6 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
 
     m_ag_btw = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/side-question/stream", path)
     if m_ag_btw:
-        import secrets
-        from core import llm_profiles
-
         sid = m_ag_btw.group(1)
         sess = srv.agent_manager.get_session(sid)
         if not sess:
@@ -1166,60 +1247,53 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
             handler._send_json({"ok": False, "error": "提问内容不能为空"}, status=400)
             return True
 
-        with sess._lock:
-            prof_id = str(body.get("llm_profile_id") or sess.llm_profile_id or "").strip()
-            mod_ov = str(body.get("llm_model") or sess.llm_model or "").strip()
-            recent = [
-                f"{m.get('role')}: {str(m.get('content') or '')[:400]}"
-                for m in sess.messages[-8:]
-                if isinstance(m, dict) and m.get("content")
-            ]
-        ov = llm_profiles.resolve_runtime_override(profile_id=prof_id, model_override=mod_ov)
-        ctx_blob = "\n".join(recent)
-        prompt = f"以下是当前任务会话的最近上下文：\n{ctx_blob}\n\n用户旁路提问（不中断主任务，简洁中文作答）：\n{question}" if ctx_blob else question
-        sq_id = f"sq_{int(time.time() * 1000)}_{secrets.token_hex(3)}"
+        prof_id = str(body.get("llm_profile_id") or body.get("profile_id") or "").strip()
+        mod_ov = str(body.get("llm_model") or "").strip()
 
         handler.send_response(200)
         handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
         handler.send_header("Cache-Control", "no-cache")
         handler.send_header("Connection", "close")
+        handler.send_header("X-Accel-Buffering", "no")
         handler.end_headers()
-        t0 = time.perf_counter()
+
+        stop_ev = threading.Event()
+
+        def _write_sse(ev: Dict[str, Any]) -> None:
+            try:
+                handler.wfile.write(f"data: {json.dumps(ev, ensure_ascii=False)}\n\n".encode("utf-8"))
+                handler.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                stop_ev.set()
+
         try:
-            handler.wfile.write(f"data: {json.dumps({'type': 'start', 'id': sq_id}, ensure_ascii=False)}\n\n".encode("utf-8"))
-            handler.wfile.flush()
-            resp = srv.llm_client.chat_completion(
-                messages=[{"role": "user", "content": prompt}],
-                tools=None,
-                system_prompt="你是 RegisterHub 旁路答疑助手，请基于上下文用简洁中文直接回答用户问题。",
-                config_override=ov,
-                timeout=45.0,
+            srv.agent_manager.stream_side_question(
+                sid,
+                question,
+                llm_profile_id=prof_id,
+                llm_model=mod_ov,
+                on_event=_write_sse,
+                stop_event=stop_ev,
             )
-            answer = str(resp.get("content") or "").strip() or "（模型未返回正文）"
-            thinking = str(resp.get("thinking") or "").strip()
-            ms = round((time.perf_counter() - t0) * 1000, 1)
-            usage = resp.get("usage") or {}
-            item_obj = {
-                "id": sq_id,
-                "question": question,
-                "answer": answer,
-                "thinking": thinking,
-                "model": resp.get("model", ""),
-                "latency_ms": ms,
-                "input_tokens": int(usage.get("prompt_tokens") or 0),
-                "output_tokens": int(usage.get("completion_tokens") or 0),
-                "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
-            }
-            if thinking:
-                handler.wfile.write(f"data: {json.dumps({'type': 'thinking_delta', 'delta': thinking}, ensure_ascii=False)}\n\n".encode("utf-8"))
-            handler.wfile.write(f"data: {json.dumps({'type': 'delta', 'delta': answer}, ensure_ascii=False)}\n\n".encode("utf-8"))
-            handler.wfile.write(
-                f"data: {json.dumps({'type': 'done', 'ok': True, 'item': item_obj, 'answer': answer, 'model': item_obj['model'], 'latency_ms': ms}, ensure_ascii=False)}\n\n".encode("utf-8")
-            )
-            handler.wfile.flush()
         except Exception as e:
-            handler.wfile.write(f"data: {json.dumps({'type': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n".encode("utf-8"))
-            handler.wfile.flush()
+            _write_sse({"type": "error", "ok": False, "error": str(e)})
+        return True
+
+    m_ag_btw_sync = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/side-question", path)
+    if m_ag_btw_sync:
+        sid = m_ag_btw_sync.group(1)
+        try:
+            res = srv.agent_manager.ask_side_question(
+                sid,
+                str(body.get("question") or ""),
+                llm_profile_id=str(body.get("llm_profile_id") or body.get("profile_id") or ""),
+                llm_model=str(body.get("llm_model") or ""),
+            )
+            handler._send_json(res)
+        except KeyError as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=404)
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
         return True
 
     m_ag_up = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/upload", path)
@@ -1231,9 +1305,9 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
         if not sess:
             handler._send_json({"ok": False, "error": "Agent session not found"}, status=404)
             return True
-        raw_name = Path(str(body.get("filename") or "upload.bin")).name
+        raw_name = Path(str(body.get("filename") or body.get("name") or "upload.bin")).name
         safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", raw_name).strip("._") or "upload.bin"
-        b64 = str(body.get("content_b64") or "")
+        b64 = str(body.get("content_b64") or body.get("content_base64") or "")
         try:
             data = base64.b64decode(b64, validate=False)
         except Exception as e:
@@ -1256,30 +1330,92 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
             "size_bytes": len(data),
             "uploaded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
+        with sess._lock:
+            sess.uploads = [u for u in sess.uploads if u.get("name") != safe_name]
+            sess.uploads.append(file_meta)
+        sess.emit("file_uploaded", file=dict(file_meta))
+        sess.persist()
         handler._send_json({"ok": True, "file": file_meta})
         return True
 
     m_ag_compact = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/compact", path)
     if m_ag_compact:
-        sess = srv.agent_manager.get_session(m_ag_compact.group(1))
-        if not sess:
-            handler._send_json({"ok": False, "error": "Agent session not found"}, status=404)
-            return True
-        with sess._lock:
-            before = len(sess.messages)
-            if before > 16:
-                sess.messages = sess.messages[-16:]
-            after = len(sess.messages)
-        sess.persist()
-        handler._send_json({"ok": True, "before": before, "after": after, "message": f"已保留最近 {after} 条核心上下文"})
+        sid = m_ag_compact.group(1)
+        try:
+            raw_keep = body.get("keep_recent_tokens")
+            keep_tok = int(raw_keep) if raw_keep not in (None, "") else None
+            res = srv.agent_manager.compact_session(
+                sid,
+                custom_instructions=str(body.get("custom_instructions") or ""),
+                keep_recent_tokens=keep_tok,
+                llm_profile_id=str(body.get("llm_profile_id") or body.get("profile_id") or ""),
+                llm_model=str(body.get("llm_model") or ""),
+            )
+            if isinstance(res.get("session"), dict):
+                res["session"] = enrich_agent_detail(res["session"])
+            handler._send_json(res)
+        except KeyError as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=404)
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
+        return True
+
+    m_ag_cp_restore = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/checkpoints/([A-Za-z0-9_-]+)/restore", path)
+    if m_ag_cp_restore:
+        try:
+            res = srv.agent_manager.restore_checkpoint(m_ag_cp_restore.group(1), m_ag_cp_restore.group(2))
+            handler._send_json(res)
+        except KeyError as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=404)
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
+        return True
+
+    m_ag_q_steer = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/queue/([A-Za-z0-9_-]+)/steer", path)
+    if m_ag_q_steer:
+        try:
+            res = srv.agent_manager.promote_queued_message(m_ag_q_steer.group(1), m_ag_q_steer.group(2))
+            handler._send_json(res)
+        except KeyError as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=404)
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
+        return True
+
+    if path == "/api/agent/guard":
+        try:
+            handler._send_json(srv.agent_manager.upsert_guard_rule(body))
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
+        return True
+
+    if path == "/api/agent/guard/test":
+        handler._send_json(srv.agent_manager.test_guard_rule(str(body.get("tool") or "*"), body.get("args")))
+        return True
+
+    m_ag_app = re.fullmatch(r"/api/agent/approvals/([A-Za-z0-9_-]+)", path)
+    if m_ag_app:
+        try:
+            res = srv.agent_manager.resolve_approval(m_ag_app.group(1), str(body.get("decision") or "reject"))
+            handler._send_json(res)
+        except KeyError as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=404)
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
         return True
 
     if path == "/api/agent/config":
-        from core.ai_agent import save_agent_config
+        from core.ai_agent import get_available_tools_meta, save_agent_config
 
         try:
             saved = save_agent_config(body)
-            handler._send_json({"ok": True, "agent": saved})
+            handler._send_json({
+                "ok": True,
+                "agent": saved,
+                "available_tools": get_available_tools_meta(),
+                "guard_rules": srv.agent_manager.list_guard_rules(),
+                "approvals": srv.agent_manager.list_approvals(),
+            })
         except Exception as e:
             handler._send_json({"ok": False, "error": str(e)}, status=400)
         return True
@@ -1331,6 +1467,22 @@ def handle_studio_delete(handler: Any, srv: Any, path: str) -> bool:
             handler._send_json({"ok": False, "error": f"供应商不存在: {pid}"}, status=404)
             return True
         handler._send_json({"ok": True, "deleted": pid})
+        return True
+
+    m_ag_guard_del = re.fullmatch(r"/api/agent/guard/([A-Za-z0-9_-]+)", path)
+    if m_ag_guard_del:
+        try:
+            handler._send_json(srv.agent_manager.delete_guard_rule(m_ag_guard_del.group(1)))
+        except KeyError as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=404)
+        return True
+
+    m_ag_q_del = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/queue/([A-Za-z0-9_-]+)", path)
+    if m_ag_q_del:
+        try:
+            handler._send_json(srv.agent_manager.remove_queued_message(m_ag_q_del.group(1), m_ag_q_del.group(2)))
+        except KeyError as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=404)
         return True
 
     m_fl_err = re.fullmatch(r"/api/fleet/([^/]+)/errors", path)

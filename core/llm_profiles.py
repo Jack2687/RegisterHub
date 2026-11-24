@@ -575,6 +575,39 @@ def record_profile_test_result(profile_id: str, ok: bool, latency_ms: float = 0.
             pass
 
 
+def resolve_context_window(profile_id: str = "", model_name: str = "") -> int:
+    """Resolve effective context window tokens for a profile/model (defaults to heuristic or 128K)."""
+    with _STORE_LOCK:
+        try:
+            store = _load_store_unlocked()
+        except Exception:
+            store = _seed_from_legacy()
+        profs = store["profiles"]
+        pid = str(profile_id or "").strip() or store["active_id"]
+        prof = next((p for p in profs if p["id"] == pid), None)
+        if prof is None:
+            prof = next((p for p in profs if p["id"] == store["active_id"]), profs[0] if profs else None)
+
+    if prof:
+        mcw = prof.get("model_context_windows")
+        if isinstance(mcw, dict) and model_name:
+            if model_name in mcw and int(mcw[model_name]) > 0:
+                return int(mcw[model_name]) * 1000
+            short_m = model_name.rsplit("/", 1)[-1]
+            if short_m in mcw and int(mcw[short_m]) > 0:
+                return int(mcw[short_m]) * 1000
+        ctx_k = int(prof.get("context_window_k") or 0)
+        if ctx_k > 0:
+            return ctx_k * 1000
+
+    low = str(model_name or "").lower()
+    if any(k in low for k in ("gemini-2", "gemini-1.5", "gemini-2.5", "claude-sonnet-4", "claude-opus-4", "gpt-4.1")):
+        return 1_000_000
+    if "claude-3" in low or "claude-4" in low:
+        return 200_000
+    return 128_000
+
+
 def resolve_runtime_override(
     profile_id: str = "",
     *,
@@ -608,11 +641,16 @@ def resolve_runtime_override(
             "max_tokens": mt if mt > 0 else llm_client.DEFAULT_MAX_TOKENS,
             "max_tokens_field": prof.get("max_tokens_field") or llm_client.DEFAULT_MAX_TOKENS_FIELD,
             "temperature": prof.get("temperature", llm_client.DEFAULT_TEMPERATURE),
+            "thinking_mode": prof.get("thinking_mode") or "none",
+            "reasoning_effort": prof.get("reasoning_effort") or "none",
+            "streaming": prof.get("streaming") is not False,
+            "context_window_k": int(prof.get("context_window_k") or 128),
+            "model_context_windows": dict(prof.get("model_context_windows") or {}),
         }
     if model_override and model_override != "__follow_profile__":
         out["model"] = str(model_override).strip()
     if isinstance(extra_overrides, dict):
-        for k in ("format", "base_url", "model", "max_tokens", "max_tokens_field", "temperature"):
+        for k in ("format", "base_url", "model", "max_tokens", "max_tokens_field", "temperature", "thinking_mode", "reasoning_effort"):
             v = extra_overrides.get(k)
             if v is not None and str(v).strip() != "":
                 if k == "max_tokens":
@@ -622,6 +660,8 @@ def resolve_runtime_override(
                     except Exception:
                         continue
                 out[k] = v
+        if "streaming" in extra_overrides and isinstance(extra_overrides.get("streaming"), bool):
+            out["streaming"] = extra_overrides["streaming"]
         if "proxy_url" in extra_overrides and extra_overrides.get("proxy_url") is not None:
             out["proxy_url"] = str(extra_overrides.get("proxy_url") or "").strip()
         raw_k = str(extra_overrides.get("api_key") or "").strip()

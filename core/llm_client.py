@@ -19,7 +19,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -275,6 +275,9 @@ def _merge_runtime_config(
     merged.setdefault("format", DEFAULT_FORMAT)
     merged.setdefault("profile_id", "")
     merged.setdefault("profile_name", "")
+    merged.setdefault("thinking_mode", "none")
+    merged.setdefault("reasoning_effort", "none")
+    merged.setdefault("streaming", True)
     if isinstance(overrides, dict):
         if overrides.get("format"):
             merged["format"] = _normalize_format(overrides.get("format"))
@@ -282,6 +285,12 @@ def _merge_runtime_config(
             merged["profile_id"] = str(overrides.get("profile_id") or "").strip()
         if overrides.get("profile_name"):
             merged["profile_name"] = str(overrides.get("profile_name") or "").strip()
+        if overrides.get("thinking_mode") in ("none", "enabled", "disabled"):
+            merged["thinking_mode"] = str(overrides.get("thinking_mode"))
+        if overrides.get("reasoning_effort") in ("none", "low", "medium", "high", "xhigh", "max"):
+            merged["reasoning_effort"] = str(overrides.get("reasoning_effort"))
+        if isinstance(overrides.get("streaming"), bool):
+            merged["streaming"] = overrides["streaming"]
         if "base_url" in overrides and str(overrides.get("base_url") or "").strip():
             try:
                 merged["base_url"] = _validate_base_url(str(overrides.get("base_url") or ""))
@@ -631,23 +640,126 @@ def _build_opener(proxy: str) -> urllib.request.OpenerDirector:
     return urllib.request.build_opener(*handlers)
 
 
-def chat_completion(
+_SECRET_VAL_RE = re.compile(r"\b(sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,})")
+
+
+def _extract_usage_metrics(usage_raw: Any, fmt: str) -> Tuple[int, int, int, int]:
+    """Return (prompt_tokens, completion_tokens, cache_read_tokens, cache_write_tokens)."""
+    if not isinstance(usage_raw, dict):
+        return 0, 0, 0, 0
+    if fmt == "anthropic":
+        raw_in = max(0, int(usage_raw.get("input_tokens") or 0))
+        cr = max(0, int(usage_raw.get("cache_read_input_tokens") or 0))
+        cw = max(0, int(usage_raw.get("cache_creation_input_tokens") or 0))
+        comp_t = max(0, int(usage_raw.get("output_tokens") or 0))
+        return raw_in + cr + cw, comp_t, cr, cw
+
+    if fmt == "openai-responses":
+        prompt_t = max(0, int(usage_raw.get("input_tokens") or usage_raw.get("prompt_tokens") or 0))
+        comp_t = max(0, int(usage_raw.get("output_tokens") or usage_raw.get("completion_tokens") or 0))
+        det = usage_raw.get("input_tokens_details") or usage_raw.get("prompt_tokens_details") or {}
+        if not isinstance(det, dict):
+            det = {}
+        cr = max(0, int(det.get("cached_tokens") or usage_raw.get("cached_tokens") or usage_raw.get("cache_read_input_tokens") or 0))
+        cw = max(0, int(det.get("cache_creation_tokens") or usage_raw.get("cache_creation_input_tokens") or 0))
+        if prompt_t > 0 and cr > prompt_t:
+            cr = prompt_t
+        return prompt_t, comp_t, cr, cw
+
+    prompt_t = max(0, int(usage_raw.get("prompt_tokens") or usage_raw.get("input_tokens") or 0))
+    comp_t = max(0, int(usage_raw.get("completion_tokens") or usage_raw.get("output_tokens") or 0))
+    det = usage_raw.get("prompt_tokens_details") or usage_raw.get("input_tokens_details") or {}
+    if not isinstance(det, dict):
+        det = {}
+    cr = max(
+        0,
+        int(
+            det.get("cached_tokens")
+            or usage_raw.get("prompt_cache_hit_tokens")
+            or usage_raw.get("cached_tokens")
+            or usage_raw.get("cache_read_input_tokens")
+            or 0
+        ),
+    )
+    cw = max(
+        0,
+        int(
+            det.get("cache_creation_tokens")
+            or usage_raw.get("cache_creation_input_tokens")
+            or 0
+        ),
+    )
+    if prompt_t > 0 and cr > prompt_t:
+        cr = prompt_t
+    return prompt_t, comp_t, cr, cw
+
+
+def _normalize_stop_reason(raw_reason: Any) -> str:
+    s = str(raw_reason or "").strip().lower()
+    if s in ("length", "max_tokens", "incomplete"):
+        return "max_tokens"
+    if s in ("tool_calls", "tool_use", "function_call"):
+        return "tool_calls"
+    if s in ("stop", "end_turn", "completed"):
+        return "stop"
+    return s
+
+
+def _check_truncated_tool_calls(tool_calls: List[Dict[str, Any]], stop_reason: str) -> bool:
+    if not tool_calls:
+        return False
+    if stop_reason == "max_tokens":
+        return True
+    for tc in tool_calls:
+        fn = tc.get("function") if isinstance(tc, dict) else None
+        if not isinstance(fn, dict):
+            continue
+        raw_args = fn.get("arguments")
+        if isinstance(raw_args, str):
+            try:
+                parsed = json.loads(raw_args)
+                if not isinstance(parsed, dict):
+                    return True
+            except Exception:
+                return True
+    return False
+
+
+def _sanitize_body_for_log(obj: Any, *, max_str: int = 2000, max_depth: int = 6) -> Any:
+    if max_depth <= 0:
+        return "... [depth limit]"
+    if isinstance(obj, str):
+        cleaned = _SECRET_VAL_RE.sub("[REDACTED]", obj)
+        return cleaned if len(cleaned) <= max_str else (cleaned[:max_str] + "... [truncated]")
+    if isinstance(obj, list):
+        return [_sanitize_body_for_log(x, max_str=max_str, max_depth=max_depth - 1) for x in obj[:40]]
+    if isinstance(obj, dict):
+        out: Dict[str, Any] = {}
+        for idx, (k, v) in enumerate(obj.items()):
+            if idx >= 50:
+                out["_truncated_keys"] = True
+                break
+            kl = str(k).lower()
+            if kl in ("api_key", "authorization", "x-api-key", "password", "secret"):
+                out[str(k)] = "[REDACTED]"
+            else:
+                out[str(k)] = _sanitize_body_for_log(v, max_str=max_str, max_depth=max_depth - 1)
+        return out
+    return obj
+
+
+def _build_request_spec(
     messages: List[Dict[str, Any]],
-    tools: Optional[List[Dict[str, Any]]] = None,
-    system_prompt: str = "",
+    tools: Optional[List[Dict[str, Any]]],
+    system_prompt: str,
+    cfg: Dict[str, Any],
+    max_tok: int,
     *,
-    config_override: Optional[Dict[str, Any]] = None,
-    config_path: Optional[Path] = None,
-    timeout: float = 90.0,
-    max_tokens_override: Optional[int] = None,
-) -> Dict[str, Any]:
-    """Invoke OpenAI Chat, OpenAI Responses, or Anthropic Messages with pure stdlib `urllib.request`."""
-    t_start = time.perf_counter()
-    cfg = _merge_runtime_config(config_override, config_path=config_path)
+    stream: bool = False,
+    include_stream_options: bool = True,
+) -> Tuple[str, str, Dict[str, str], Dict[str, Any]]:
     fmt = _normalize_format(cfg.get("format"))
     api_key = cfg["api_key"]
-    max_tok = max_tokens_override if max_tokens_override is not None else cfg["max_tokens"]
-
     if fmt == "anthropic":
         endpoint = _build_anthropic_messages_url(cfg["base_url"])
     elif fmt == "openai-responses":
@@ -660,9 +772,12 @@ def chat_completion(
 
     headers: Dict[str, str] = {
         "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": "RegisterHub-Lite/2.1",
+        "Accept": "text/event-stream" if stream else "application/json",
+        "User-Agent": "RegisterHub-Lite/2.2",
     }
+
+    thinking_mode = str(cfg.get("thinking_mode") or "none").strip()
+    reasoning_effort = str(cfg.get("reasoning_effort") or "none").strip()
 
     if fmt == "anthropic":
         sys_txt, anth_msgs = _openai_messages_to_anthropic(messages, system_prompt)
@@ -673,10 +788,16 @@ def chat_completion(
         }
         if sys_txt:
             payload["system"] = sys_txt
-        payload["temperature"] = cfg["temperature"]
+        if thinking_mode == "enabled" and int(max_tok) > 1280:
+            budget = min(max(1024, int(max_tok) // 2), int(max_tok) - 256)
+            payload["thinking"] = {"type": "enabled", "budget_tokens": budget}
+        else:
+            payload["temperature"] = cfg["temperature"]
         anth_tools = _openai_tools_to_anthropic(tools)
         if anth_tools:
             payload["tools"] = anth_tools
+        if stream:
+            payload["stream"] = True
         headers["anthropic-version"] = "2023-06-01"
         if api_key:
             headers["x-api-key"] = api_key
@@ -690,9 +811,13 @@ def chat_completion(
             payload["instructions"] = system_prompt
         if not _is_reasoning_model(cfg["model"], cfg["max_tokens_field"]):
             payload["temperature"] = cfg["temperature"]
+        if reasoning_effort and reasoning_effort != "none":
+            payload["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
         resp_tools = _openai_tools_to_responses(tools)
         if resp_tools:
             payload["tools"] = resp_tools
+        if stream:
+            payload["stream"] = True
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
     else:
@@ -707,77 +832,34 @@ def chat_completion(
         }
         if not _is_reasoning_model(cfg["model"], cfg["max_tokens_field"]):
             payload["temperature"] = cfg["temperature"]
+        if reasoning_effort and reasoning_effort != "none":
+            payload["reasoning_effort"] = reasoning_effort
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+        if stream:
+            payload["stream"] = True
+            if include_stream_options:
+                payload["stream_options"] = {"include_usage": True}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-    opener = _build_opener(cfg.get("proxy_url", ""))
-    req = urllib.request.Request(
-        endpoint,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
+    return fmt, endpoint, headers, payload
 
-    def _log_call(ok: bool, model_used: str = "", in_t: int = 0, out_t: int = 0, err_msg: str = "") -> None:
-        lat_ms = round((time.perf_counter() - t_start) * 1000, 1)
-        _record_llm_call({
-            "id": f"call_{int(time.time() * 1000)}_{secrets.token_hex(3)}",
-            "ts": time.strftime("%H:%M:%S"),
-            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "profile_id": cfg.get("profile_id") or "",
-            "profile_name": cfg.get("profile_name") or cfg["model"],
-            "format": fmt,
-            "model": model_used or cfg["model"],
-            "ok": ok,
-            "status": "ok" if ok else "error",
-            "latency_ms": lat_ms,
-            "input_tokens": in_t,
-            "output_tokens": out_t,
-            "prompt_tokens": in_t,
-            "completion_tokens": out_t,
-            "total_tokens": in_t + out_t,
-            "error": err_msg[:240] if err_msg else "",
-        })
 
-    try:
-        with opener.open(req, timeout=timeout) as resp:
-            raw_bytes = resp.read()
-    except urllib.error.HTTPError as he:
-        err_s = f"HTTP {he.code}: {_parse_http_error(he)}"
-        _log_call(False, err_msg=err_s)
-        raise LLMClientError(err_s, status_code=he.code) from he
-    except urllib.error.URLError as ue:
-        err_s = f"网络请求失败: {ue.reason}"
-        _log_call(False, err_msg=err_s)
-        raise LLMClientError(err_s) from ue
-    except TimeoutError as te:
-        err_s = f"LLM 请求超时 ({int(timeout)}s)"
-        _log_call(False, err_msg=err_s)
-        raise LLMClientError(err_s) from te
-    except Exception as exc:
-        err_s = f"LLM 调用异常: {exc}"
-        _log_call(False, err_msg=err_s)
-        raise LLMClientError(err_s) from exc
-
-    try:
-        data = json.loads(raw_bytes.decode("utf-8", errors="replace"))
-    except Exception as exc:
-        err_s = f"LLM 返回内容不是合法 JSON: {exc}"
-        _log_call(False, err_msg=err_s)
-        raise LLMClientError(err_s) from exc
-
-    if not isinstance(data, dict):
-        _log_call(False, err_msg="LLM 响应根节点非 JSON 对象")
-        raise LLMClientError("LLM 响应根节点非 JSON 对象")
+def _parse_non_stream_json_response(
+    data: Dict[str, Any],
+    fmt: str,
+    cfg: Dict[str, Any],
+    max_tok: int,
+    t_start: float,
+) -> Dict[str, Any]:
+    lat_ms = round((time.perf_counter() - t_start) * 1000, 1)
 
     if fmt == "anthropic":
         if data.get("type") == "error" or (data.get("error") and not data.get("content")):
             err_obj = data.get("error") or {}
             err_msg = err_obj.get("message") if isinstance(err_obj, dict) else str(err_obj)
-            _log_call(False, err_msg=f"接口报错: {err_msg}")
             raise LLMClientError(f"接口报错: {err_msg}")
         text_parts: List[str] = []
         think_parts: List[str] = []
@@ -799,25 +881,16 @@ def chat_completion(
                         "arguments": json.dumps(blk.get("input") or {}, ensure_ascii=False),
                     },
                 })
-        u_raw = data.get("usage") or {}
-        prompt_t = int(u_raw.get("input_tokens") or 0)
-        comp_t = int(u_raw.get("output_tokens") or 0)
+        prompt_t, comp_t, cache_r, cache_w = _extract_usage_metrics(data.get("usage") or {}, fmt)
         model_used = str(data.get("model") or cfg["model"])
-        _log_call(True, model_used=model_used, in_t=prompt_t, out_t=comp_t)
-        return {
-            "content": "\n".join(p for p in text_parts if p),
-            "thinking": "\n".join(p for p in think_parts if p),
-            "tool_calls": norm_tool_calls,
-            "usage": {"prompt_tokens": prompt_t, "completion_tokens": comp_t, "total_tokens": prompt_t + comp_t},
-            "model": model_used,
-            "finish_reason": str(data.get("stop_reason") or ""),
-        }
-
-    if fmt == "openai-responses":
+        raw_fr = str(data.get("stop_reason") or "")
+        stop_reason = _normalize_stop_reason(raw_fr)
+        content = "\n".join(p for p in text_parts if p)
+        thinking = "\n".join(p for p in think_parts if p)
+    elif fmt == "openai-responses":
         if data.get("error") and not data.get("output"):
             err_obj = data["error"]
             err_msg = err_obj.get("message") if isinstance(err_obj, dict) else str(err_obj)
-            _log_call(False, err_msg=f"接口报错: {err_msg}")
             raise LLMClientError(f"接口报错: {err_msg}")
         text_parts = []
         think_parts = []
@@ -845,64 +918,55 @@ def chat_completion(
                     "type": "function",
                     "function": {"name": str(item.get("name") or ""), "arguments": fn_args},
                 })
-        u_raw = data.get("usage") or {}
-        prompt_t = int(u_raw.get("input_tokens") or u_raw.get("prompt_tokens") or 0)
-        comp_t = int(u_raw.get("output_tokens") or u_raw.get("completion_tokens") or 0)
+        prompt_t, comp_t, cache_r, cache_w = _extract_usage_metrics(data.get("usage") or {}, fmt)
         model_used = str(data.get("model") or cfg["model"])
-        _log_call(True, model_used=model_used, in_t=prompt_t, out_t=comp_t)
-        return {
-            "content": "\n".join(p for p in text_parts if p),
-            "thinking": "\n".join(p for p in think_parts if p),
-            "tool_calls": norm_tool_calls,
-            "usage": {"prompt_tokens": prompt_t, "completion_tokens": comp_t, "total_tokens": prompt_t + comp_t},
-            "model": model_used,
-            "finish_reason": str(data.get("status") or ""),
-        }
+        raw_fr = str(data.get("status") or "")
+        stop_reason = _normalize_stop_reason(raw_fr)
+        content = "\n".join(p for p in text_parts if p)
+        thinking = "\n".join(p for p in think_parts if p)
+    else:
+        if data.get("error") and not data.get("choices"):
+            err_obj = data["error"]
+            err_msg = err_obj.get("message") if isinstance(err_obj, dict) else str(err_obj)
+            raise LLMClientError(f"接口报错: {err_msg}")
+        choices = data.get("choices") or []
+        if not choices or not isinstance(choices[0], dict):
+            raise LLMClientError("LLM 响应缺少 choices 字段")
+        choice0 = choices[0]
+        msg = choice0.get("message") or {}
+        content = _extract_content_text(msg.get("content"))
+        raw_thinking = msg.get("reasoning_content")
+        if raw_thinking is None:
+            raw_thinking = msg.get("reasoning")
+        thinking = _extract_content_text(raw_thinking)
+        norm_tool_calls = []
+        for idx, tc in enumerate(msg.get("tool_calls") or []):
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function") or {}
+            tc_id = str(tc.get("id") or f"call_{idx + 1}")
+            fn_name = str(fn.get("name") or "").strip()
+            fn_args = fn.get("arguments")
+            if not isinstance(fn_args, str):
+                fn_args = json.dumps(fn_args if fn_args is not None else {}, ensure_ascii=False)
+            if fn_name:
+                norm_tool_calls.append({
+                    "id": tc_id,
+                    "type": "function",
+                    "function": {"name": fn_name, "arguments": fn_args},
+                })
+        prompt_t, comp_t, cache_r, cache_w = _extract_usage_metrics(data.get("usage") or {}, fmt)
+        model_used = str(data.get("model") or cfg["model"])
+        raw_fr = str(choice0.get("finish_reason") or "")
+        stop_reason = _normalize_stop_reason(raw_fr)
 
-    if data.get("error") and not data.get("choices"):
-        err_obj = data["error"]
-        err_msg = err_obj.get("message") if isinstance(err_obj, dict) else str(err_obj)
-        _log_call(False, err_msg=f"接口报错: {err_msg}")
-        raise LLMClientError(f"接口报错: {err_msg}")
-
-    choices = data.get("choices") or []
-    if not choices or not isinstance(choices[0], dict):
-        _log_call(False, err_msg="LLM 响应缺少 choices 字段")
-        raise LLMClientError("LLM 响应缺少 choices 字段")
-
-    choice0 = choices[0]
-    msg = choice0.get("message") or {}
-    content = _extract_content_text(msg.get("content"))
-    raw_thinking = msg.get("reasoning_content")
-    if raw_thinking is None:
-        raw_thinking = msg.get("reasoning")
-    thinking = _extract_content_text(raw_thinking)
-
-    norm_tool_calls = []
-    for idx, tc in enumerate(msg.get("tool_calls") or []):
-        if not isinstance(tc, dict):
-            continue
-        fn = tc.get("function") or {}
-        tc_id = str(tc.get("id") or f"call_{idx + 1}")
-        fn_name = str(fn.get("name") or "").strip()
-        fn_args = fn.get("arguments")
-        if not isinstance(fn_args, str):
-            fn_args = json.dumps(fn_args if fn_args is not None else {}, ensure_ascii=False)
-        if fn_name:
-            norm_tool_calls.append({
-                "id": tc_id,
-                "type": "function",
-                "function": {"name": fn_name, "arguments": fn_args},
-            })
-
-    usage_raw = data.get("usage") or {}
-    prompt_t = int(usage_raw.get("prompt_tokens") or 0)
-    comp_t = int(usage_raw.get("completion_tokens") or 0)
-    total_t = int(usage_raw.get("total_tokens") or (prompt_t + comp_t))
-    model_used = str(data.get("model") or cfg["model"])
-    _log_call(True, model_used=model_used, in_t=prompt_t, out_t=comp_t)
+    total_t = prompt_t + comp_t
+    hit_pct = min(100, max(0, round(cache_r / prompt_t * 100))) if prompt_t > 0 else 0
+    tok_s = round(comp_t / max(0.05, lat_ms / 1000.0), 1) if comp_t > 0 else 0.0
+    truncated_tc = _check_truncated_tool_calls(norm_tool_calls, stop_reason)
 
     return {
+        "ok": True,
         "content": content,
         "thinking": thinking,
         "tool_calls": norm_tool_calls,
@@ -910,10 +974,657 @@ def chat_completion(
             "prompt_tokens": prompt_t,
             "completion_tokens": comp_t,
             "total_tokens": total_t,
+            "cache_read_tokens": cache_r,
+            "cache_write_tokens": cache_w,
         },
+        "input_tokens": prompt_t,
+        "output_tokens": comp_t,
+        "cache_read_tokens": cache_r,
+        "cache_write_tokens": cache_w,
+        "cache_hit_pct": hit_pct,
+        "latency_ms": lat_ms,
+        "ttft_ms": lat_ms,
+        "tok_s": tok_s,
         "model": model_used,
-        "finish_reason": str(choice0.get("finish_reason") or ""),
+        "finish_reason": raw_fr,
+        "stop_reason": stop_reason,
+        "effective_max_tokens": int(max_tok),
+        "truncated_tool_calls": truncated_tc,
     }
+
+
+def _emit_call_log(
+    cfg: Dict[str, Any],
+    fmt: str,
+    t_start: float,
+    *,
+    ok: bool,
+    session_id: str = "",
+    model_used: str = "",
+    in_t: int = 0,
+    out_t: int = 0,
+    cache_r: int = 0,
+    cache_w: int = 0,
+    ttft_ms: float = 0.0,
+    tok_s: float = 0.0,
+    err_msg: str = "",
+    req_body: Any = None,
+    resp_body: Any = None,
+) -> None:
+    lat_ms = round((time.perf_counter() - t_start) * 1000, 1)
+    hit_pct = min(100, max(0, round(cache_r / in_t * 100))) if in_t > 0 else 0
+    entry: Dict[str, Any] = {
+        "id": f"call_{int(time.time() * 1000)}_{secrets.token_hex(3)}",
+        "ts": time.strftime("%H:%M:%S"),
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "session_id": session_id,
+        "profile_id": cfg.get("profile_id") or "",
+        "profile_name": cfg.get("profile_name") or cfg["model"],
+        "format": fmt,
+        "model": model_used or cfg["model"],
+        "ok": ok,
+        "status": "ok" if ok else "error",
+        "latency_ms": lat_ms,
+        "ttft_ms": round(ttft_ms or lat_ms, 1),
+        "tok_s": round(tok_s, 1),
+        "input_tokens": in_t,
+        "output_tokens": out_t,
+        "prompt_tokens": in_t,
+        "completion_tokens": out_t,
+        "total_tokens": in_t + out_t,
+        "cache_read_tokens": cache_r,
+        "cache_write_tokens": cache_w,
+        "cache_hit_pct": hit_pct,
+        "context_tokens": in_t,
+        "error": err_msg[:240] if err_msg else "",
+    }
+    if req_body is not None or resp_body is not None:
+        entry["has_bodies"] = True
+        if req_body is not None:
+            entry["request_body"] = _sanitize_body_for_log(req_body)
+        if resp_body is not None:
+            entry["response_body"] = _sanitize_body_for_log(resp_body)
+    _record_llm_call(entry)
+
+
+def chat_completion(
+    messages: List[Dict[str, Any]],
+    tools: Optional[List[Dict[str, Any]]] = None,
+    system_prompt: str = "",
+    *,
+    config_override: Optional[Dict[str, Any]] = None,
+    config_path: Optional[Path] = None,
+    timeout: float = 90.0,
+    max_tokens_override: Optional[int] = None,
+    session_id: str = "",
+) -> Dict[str, Any]:
+    """Invoke OpenAI Chat, OpenAI Responses, or Anthropic Messages with pure stdlib `urllib.request`."""
+    t_start = time.perf_counter()
+    cfg = _merge_runtime_config(config_override, config_path=config_path)
+    max_tok = max_tokens_override if max_tokens_override is not None else cfg["max_tokens"]
+    fmt, endpoint, headers, payload = _build_request_spec(
+        messages, tools, system_prompt, cfg, int(max_tok), stream=False
+    )
+
+    opener = _build_opener(cfg.get("proxy_url", ""))
+    req = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+
+    try:
+        with opener.open(req, timeout=timeout) as resp:
+            raw_bytes = resp.read()
+    except urllib.error.HTTPError as he:
+        err_s = f"HTTP {he.code}: {_parse_http_error(he)}"
+        _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
+        raise LLMClientError(err_s, status_code=he.code) from he
+    except urllib.error.URLError as ue:
+        err_s = f"网络请求失败: {ue.reason}"
+        _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
+        raise LLMClientError(err_s) from ue
+    except TimeoutError as te:
+        err_s = f"LLM 请求超时 ({int(timeout)}s)"
+        _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
+        raise LLMClientError(err_s) from te
+    except Exception as exc:
+        err_s = f"LLM 调用异常: {exc}"
+        _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
+        raise LLMClientError(err_s) from exc
+
+    try:
+        data = json.loads(raw_bytes.decode("utf-8", errors="replace"))
+    except Exception as exc:
+        err_s = f"LLM 返回内容不是合法 JSON: {exc}"
+        _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
+        raise LLMClientError(err_s) from exc
+
+    if not isinstance(data, dict):
+        _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg="LLM 响应根节点非 JSON 对象", req_body=payload)
+        raise LLMClientError("LLM 响应根节点非 JSON 对象")
+
+    try:
+        res = _parse_non_stream_json_response(data, fmt, cfg, int(max_tok), t_start)
+    except LLMClientError as exc:
+        _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=str(exc), req_body=payload, resp_body=data)
+        raise
+
+    _emit_call_log(
+        cfg,
+        fmt,
+        t_start,
+        ok=True,
+        session_id=session_id,
+        model_used=res["model"],
+        in_t=res["input_tokens"],
+        out_t=res["output_tokens"],
+        cache_r=res["cache_read_tokens"],
+        cache_w=res["cache_write_tokens"],
+        ttft_ms=res["ttft_ms"],
+        tok_s=res["tok_s"],
+        req_body=payload,
+        resp_body={"content": res["content"][:2000], "thinking": res["thinking"][:1000], "tool_calls": res["tool_calls"], "usage": res["usage"]},
+    )
+    return res
+
+
+def stream_chat_completion(
+    messages: List[Dict[str, Any]],
+    tools: Optional[List[Dict[str, Any]]] = None,
+    system_prompt: str = "",
+    *,
+    config_override: Optional[Dict[str, Any]] = None,
+    config_path: Optional[Path] = None,
+    timeout: float = 120.0,
+    max_tokens_override: Optional[int] = None,
+    on_event: Optional[Callable[[Dict[str, Any]], None]] = None,
+    stop_event: Optional[threading.Event] = None,
+    session_id: str = "",
+) -> Dict[str, Any]:
+    """True SSE streaming completion (OpenAI Chat / Anthropic Messages / OpenAI Responses) using stdlib only."""
+    t_start = time.perf_counter()
+    cfg = _merge_runtime_config(config_override, config_path=config_path)
+    max_tok = max_tokens_override if max_tokens_override is not None else cfg["max_tokens"]
+
+    def _fire(ev: Dict[str, Any]) -> None:
+        if callable(on_event):
+            try:
+                on_event(ev)
+            except Exception:
+                pass
+
+    if cfg.get("streaming") is False:
+        res = chat_completion(
+            messages=messages,
+            tools=tools,
+            system_prompt=system_prompt,
+            config_override=config_override,
+            config_path=config_path,
+            timeout=timeout,
+            max_tokens_override=max_tokens_override,
+            session_id=session_id,
+        )
+        if res.get("thinking"):
+            _fire({"type": "thinking_delta", "delta": str(res["thinking"])})
+        if res.get("content"):
+            _fire({"type": "text_delta", "delta": str(res["content"])})
+        return res
+
+    include_stream_opts = True
+    fmt, endpoint, headers, payload = _build_request_spec(
+        messages, tools, system_prompt, cfg, int(max_tok), stream=True, include_stream_options=include_stream_opts
+    )
+    opener = _build_opener(cfg.get("proxy_url", ""))
+
+    def _open_stream(req_payload: Dict[str, Any]) -> Any:
+        req = urllib.request.Request(
+            endpoint,
+            data=json.dumps(req_payload, ensure_ascii=False).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        return opener.open(req, timeout=timeout)
+
+    try:
+        resp = _open_stream(payload)
+    except urllib.error.HTTPError as he:
+        err_detail = _parse_http_error(he)
+        if fmt == "openai" and include_stream_opts and he.code == 400 and "stream_options" in err_detail.lower():
+            fmt, endpoint, headers, payload = _build_request_spec(
+                messages, tools, system_prompt, cfg, int(max_tok), stream=True, include_stream_options=False
+            )
+            try:
+                resp = _open_stream(payload)
+            except urllib.error.HTTPError as he2:
+                err_s = f"HTTP {he2.code}: {_parse_http_error(he2)}"
+                _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
+                raise LLMClientError(err_s, status_code=he2.code) from he2
+            except Exception as exc2:
+                err_s = f"LLM 流式调用异常: {exc2}"
+                _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
+                raise LLMClientError(err_s) from exc2
+        else:
+            err_s = f"HTTP {he.code}: {err_detail}"
+            _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
+            raise LLMClientError(err_s, status_code=he.code) from he
+    except urllib.error.URLError as ue:
+        err_s = f"网络请求失败: {ue.reason}"
+        _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
+        raise LLMClientError(err_s) from ue
+    except TimeoutError as te:
+        err_s = f"LLM 流式请求超时 ({int(timeout)}s)"
+        _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
+        raise LLMClientError(err_s) from te
+    except Exception as exc:
+        err_s = f"LLM 流式调用异常: {exc}"
+        _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
+        raise LLMClientError(err_s) from exc
+
+    content_parts: List[str] = []
+    thinking_parts: List[str] = []
+    # OpenAI tool_calls by index / Anthropic blocks by index / Responses by call_id or item_id
+    tc_map: Dict[Any, Dict[str, Any]] = {}
+    tc_order: List[Any] = []
+    anth_block_types: Dict[int, str] = {}
+
+    model_used = cfg["model"]
+    raw_fr = ""
+    prompt_t = 0
+    comp_t = 0
+    cache_r = 0
+    cache_w = 0
+    first_token_at: Optional[float] = None
+    aborted = False
+    sse_error = ""
+
+    def _mark_first_token() -> None:
+        nonlocal first_token_at
+        if first_token_at is None:
+            first_token_at = time.perf_counter()
+
+    try:
+        with resp:
+            ctype = str(resp.headers.get("Content-Type") or "").lower()
+            # Graceful fallback if upstream proxy ignored stream=true and returned JSON
+            if "application/json" in ctype and "text/event-stream" not in ctype:
+                raw_bytes = resp.read()
+                data = json.loads(raw_bytes.decode("utf-8", errors="replace"))
+                if not isinstance(data, dict):
+                    raise LLMClientError("LLM 响应根节点非 JSON 对象")
+                res = _parse_non_stream_json_response(data, fmt, cfg, int(max_tok), t_start)
+                if res.get("thinking"):
+                    _fire({"type": "thinking_delta", "delta": res["thinking"]})
+                if res.get("content"):
+                    _fire({"type": "text_delta", "delta": res["content"]})
+                _emit_call_log(
+                    cfg, fmt, t_start, ok=True, session_id=session_id,
+                    model_used=res["model"], in_t=res["input_tokens"], out_t=res["output_tokens"],
+                    cache_r=res["cache_read_tokens"], cache_w=res["cache_write_tokens"],
+                    ttft_ms=res["ttft_ms"], tok_s=res["tok_s"], req_body=payload,
+                    resp_body={"content": res["content"][:2000], "tool_calls": res["tool_calls"], "usage": res["usage"]},
+                )
+                return res
+
+            cur_event_name = ""
+            while True:
+                if stop_event is not None and stop_event.is_set():
+                    aborted = True
+                    break
+                raw_line = resp.readline()
+                if not raw_line:
+                    break
+                if stop_event is not None and stop_event.is_set():
+                    aborted = True
+                    break
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                if not line:
+                    cur_event_name = ""
+                    continue
+                if line.startswith(":"):
+                    continue
+                if line.startswith("event:"):
+                    cur_event_name = line[6:].strip()
+                    continue
+                if not line.startswith("data:"):
+                    # Handle proxies that send a raw JSON error line without SSE prefix
+                    if line.startswith("{"):
+                        try:
+                            err_j = json.loads(line)
+                            if isinstance(err_j, dict) and err_j.get("error"):
+                                err_o = err_j["error"]
+                                sse_error = err_o.get("message") if isinstance(err_o, dict) else str(err_o)
+                                break
+                        except Exception:
+                            pass
+                    continue
+                data_str = line[5:].strip()
+                if not data_str:
+                    continue
+                if data_str == "[DONE]":
+                    break
+                try:
+                    ev = json.loads(data_str)
+                except Exception:
+                    continue
+                if not isinstance(ev, dict):
+                    continue
+
+                if fmt == "anthropic":
+                    ev_type = str(ev.get("type") or cur_event_name or "")
+                    if ev_type == "error":
+                        eo = ev.get("error") or {}
+                        sse_error = eo.get("message") if isinstance(eo, dict) else str(eo)
+                        break
+                    if ev_type == "message_start":
+                        msg_obj = ev.get("message") or {}
+                        if isinstance(msg_obj, dict):
+                            if msg_obj.get("model"):
+                                model_used = str(msg_obj["model"])
+                            u_m = msg_obj.get("usage")
+                            if isinstance(u_m, dict):
+                                p0, c0, cr0, cw0 = _extract_usage_metrics(u_m, fmt)
+                                prompt_t = max(prompt_t, p0)
+                                comp_t = max(comp_t, c0)
+                                cache_r = max(cache_r, cr0)
+                                cache_w = max(cache_w, cw0)
+                    elif ev_type == "content_block_start":
+                        idx = int(ev.get("index") or 0)
+                        cb = ev.get("content_block") or {}
+                        if isinstance(cb, dict):
+                            btype = str(cb.get("type") or "")
+                            anth_block_types[idx] = btype
+                            if btype == "tool_use":
+                                tc_map[idx] = {
+                                    "id": str(cb.get("id") or f"toolu_{idx}"),
+                                    "name": str(cb.get("name") or ""),
+                                    "args_parts": [],
+                                }
+                                tc_order.append(idx)
+                                _mark_first_token()
+                                _fire({"type": "tool_call_delta", "name": tc_map[idx]["name"], "delta": ""})
+                            elif btype == "text" and cb.get("text"):
+                                txt = str(cb["text"])
+                                content_parts.append(txt)
+                                _mark_first_token()
+                                _fire({"type": "text_delta", "delta": txt})
+                            elif btype == "thinking" and cb.get("thinking"):
+                                th = str(cb["thinking"])
+                                thinking_parts.append(th)
+                                _mark_first_token()
+                                _fire({"type": "thinking_delta", "delta": th})
+                    elif ev_type == "content_block_delta":
+                        idx = int(ev.get("index") or 0)
+                        delta = ev.get("delta") or {}
+                        if not isinstance(delta, dict):
+                            continue
+                        dtype = str(delta.get("type") or "")
+                        if dtype == "text_delta":
+                            txt = str(delta.get("text") or "")
+                            if txt:
+                                content_parts.append(txt)
+                                _mark_first_token()
+                                _fire({"type": "text_delta", "delta": txt})
+                        elif dtype == "thinking_delta":
+                            th = str(delta.get("thinking") or "")
+                            if th:
+                                thinking_parts.append(th)
+                                _mark_first_token()
+                                _fire({"type": "thinking_delta", "delta": th})
+                        elif dtype == "input_json_delta":
+                            part = str(delta.get("partial_json") or "")
+                            if part and idx in tc_map:
+                                tc_map[idx]["args_parts"].append(part)
+                                _mark_first_token()
+                                _fire({"type": "tool_call_delta", "name": tc_map[idx]["name"], "delta": part})
+                    elif ev_type == "message_delta":
+                        delta = ev.get("delta") or {}
+                        if isinstance(delta, dict) and delta.get("stop_reason"):
+                            raw_fr = str(delta["stop_reason"])
+                        u_d = ev.get("usage")
+                        if isinstance(u_d, dict):
+                            if u_d.get("output_tokens") is not None:
+                                comp_t = max(comp_t, int(u_d.get("output_tokens") or 0))
+                            if u_d.get("input_tokens") is not None:
+                                p1, c1, cr1, cw1 = _extract_usage_metrics(u_d, fmt)
+                                prompt_t = max(prompt_t, p1)
+                                comp_t = max(comp_t, c1)
+                                cache_r = max(cache_r, cr1)
+                                cache_w = max(cache_w, cw1)
+                    elif ev_type == "message_stop":
+                        break
+
+                elif fmt == "openai-responses":
+                    ev_type = str(ev.get("type") or cur_event_name or "")
+                    if ev_type == "error":
+                        eo = ev.get("error") or {}
+                        sse_error = eo.get("message") if isinstance(eo, dict) else str(eo)
+                        break
+                    if ev_type == "response.output_text.delta":
+                        txt = str(ev.get("delta") or "")
+                        if txt:
+                            content_parts.append(txt)
+                            _mark_first_token()
+                            _fire({"type": "text_delta", "delta": txt})
+                    elif ev_type in ("response.reasoning_summary_text.delta", "response.reasoning.delta"):
+                        th = str(ev.get("delta") or "")
+                        if th:
+                            thinking_parts.append(th)
+                            _mark_first_token()
+                            _fire({"type": "thinking_delta", "delta": th})
+                    elif ev_type == "response.output_item.added":
+                        item = ev.get("item") or {}
+                        if isinstance(item, dict) and item.get("type") == "function_call":
+                            key = str(item.get("id") or item.get("call_id") or f"fc_{len(tc_order)}")
+                            tc_map[key] = {
+                                "id": str(item.get("call_id") or item.get("id") or key),
+                                "name": str(item.get("name") or ""),
+                                "args_parts": [],
+                            }
+                            if key not in tc_order:
+                                tc_order.append(key)
+                            _mark_first_token()
+                            _fire({"type": "tool_call_delta", "name": tc_map[key]["name"], "delta": ""})
+                    elif ev_type == "response.function_call_arguments.delta":
+                        key = str(ev.get("item_id") or ev.get("call_id") or (tc_order[-1] if tc_order else "fc_0"))
+                        part = str(ev.get("delta") or "")
+                        if key not in tc_map:
+                            tc_map[key] = {"id": key, "name": str(ev.get("name") or ""), "args_parts": []}
+                            tc_order.append(key)
+                        if part:
+                            tc_map[key]["args_parts"].append(part)
+                            _mark_first_token()
+                            _fire({"type": "tool_call_delta", "name": tc_map[key]["name"], "delta": part})
+                    elif ev_type in ("response.completed", "response.incomplete"):
+                        r_obj = ev.get("response") or {}
+                        if isinstance(r_obj, dict):
+                            if r_obj.get("model"):
+                                model_used = str(r_obj["model"])
+                            raw_fr = str(r_obj.get("status") or ("incomplete" if ev_type == "response.incomplete" else "completed"))
+                            u_r = r_obj.get("usage")
+                            if isinstance(u_r, dict):
+                                p1, c1, cr1, cw1 = _extract_usage_metrics(u_r, fmt)
+                                prompt_t, comp_t, cache_r, cache_w = p1, c1, cr1, cw1
+
+                else:
+                    # OpenAI Chat Completions SSE
+                    if ev.get("error") and not ev.get("choices"):
+                        eo = ev["error"]
+                        sse_error = eo.get("message") if isinstance(eo, dict) else str(eo)
+                        break
+                    if ev.get("model"):
+                        model_used = str(ev["model"])
+                    if isinstance(ev.get("usage"), dict):
+                        p1, c1, cr1, cw1 = _extract_usage_metrics(ev["usage"], fmt)
+                        if p1 or c1:
+                            prompt_t, comp_t, cache_r, cache_w = p1, c1, cr1, cw1
+                    choices = ev.get("choices") or []
+                    if not choices or not isinstance(choices[0], dict):
+                        continue
+                    c0 = choices[0]
+                    if c0.get("finish_reason"):
+                        raw_fr = str(c0["finish_reason"])
+                    delta = c0.get("delta") or {}
+                    if not isinstance(delta, dict):
+                        continue
+                    d_think = delta.get("reasoning_content")
+                    if d_think is None:
+                        d_think = delta.get("reasoning")
+                    if isinstance(d_think, str) and d_think:
+                        thinking_parts.append(d_think)
+                        _mark_first_token()
+                        _fire({"type": "thinking_delta", "delta": d_think})
+                    d_content = delta.get("content")
+                    if isinstance(d_content, str) and d_content:
+                        content_parts.append(d_content)
+                        _mark_first_token()
+                        _fire({"type": "text_delta", "delta": d_content})
+                    for tc in delta.get("tool_calls") or []:
+                        if not isinstance(tc, dict):
+                            continue
+                        idx = tc.get("index")
+                        if idx is None:
+                            idx = len(tc_order)
+                        if idx not in tc_map:
+                            tc_map[idx] = {
+                                "id": str(tc.get("id") or f"call_{len(tc_order) + 1}"),
+                                "name": "",
+                                "args_parts": [],
+                            }
+                            tc_order.append(idx)
+                        elif tc.get("id"):
+                            tc_map[idx]["id"] = str(tc["id"])
+                        fn = tc.get("function") or {}
+                        if isinstance(fn, dict):
+                            if fn.get("name"):
+                                tc_map[idx]["name"] += str(fn["name"])
+                            arg_d = fn.get("arguments")
+                            if isinstance(arg_d, str) and arg_d:
+                                tc_map[idx]["args_parts"].append(arg_d)
+                                _mark_first_token()
+                                _fire({"type": "tool_call_delta", "name": tc_map[idx]["name"], "delta": arg_d})
+                            elif fn.get("name"):
+                                _mark_first_token()
+                                _fire({"type": "tool_call_delta", "name": tc_map[idx]["name"], "delta": ""})
+    except Exception as exc:
+        if stop_event is not None and stop_event.is_set():
+            aborted = True
+        else:
+            err_s = f"LLM 流式读取中断: {exc}"
+            _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
+            raise LLMClientError(err_s) from exc
+
+    content = "".join(content_parts)
+    thinking = "".join(thinking_parts)
+    if aborted:
+        lat_ms = round((time.perf_counter() - t_start) * 1000, 1)
+        ttft_ms = round((first_token_at - t_start) * 1000, 1) if first_token_at is not None else lat_ms
+        return {
+            "ok": False,
+            "aborted": True,
+            "content": content,
+            "thinking": thinking,
+            "partial_content": content,
+            "partial_thinking": thinking,
+            "tool_calls": [],
+            "usage": {"prompt_tokens": prompt_t, "completion_tokens": comp_t, "total_tokens": prompt_t + comp_t},
+            "input_tokens": prompt_t,
+            "output_tokens": comp_t,
+            "cache_read_tokens": cache_r,
+            "cache_write_tokens": cache_w,
+            "cache_hit_pct": min(100, max(0, round(cache_r / prompt_t * 100))) if prompt_t > 0 else 0,
+            "latency_ms": lat_ms,
+            "ttft_ms": ttft_ms,
+            "tok_s": 0.0,
+            "model": model_used,
+            "finish_reason": "aborted",
+            "stop_reason": "aborted",
+            "effective_max_tokens": int(max_tok),
+            "truncated_tool_calls": False,
+        }
+
+    if sse_error:
+        err_s = f"接口报错: {sse_error}"
+        _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
+        raise LLMClientError(err_s)
+
+    norm_tool_calls: List[Dict[str, Any]] = []
+    for k in tc_order:
+        ent = tc_map[k]
+        fn_name = str(ent.get("name") or "").strip()
+        if not fn_name:
+            continue
+        raw_args = "".join(ent.get("args_parts") or [])
+        if not raw_args.strip():
+            raw_args = "{}"
+        norm_tool_calls.append({
+            "id": str(ent.get("id") or f"call_{len(norm_tool_calls) + 1}"),
+            "type": "function",
+            "function": {"name": fn_name, "arguments": raw_args},
+        })
+
+    t_end = time.perf_counter()
+    lat_ms = round((t_end - t_start) * 1000, 1)
+    ttft_ms = round((first_token_at - t_start) * 1000, 1) if first_token_at is not None else lat_ms
+    # Estimate output tokens if upstream gateway omitted usage in stream mode
+    if comp_t == 0 and (content or thinking or norm_tool_calls):
+        approx_chars = len(content) + len(thinking) + sum(len(tc["function"]["arguments"]) for tc in norm_tool_calls)
+        comp_t = max(1, approx_chars // 3)
+    gen_secs = max(0.05, (t_end - first_token_at) if first_token_at is not None else (t_end - t_start))
+    tok_s = round(comp_t / gen_secs, 1) if comp_t > 0 else 0.0
+    total_t = prompt_t + comp_t
+    hit_pct = min(100, max(0, round(cache_r / prompt_t * 100))) if prompt_t > 0 else 0
+    stop_reason = _normalize_stop_reason(raw_fr)
+    truncated_tc = _check_truncated_tool_calls(norm_tool_calls, stop_reason)
+
+    _emit_call_log(
+        cfg,
+        fmt,
+        t_start,
+        ok=True,
+        session_id=session_id,
+        model_used=model_used,
+        in_t=prompt_t,
+        out_t=comp_t,
+        cache_r=cache_r,
+        cache_w=cache_w,
+        ttft_ms=ttft_ms,
+        tok_s=tok_s,
+        req_body=payload,
+        resp_body={"content": content[:2000], "thinking": thinking[:1000], "tool_calls": norm_tool_calls, "usage": {"prompt_tokens": prompt_t, "completion_tokens": comp_t, "cache_read_tokens": cache_r, "cache_write_tokens": cache_w}},
+    )
+
+    return {
+        "ok": True,
+        "content": content,
+        "thinking": thinking,
+        "tool_calls": norm_tool_calls,
+        "usage": {
+            "prompt_tokens": prompt_t,
+            "completion_tokens": comp_t,
+            "total_tokens": total_t,
+            "cache_read_tokens": cache_r,
+            "cache_write_tokens": cache_w,
+        },
+        "input_tokens": prompt_t,
+        "output_tokens": comp_t,
+        "cache_read_tokens": cache_r,
+        "cache_write_tokens": cache_w,
+        "cache_hit_pct": hit_pct,
+        "latency_ms": lat_ms,
+        "ttft_ms": ttft_ms,
+        "tok_s": tok_s,
+        "model": model_used,
+        "finish_reason": raw_fr,
+        "stop_reason": stop_reason,
+        "effective_max_tokens": int(max_tok),
+        "truncated_tool_calls": truncated_tc,
+    }
+
+
+_ORIG_CHAT_COMPLETION = chat_completion
+_ORIG_STREAM_CHAT_COMPLETION = stream_chat_completion
 
 
 def discover_models(

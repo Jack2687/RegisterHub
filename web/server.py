@@ -1139,6 +1139,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
             self.end_headers()
             hist, sub_q = sess.subscribe(keep_open=keep_open)
             sent_live_terminal = False
@@ -1189,12 +1190,19 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                             self.wfile.write(chunk.encode("utf-8"))
                             self.wfile.flush()
                         break
+                    ev_type = str(ev.get("type") or "")
+                    if ev.get("_ephemeral") or ev_type in ("text_delta", "thinking_delta", "tool_call_delta"):
+                        clean_ev = {k: v for k, v in ev.items() if k != "_ephemeral"}
+                        payload_json = json.dumps(clean_ev, ensure_ascii=False)
+                        self.wfile.write(f"data: {payload_json}\n\n".encode("utf-8"))
+                        self.wfile.flush()
+                        continue
                     raw_ev_seq = ev.get("seq")
                     ev_seq = raw_ev_seq if isinstance(raw_ev_seq, int) and not isinstance(raw_ev_seq, bool) else seq_cursor
                     if ev_seq < since:
                         continue
                     seq_cursor = max(seq_cursor, ev_seq + 1)
-                    if ev.get("type") == "status":
+                    if ev_type == "status":
                         last_error = str(ev.get("error") or "")
                         if ev.get("status") in ("done", "error", "stopped"):
                             sent_live_terminal = True
@@ -1847,8 +1855,10 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             sid = m_ag_msg.group(1)
             msg_text = str(body.get("message") or body.get("content") or "").strip()
             target_url = str(body.get("target_url") or "").strip()
-            llm_pid = body.get("llm_profile_id") if "llm_profile_id" in body else None
+            llm_pid = body.get("llm_profile_id") if "llm_profile_id" in body else body.get("profile_id")
             llm_mod = body.get("llm_model") if "llm_model" in body else None
+            mode = str(body.get("mode") or "steer").strip().lower()
+            goal_mode = bool(body.get("goal_mode", False))
             try:
                 res = agent_manager.send_message(
                     sid,
@@ -1856,6 +1866,8 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                     target_url=target_url,
                     llm_profile_id=str(llm_pid) if llm_pid is not None else None,
                     llm_model=str(llm_mod) if llm_mod is not None else None,
+                    mode=mode,
+                    goal_mode=goal_mode,
                 )
                 self._send_json(res)
             except KeyError as ke:
