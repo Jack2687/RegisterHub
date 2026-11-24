@@ -29,7 +29,10 @@ RegisterHub 是一个面向工程研发的现代化 Web 自动化框架，旨在
 ### 核心工程支柱
 
 - **运行环境自洽性 (Runtime Environment Parity)**：通过原生 Chrome 二进制接入与底层自动化特征消除，支持可选安装 **`patchright`** 实现零 `Runtime.enable` CDP 隐匿（自动检测并优先启用，未安装平滑回退 Playwright），保持 JavaScript 原型链纯净（`[native code]`）。
-- **零依赖 Web 可视化工作台 + 内置 AI 直跑 (RegisterHub Lite Web Workbench)**：纯 Python 标准库 HTTP/SSE 驱动（免装 Node/FastAPI），双击 `run_web.bat` 或运行 `python main.py --web` 即可打开 11 大面板（总览仪表盘、AI 直跑、单站试跑、账号与 Key 管理、失败黑匣子快照、站点工坊、视窗标定、临时邮箱/TOTP/Luhn 工具箱、环境诊断、运行与 LLM 配置）。
+- **零依赖 Web 可视化工作台 + 全自主流式 AI Agent (`RegisterHub Lite`)**：纯 Python 标准库 HTTP/SSE 驱动（免装 Node/FastAPI），双击 `run_web.bat`（macOS/Linux 运行 `./run_web.sh`）或执行 `python main.py --web` 即可打开全套 Studio 工作台：
+  - **全自主 AI 对话**：三协议真 SSE 流式输出（OpenAI Chat / Anthropic Messages / OpenAI Responses）、Prompt Cache 命中率 / TTFT / 吞吐速度遥测、手动 `/compact` 与 85% 自动上下文压缩、16 项内置工具、5 套可编辑工程技能（`skills/*.md`）、步级代码检查点一键回滚、持久化安全护栏审批、追问队列、`/goal` 长跑闭环与流式 `/btw` 旁白提问；
+  - **内置邮箱池 & 内置代理池（零 Docker / 零外部依赖）**：本地 SQLite + Windows DPAPI 加密存储，支持混合批量粘贴导入 Outlook OAuth2 / iCloud 接码链接 / 通用 IMAP 邮箱与静态 HTTP/SOCKS5 代理 / 动态住宅网关（Sticky Session）/ 短效 API 提取源，支持在线验活、收件箱读信提码与 IP 纯净度打分；
+  - **全栈开发工具集**：单线程任务台、站点工坊（在线 AST 语法/安全校验编辑器 + HAR 抓包提炼）、账号与 Key 验活/导出（Bitwarden / CSV / JSON）、跨分辨率视窗标定、多国身份/虚拟卡/TOTP 2FA/税号手机证件硬件指纹四合一工具箱。
 - **离线视觉算法求解器 (Algorithmic Vision Solver)**：内置双通 Canny 边缘轮廓计算与三次贝塞尔拟人手部动力学模型，纯本地离线执行，零第三方付费 API 依赖。
 - **CDP 会话桥接架构 (CDP Bridge Architecture)**：深度支持外部指纹浏览器（AdsPower、比特浏览器等）与本地已登录 Chrome 会话无缝接入，复用既有干净住宅网络与登录状态。
 - **AI 代理原生集成规范 (Agentic Co-Pilot Protocol)**：仓库根目录内置工业级 `AGENTS.md` 交互契约，既可在内置 Web「AI 直跑」接入任意 OpenAI 兼容大模型自主写适配器并实测，也深度适配 Cursor、Claude Code、Windsurf 与 Gemini CLI。
@@ -48,11 +51,17 @@ RegisterHub/
 │   ├── solver.py          # OpenCV 缺口匹配计算与贝塞尔轨迹规划器
 │   ├── identity.py        # 高熵多国身份与合规密码发生器
 │   ├── mail_client.py     # 毫秒级自适应退避临时邮箱轮询客户端
-│   ├── imap_mail.py       # 零依赖标准库单账号 IMAP 验证码拉取客户端
+│   ├── imap_mail.py       # 零依赖标准库单账号 IMAP 与内置邮箱池接码客户端
+│   ├── mail_builtin.py    # 零 Docker 内置邮箱池（SQLite WAL + DPAPI + Outlook/iCloud/IMAP）
+│   ├── proxy_builtin.py   # 零依赖内置代理池（静态代理 / 动态住宅网关 / API 提取源）
+│   ├── secrets.py         # Windows DPAPI 本地凭据加密与全链路日志脱敏
+│   ├── ai_agent.py        # 纯标准库单线程自主 AI Agent（16 工具 / 压缩 / 检查点 / 护栏）
+│   ├── llm_client.py      # 三协议真 SSE 流式模型客户端与 Cache/TTFT/tok_s 遥测
 │   ├── ip_scorer.py       # 出口 IP 住宅属性与风控纯净度评分器
-│   ├── runner.py          # 调度引擎、黑匣子快照抓取与原子台账持久化
-│   ├── scaffold.py        # 适配器自动派生与预装配代码生成引擎（自动联动临时邮 / IMAP）
+│   ├── runner.py          # 调度引擎、内置代理自动解析、黑匣子快照与原子台账持久化
+│   ├── scaffold.py        # 适配器自动派生与预装配代码生成引擎（自动联动内置池 / 临时邮 / IMAP）
 │   └── exporter.py        # Bitwarden、1Password、CSV 及 JSON 资产导出器
+├── skills/                # 5 套内置可编辑 AI Agent 工程技能规范 (*.md)
 ├── sites/                 # 业务与示范适配器池
 │   ├── _template.py       # 工业级标准适配器实现模板（支持 tempmail / IMAP 自动切换）
 │   ├── demo_site.py       # 自包含离线 Base64 靶场适配器
@@ -171,16 +180,16 @@ AI 将直接对照你跑通的真实人类行为路径进行精确代码装配�
 
 ## 关于代理与邮箱接码配置 (Proxy & Email Strategies)
 
-在 Web 工作台 **「系统设置」** 面板（或根目录 `config.json`）中，开源版支持开箱即用的单代理与双邮箱源，并提供一键连通性自检：
+在 Web 工作台 **「资产中心 → 内置邮箱池」**、**「代理网络 → 内置代理池」** 或 **「系统设置」**（同步持久化至 `config.json` 与 `results/*.db`）中，开源版支持零搭建开箱即用的双池与单通道模式：
 
-1. **代理出口接入**：
-   - 支持 **直连 / 系统代理（`direct`）**、**单条 HTTP / SOCKS5 代理（`proxy`）**（含带账密的住宅代理网关）以及 **外部指纹浏览器 CDP 桥接**；
-   - 配置后可直接在 **「系统设置」→「测试代理连通」** 或 **「IP 纯净度」** 面板实测出口延迟与住宅纯净分。
-2. **默认免费临时邮箱（`tempmail`，零配置）**：
-   - 默认 `defaults.use_disposable_mail: true`，框架通过内置 `DisposableMailClient` 自动申请公共临时邮箱并轮询验证码，适合快速功能验证与测试靶场。
-3. **自备单账号 IMAP 接码（`imap`，推荐应对严格风控站）**：
-   - 遇到屏蔽公共临时域的目标站时，在「系统设置」切换为 **单账号自有 IMAP**，填入 Gmail / Outlook / QQ / 163 / 自建域的 IMAP 服务器、端口（993）、邮箱与授权码，点击 **「测试 IMAP 登录」** 验证通过后保存；
-   - 脚手架 `--scaffold` 生成的新适配器与内置「AI 对话」均会自动读取 `config.json` 并无缝切换至 `SingleImapMailClient` 无损收码（`BODY.PEEK[]`）。
+1. **内置代理池（`builtin`，推荐，零外部依赖）与单代理接入**：
+   - 在 **「代理网络 → 内置代理池」** 批量粘贴静态 HTTP/HTTPS/SOCKS5 代理、配置动态住宅代理网关（Smartproxy / IPRoyal / Oxylabs / Bright Data / 自定义 Sticky Session 模板）或粘贴短效 API 提取链接，所有账密均经本地 DPAPI 加密落盘并自动脱敏展示；
+   - 亦支持 **直连 / 系统代理（`direct`）**、**单条自定义代理（`proxy`）** 及 **外部指纹浏览器 CDP 桥接**，并可一键实测出口延迟与住宅纯净度评分。
+2. **内置邮箱池（`builtin`，推荐，零 Docker）**：
+   - 在 **「资产中心 → 内置邮箱池」** 智能混合粘贴导入 **Outlook OAuth2（三/四段正反序）**、**iCloud 接码链接** 或 **QQ/163/Gmail/自定义 IMAP**，支持导入前脱敏预览、批量在线验活、收件箱原文查看/验证码提取与事务租约（任务结束自动释放）；
+   - 一键切换为 `mail.provider = "builtin"` 后，脚手架 `--scaffold` 生成的适配器与 AI Agent 会自动通过 `BuiltinPoolMailClient` 租借接码。
+3. **默认免费临时邮箱（`tempmail`）与单账号 IMAP（`imap`）**：
+   - 首次零配置即可用 `DisposableMailClient` 三通道公网临时邮快速验证；也可在「系统设置」填入单个自有 IMAP 账号一键测试连通并无损收码（`BODY.PEEK[]`）。
 
 ---
 

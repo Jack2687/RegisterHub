@@ -29,7 +29,10 @@ RegisterHub is an engineering-first automation framework designed to eliminate t
 ### Engineering Core Pillars
 
 - **Runtime Environment Parity**: Eliminates synthetic automation signatures via native Chrome runtime integration, strict prototype preservation (`[native code]`), and optional zero-`Runtime.enable` **`patchright`** auto-acceleration (gracefully falling back to Playwright when not installed).
-- **Zero-Dependency Web Workbench & Built-in AI Agent (`RegisterHub Lite`)**: Pure Python stdlib HTTP/SSE server (no Node.js or FastAPI required). Launch via `python main.py --web` or `run_web.bat` for 11 live views including Dashboard, Built-in AI Agent, Single-Site Runner, Accounts/Keys, Failure Snapshots, Adapter Workbench, Window Calibration, Utility Toolbox (Disposable Mail / TOTP / Luhn Cards), Doctor, and LLM Settings.
+- **Zero-Dependency Web Workbench & Autonomous Streaming AI Agent (`RegisterHub Lite`)**: Pure Python stdlib HTTP/SSE server (no Node.js or FastAPI required). Launch via `python main.py --web`, `run_web.bat` (Windows), or `./run_web.sh` (macOS/Linux):
+  - **Autonomous AI Agent**: Real 3-protocol SSE streaming (OpenAI Chat / Anthropic Messages / OpenAI Responses), live Prompt Cache / TTFT / tok/s telemetry, manual `/compact` & automatic 85% context compaction, 16 built-in tools, 5 editable Markdown engineering skills (`skills/*.md`), step-level adapter checkpoints & restore, persistent guard rules with approvals, follow-up queue, `/goal` loop, and streaming `/btw` side questions.
+  - **Built-in Mail Pool & Proxy Pool (Zero Docker / Zero Extra Deps)**: Local SQLite WAL + Windows DPAPI-encrypted pools supporting auto-detected bulk import for Outlook OAuth2 / iCloud links / IMAP mailboxes, static HTTP/HTTPS/SOCKS5 proxies, residential Sticky-Session gateways, and short-lived API extract sources with live health probing & IP purity scoring.
+  - **Complete Engineering Toolkit**: Single-thread runner, online AST-validated Adapter Code Editor, HAR-to-Protocol extractor, credential vault export (Bitwarden / CSV / JSON), cross-resolution window layout calibrator, and synthetic identity / Luhn card / TOTP 2FA / Tax-Phone-ID-Hardware utility toolbox.
 - **Algorithmic Vision Solver**: Built-in computer vision pipeline featuring dual-pass Canny edge detection and human-kinetic Bezier curve trajectory generation, executing offline with zero cloud API dependencies.
 - **CDP Bridge Architecture**: Native integration with enterprise fingerprint browsers (AdsPower, BitBrowser) and local Chrome instances, allowing seamless reuse of clean residential IPs and persistent user sessions.
 - **Agentic Automation Protocol**: Natively integrated with `AGENTS.md` and the built-in AI Agent workbench, supporting any OpenAI-compatible LLM as well as Cursor, Claude Code, Windsurf, and Gemini CLI.
@@ -50,11 +53,17 @@ RegisterHub/
 │   ├── solver.py          # OpenCV puzzle gap detector & Bezier trajectory planner
 │   ├── identity.py        # High-entropy synthetic persona & credential generator
 │   ├── mail_client.py     # Adaptive polling disposable mailbox client
-│   ├── imap_mail.py       # Zero-dependency stdlib single-account IMAP client
+│   ├── imap_mail.py       # Stdlib single-account IMAP & BuiltinPoolMailClient
+│   ├── mail_builtin.py    # Zero-Docker built-in mail pool (SQLite + DPAPI)
+│   ├── proxy_builtin.py   # Zero-dep built-in proxy pool (Static / Residential / API)
+│   ├── secrets.py         # Windows DPAPI credential protection & log redaction
+│   ├── ai_agent.py        # Pure-stdlib autonomous single-thread AI Agent (16 tools)
+│   ├── llm_client.py      # 3-protocol SSE streaming LLM client + cache/TTFT telemetry
 │   ├── ip_scorer.py       # Exit IP residential attribution & risk purity scorer
-│   ├── runner.py          # Deterministic task execution, snapshot logger & ledger writer
-│   ├── scaffold.py        # Automated adapter scaffolding (auto-wires tempmail / IMAP)
+│   ├── runner.py          # Deterministic task execution, builtin proxy resolution & ledger
+│   ├── scaffold.py        # Automated adapter scaffolding (builtin pool / tempmail / IMAP)
 │   └── exporter.py        # Bitwarden, 1Password, CSV & JSON credential exporter
+├── skills/                # 5 built-in editable AI Agent skill recipes (*.md)
 ├── config/
 │   └── window_geometry.json # Calibrated multi-window layout & zoom presets
 ├── docs/
@@ -178,16 +187,15 @@ The AI will precisely map and automate your verified human interaction chain, el
 
 ## Proxy & Email Verification Configuration
 
-Configure egress proxies and email verification directly in the Web Workbench **Settings** panel (atomically persisted to `config.json`), complete with 1-click live connectivity self-tests:
+Manage pools and egress strategies directly inside **Assets → Built-in Mail Pool**, **Proxies → Built-in Proxy Pool**, or **Settings** (persisted atomically to `config.json` and `results/*.db`):
 
-1. **Proxy Egress Modes**:
-   - Supports **Direct / System Proxy (`direct`)**, **Custom HTTP / SOCKS5 Proxy (`proxy`)** (including authenticated residential gateways), and **External Anti-Detect Browser CDP Bridge**;
-   - Verify latency and residential purity right from **Settings → Test Proxy** or the **IP Purity** view.
-2. **Default Public Disposable Mail (`tempmail`, Zero-Config)**:
-   - With `defaults.use_disposable_mail: true`, `DisposableMailClient` provisions temporary mailboxes and polls OTP codes automatically for rapid testing.
-3. **Single-Account Custom IMAP (`imap`, Recommended for Strict Targets)**:
-   - Switch to **Custom IMAP** in Settings and provide your Gmail / Outlook / QQ / 163 / custom-domain IMAP host, port (`993`), address, and app password, then click **Test IMAP Login**;
-   - Both `--scaffold` generated adapters and the built-in **AI Agent** automatically read `config.json` and switch to non-destructive `SingleImapMailClient` (`BODY.PEEK[]`) polling.
+1. **Built-in Proxy Pool (`builtin`, Recommended) & Custom Proxy**:
+   - Bulk-import static HTTP/HTTPS/SOCKS5 proxies, configure dynamic residential gateways (Smartproxy / IPRoyal / Oxylabs / Bright Data / custom Sticky Session templates), or attach short-lived API extract URLs—all encrypted locally via DPAPI with automatic credential masking.
+   - Also supports **Direct / System Proxy (`direct`)**, **Single Custom Proxy (`proxy`)**, and **External Anti-Detect Browser CDP Bridge**, plus real-time IP purity scoring.
+2. **Built-in Mail Pool (`builtin`, Recommended, Zero Docker)**:
+   - Paste mixed lines of **Outlook OAuth2 (3/4-column)**, **iCloud verification links**, or **Gmail/QQ/163/custom IMAP** accounts with masked dry-run preview, batch verification, inbox viewer with OTP extraction, and transactional lease/release.
+3. **Public Disposable Mail (`tempmail`) & Single-Account IMAP (`imap`)**:
+   - Out-of-the-box `DisposableMailClient` works with zero setup; single-account non-destructive IMAP (`BODY.PEEK[]`) is available directly in Settings.
 
 ---
 

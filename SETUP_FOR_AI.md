@@ -36,8 +36,9 @@ flowchart LR
 2. **代理环境嗅探**：
    - 快速探测常见本地代理端口（如 `127.0.0.1:7897` Clash/Mihomo、`:10809` v2rayN）；
    - 若任一端口处于监听状态，记录该地址备用；若无本地代理，检查系统环境变量 `HTTP_PROXY` / `HTTPS_PROXY`；
-3. **网络与临时邮箱连通性**：
-   - 内置 `core.mail_client.DisposableMailClient` 会自动调度 `mail.tm` / `tempmail.io` / `guerrillamail` 三大公网临时邮箱服务，无需本地 Docker，无需任何密钥。
+3. **网络与多模式邮箱接码**：
+   - 默认内置 `core.mail_client.DisposableMailClient`（`mail.tm` / `tempmail.io` / `guerrillamail` 三通道临时邮），零配置即可跑通；
+   - 亦自带零 Docker **内置邮箱池**（`results/builtin_mail.db`，支持 Outlook OAuth2 / iCloud 链接 / IMAP 批量导入与收件箱读信）与 **内置代理池**（`results/builtin_proxies.db`，支持静态代理 / 住宅网关 / API 提取源），可通过 Web 工作台（`http://127.0.0.1:18886`）或 Agent 工具直接管理。
 
 ---
 

@@ -47,6 +47,8 @@ ACCOUNTS_FILE = RESULTS_DIR / "accounts.txt"
 FAILED_FILE = RESULTS_DIR / "failed.txt"
 CONFIG_FILE = ROOT_DIR / "config.json"
 AGENT_SESSIONS_DIR = RESULTS_DIR / "agent_sessions"
+AGENT_SKILLS_DIR = ROOT_DIR / "skills"
+_SAFE_SKILL_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 
 MAX_STEPS_PER_TURN = 16
 RUN_ADAPTER_TIMEOUT_S = 120
@@ -4361,6 +4363,9 @@ class SingleAgentManager:
         max_steps = max(base_max_steps, int(goal_init.get("max_steps") or _GOAL_DEFAULT_MAX_STEPS)) if goal_init else base_max_steps
         eff_system_prompt = str(saved_cfg.get("system_prompt") or AGENT_SYSTEM_PROMPT) if saved_cfg else AGENT_SYSTEM_PROMPT
         eff_cfg = load_agent_config()
+        skills_block = _render_enabled_skills_prompt(eff_cfg.get("enabled_skills") or [])
+        if skills_block:
+            eff_system_prompt = f"{eff_system_prompt.rstrip()}\n\n{skills_block}"
         allowed_tools = set(eff_cfg.get("enabled_tools") or [t["function"]["name"] for t in TOOL_SCHEMAS])
         eff_tools = [t for t in TOOL_SCHEMAS if t["function"]["name"] in allowed_tools]
         default_cfg_pid = str(saved_cfg.get("llm_profile_id") or "").strip() if saved_cfg else ""
@@ -4790,12 +4795,125 @@ class SingleAgentManager:
 _AGENT_CFG_LOCK = threading.Lock()
 
 
+def _parse_skill_meta(fp: Path) -> Tuple[str, str]:
+    """Extract skill description from YAML frontmatter or first non-heading line."""
+    text = fp.read_text(encoding="utf-8", errors="replace")
+    desc = ""
+    if text.startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) >= 3:
+            for ln in parts[1].splitlines():
+                if ln.strip().lower().startswith("description:"):
+                    desc = ln.split(":", 1)[1].strip().strip("\"'")
+                    break
+    if not desc:
+        for ln in text.splitlines():
+            s = ln.strip().lstrip("#").strip()
+            if s and not s.startswith("---"):
+                desc = s[:140]
+                break
+    return fp.stem, desc or "内置工程技能规范"
+
+
+def list_skills(enabled_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """List pure-Community Markdown skill recipes under skills/*.md."""
+    if not AGENT_SKILLS_DIR.is_dir():
+        return []
+    enabled_set = set(enabled_names) if enabled_names is not None else None
+    out: List[Dict[str, Any]] = []
+    for fp in sorted(AGENT_SKILLS_DIR.glob("*.md")):
+        if not _SAFE_SKILL_NAME_RE.fullmatch(fp.stem):
+            continue
+        name, desc = _parse_skill_meta(fp)
+        size_kb = round(fp.stat().st_size / 1024.0, 1)
+        out.append({
+            "name": name,
+            "size_kb": max(0.1, size_kb),
+            "description": desc,
+            "path": f"skills/{fp.name}",
+            "enabled": True if enabled_set is None else (name in enabled_set),
+        })
+    return out
+
+
+def read_skill(skill_name: str) -> Dict[str, Any]:
+    raw = str(skill_name or "").strip().removesuffix(".md")
+    if not _SAFE_SKILL_NAME_RE.fullmatch(raw):
+        raise ValueError(f"非法技能名称: {skill_name!r}")
+    root = AGENT_SKILLS_DIR.resolve()
+    fp = (root / f"{raw}.md").resolve()
+    if fp.parent != root or not fp.is_file():
+        raise KeyError(f"未找到技能文件: {raw}")
+    content = fp.read_text(encoding="utf-8", errors="replace")
+    _, desc = _parse_skill_meta(fp)
+    return {
+        "ok": True,
+        "name": raw,
+        "path": f"skills/{fp.name}",
+        "description": desc,
+        "size_kb": max(0.1, round(len(content.encode("utf-8")) / 1024.0, 1)),
+        "content": content,
+    }
+
+
+def write_skill(skill_name: str, content: str) -> Dict[str, Any]:
+    raw = str(skill_name or "").strip().removesuffix(".md")
+    if not _SAFE_SKILL_NAME_RE.fullmatch(raw):
+        raise ValueError(f"非法技能名称: {skill_name!r}")
+    text = str(content or "")
+    if not text.strip() or len(text) > 200_000:
+        raise ValueError("技能内容不能为空且不能超过 200KB")
+    AGENT_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+    root = AGENT_SKILLS_DIR.resolve()
+    fp = (root / f"{raw}.md").resolve()
+    if fp.parent != root:
+        raise ValueError("非法技能路径")
+    tmp = fp.with_suffix(".md.tmp")
+    tmp.write_text(text.rstrip() + "\n", encoding="utf-8")
+    os.replace(tmp, fp)
+    _, desc = _parse_skill_meta(fp)
+    return {
+        "ok": True,
+        "name": raw,
+        "path": f"skills/{fp.name}",
+        "description": desc,
+        "size_kb": max(0.1, round(fp.stat().st_size / 1024.0, 1)),
+    }
+
+
+def _render_enabled_skills_prompt(enabled_skills: List[str]) -> str:
+    if not enabled_skills or not AGENT_SKILLS_DIR.is_dir():
+        return ""
+    blocks: List[str] = []
+    budget = 6000
+    for name in enabled_skills[:12]:
+        if not _SAFE_SKILL_NAME_RE.fullmatch(str(name or "")):
+            continue
+        fp = AGENT_SKILLS_DIR / f"{name}.md"
+        if not fp.is_file():
+            continue
+        body = fp.read_text(encoding="utf-8", errors="replace").strip()
+        if body.startswith("---"):
+            parts = body.split("---", 2)
+            if len(parts) >= 3:
+                body = parts[2].strip()
+        chunk = f"### Skill: {name}\n{body[:1400]}"
+        if len(chunk) > budget:
+            break
+        blocks.append(chunk)
+        budget -= len(chunk)
+    if not blocks:
+        return ""
+    return "## 已启用工程技能规范\n\n" + "\n\n".join(blocks)
+
+
 def _agent_config_file() -> Path:
     return RESULTS_DIR / "agent_config.json"
 
 
 def _default_agent_config() -> Dict[str, Any]:
     all_names = [t["function"]["name"] for t in TOOL_SCHEMAS]
+    all_skills = [s["name"] for s in list_skills()]
     return {
         "name": "RegisterHub 开源单线程 Agent",
         "description": "纯 Python 标准库驱动的自主注册工程师 Agent（单线程安全模式，支持流式输出、真压缩与全套诊断工具）",
@@ -4804,7 +4922,8 @@ def _default_agent_config() -> Dict[str, Any]:
         "system_prompt": AGENT_SYSTEM_PROMPT,
         "enabled_tools": all_names,
         "known_tools": all_names,
-        "enabled_skills": [],
+        "enabled_skills": all_skills,
+        "known_skills": all_skills,
     }
 
 
@@ -4829,6 +4948,8 @@ def load_agent_config() -> Dict[str, Any]:
         return base
     all_tool_names = [t["function"]["name"] for t in TOOL_SCHEMAS]
     valid_tool_names = set(all_tool_names)
+    all_skill_names = [s["name"] for s in list_skills()]
+    valid_skill_names = set(all_skill_names)
     out = dict(base)
     if isinstance(saved.get("name"), str) and saved["name"].strip():
         out["name"] = saved["name"].strip()[:80]
@@ -4853,7 +4974,15 @@ def load_agent_config() -> Dict[str, Any]:
             if tname not in known and tname not in enabled:
                 enabled.append(tname)
         out["enabled_tools"] = enabled
+    if isinstance(saved.get("enabled_skills"), list):
+        en_sk = [str(x) for x in saved["enabled_skills"] if str(x) in valid_skill_names]
+        known_sk = set(str(x) for x in (saved.get("known_skills") or []))
+        for sname in all_skill_names:
+            if sname not in known_sk and sname not in en_sk:
+                en_sk.append(sname)
+        out["enabled_skills"] = en_sk
     out["known_tools"] = all_tool_names
+    out["known_skills"] = all_skill_names
     return out
 
 
@@ -4862,6 +4991,8 @@ def save_agent_config(updates: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError("Agent 配置必须为 JSON 对象")
     all_tool_names = [t["function"]["name"] for t in TOOL_SCHEMAS]
     valid_tool_names = set(all_tool_names)
+    all_skill_names = [s["name"] for s in list_skills()]
+    valid_skill_names = set(all_skill_names)
     with _AGENT_CFG_LOCK:
         cur = load_agent_config()
         if "name" in updates and isinstance(updates.get("name"), str) and updates["name"].strip():
@@ -4880,7 +5011,10 @@ def save_agent_config(updates: Dict[str, Any]) -> Dict[str, Any]:
             cur["system_prompt"] = updates["system_prompt"] or AGENT_SYSTEM_PROMPT
         if "enabled_tools" in updates and isinstance(updates.get("enabled_tools"), list):
             cur["enabled_tools"] = [str(x) for x in updates["enabled_tools"] if str(x) in valid_tool_names]
+        if "enabled_skills" in updates and isinstance(updates.get("enabled_skills"), list):
+            cur["enabled_skills"] = [str(x) for x in updates["enabled_skills"] if str(x) in valid_skill_names]
         cur["known_tools"] = all_tool_names
+        cur["known_skills"] = all_skill_names
         fp = _agent_config_file()
         fp.parent.mkdir(parents=True, exist_ok=True)
         tmp = fp.with_suffix(".json.tmp")

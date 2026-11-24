@@ -107,13 +107,13 @@ COMMUNITY_META: Dict[str, Any] = {
         "notify": False,
         "pro_sites": True,
         "pro_adapters": True,
-        "adapter_editor": False,
+        "adapter_editor": True,
         "scheduler": False,
         "proxy_import": True,
         "accounts": True,
         "accounts_delete": True,
         "tools": True,
-        "tools_extras": False,
+        "tools_extras": True,
         "password_change": False,
         "ai_agent": True,
         "builtin_mail": True,
@@ -809,15 +809,28 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
         return True
 
     if path == "/api/agent/config":
-        from core.ai_agent import get_available_tools_meta, load_agent_config
+        from core.ai_agent import get_available_tools_meta, list_skills, load_agent_config
 
+        acfg = load_agent_config()
         handler._send_json({
-            "agent": load_agent_config(),
+            "agent": acfg,
             "available_tools": get_available_tools_meta(),
-            "skills": [],
+            "skills": list_skills(acfg.get("enabled_skills")),
             "guard_rules": srv.agent_manager.list_guard_rules(),
             "approvals": srv.agent_manager.list_approvals(),
         })
+        return True
+
+    m_ag_skill = re.fullmatch(r"/api/agent/skills/([A-Za-z0-9_-]+)", path)
+    if m_ag_skill:
+        from core.ai_agent import read_skill
+
+        try:
+            handler._send_json(read_skill(m_ag_skill.group(1)))
+        except ValueError as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
+        except KeyError as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=404)
         return True
 
     m_ag_cps = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/checkpoints", path)
@@ -1062,29 +1075,282 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
     if path == "/api/tools/profile":
         from core.identity import generate_identity
 
-        loc = str(body.get("country") or "US").strip().upper()
-        if loc not in ("US", "UK", "DE"):
-            loc = "US"
-        ident = generate_identity(locale=loc, use_disposable=False)
-        first = ident.get("first_name") or str(ident.get("full_name", "Alex Morgan")).split(" ")[0]
-        last = ident.get("last_name") or (str(ident.get("full_name", "Alex Morgan")).split(" ")[-1])
+        us_states_map: Dict[str, Tuple[str, str, str]] = {
+            "DE": ("Delaware", "Wilmington", "19801"),
+            "OR": ("Oregon", "Portland", "97204"),
+            "MT": ("Montana", "Bozeman", "59715"),
+            "NH": ("New Hampshire", "Manchester", "03101"),
+            "AK": ("Alaska", "Anchorage", "99501"),
+            "CA": ("California", "San Francisco", "94105"),
+            "NY": ("New York", "New York", "10001"),
+            "TX": ("Texas", "Austin", "78701"),
+            "WA": ("Washington", "Seattle", "98101"),
+            "FL": ("Florida", "Miami", "33131"),
+            "CO": ("Colorado", "Denver", "80202"),
+            "MA": ("Massachusetts", "Boston", "02110"),
+        }
+        country_geo: Dict[str, Tuple[str, str, str, str, str, str]] = {
+            "US": ("United States", "Delaware", "DE", "Wilmington", "19801", "+1"),
+            "UK": ("United Kingdom", "Greater London", "GL", "London", "EC1A 1BB", "+44"),
+            "JP": ("Japan", "Tokyo", "13", "Shibuya-ku", "150-0002", "+81"),
+            "DE": ("Germany", "Berlin", "BE", "Berlin", "10115", "+49"),
+            "CA": ("Canada", "Ontario", "ON", "Toronto", "M5V 2T6", "+1"),
+            "SG": ("Singapore", "Central", "SG", "Singapore", "048619", "+65"),
+            "AU": ("Australia", "New South Wales", "NSW", "Sydney", "2000", "+61"),
+            "FR": ("France", "Ile-de-France", "IDF", "Paris", "75008", "+33"),
+            "HK": ("Hong Kong", "Hong Kong Island", "HK", "Central", "999077", "+852"),
+        }
+        streets = [
+            "Market St", "Pine Ave", "Cedar Ln", "Oakridge Blvd", "Harbor View Rd",
+            "Parkside Way", "Summit Dr", "Linden St", "Meadowbrook Ave", "Riverside Ter",
+        ]
+        orgs = [
+            "Northstar Labs LLC", "CedarWorks Studio", "Harborline Systems", "Summit Field Digital",
+            "Maplecraft Research", "Quartzline Interactive", "CivicGrid Consulting",
+        ]
+        roles = [
+            "Software Engineer", "Product Designer", "Data Analyst", "DevOps Engineer",
+            "Frontend Architect", "QA Automation Lead", "Solutions Consultant",
+        ]
+        req_country = str(body.get("country") or "US").strip().upper()
+        if req_country not in country_geo:
+            req_country = "US"
+        req_state = str(body.get("state") or "").strip().upper()
+        cnt = _parse_int_param(body.get("count"), 4, 1, 10)
+        custom_email = str(body.get("email") or "").strip()
+        ident_loc = req_country if req_country in ("US", "UK", "DE") else "US"
+        c_name, def_state, def_st_code, def_city, def_zip, dial = country_geo[req_country]
+
+        profiles: List[Dict[str, Any]] = []
+        for _ in range(cnt):
+            ident = generate_identity(locale=ident_loc, use_disposable=False)
+            first = str(ident.get("first_name") or "Alex")
+            last = str(ident.get("last_name") or "Morgan")
+            st_name, city_name, zip_code, st_code = def_state, def_city, def_zip, def_st_code
+            if req_country == "US":
+                chosen_st = req_state if req_state in us_states_map else random.choice(list(us_states_map.keys()))
+                st_name, city_name, zip_code = us_states_map[chosen_st]
+                st_code = chosen_st
+            elif ident_loc == req_country:
+                city_name = str(ident.get("city") or def_city)
+                st_code = str(ident.get("state") or def_st_code)
+                zip_code = str(ident.get("postal_code") or def_zip)
+            num_a = random.randint(201, 899)
+            num_b = random.randint(200, 999)
+            num_c = random.randint(1000, 9999)
+            phone_str = f"{dial} ({num_a}) {num_b}-{num_c}" if dial == "+1" else f"{dial} {num_a}{num_b}{num_c}"
+            profiles.append({
+                "first_name": first,
+                "last_name": last,
+                "full_name": f"{first} {last}",
+                "country": c_name,
+                "country_code": req_country,
+                "state": st_name,
+                "state_code": st_code,
+                "city": city_name,
+                "address": f"{random.randint(100, 9899)} {random.choice(streets)}",
+                "address_line2": f"Suite {random.randint(100, 880)}" if random.random() < 0.45 else "",
+                "zip_code": zip_code,
+                "phone": phone_str,
+                "email": custom_email or str(ident.get("email") or ""),
+                "birthday": str(ident.get("birth_date") or "1995-06-14"),
+                "organization": random.choice(orgs),
+                "job_title": random.choice(roles),
+            })
         handler._send_json({
-            "first_name": first,
-            "last_name": last,
-            "full_name": ident.get("full_name") or f"{first} {last}",
-            "country": loc,
-            "country_code": loc,
-            "state": ident.get("state") or "California",
-            "state_code": ident.get("state") or "CA",
-            "city": ident.get("city") or "Austin",
-            "address": ident.get("address") or f"{random.randint(100, 999)} Innovation Ave",
-            "zip_code": ident.get("postal_code") or ident.get("zip_code") or "78704",
-            "phone": ident.get("phone") or "+1 (512) 555-0148",
-            "email": ident.get("email") or "",
-            "birthday": ident.get("birth_date") or "1995-06-14",
-            "organization": "Independent Developer",
-            "job_title": "Software Engineer",
+            "ok": True,
+            "count": len(profiles),
+            "us_states": list(us_states_map.keys()),
+            "profiles": profiles,
+            **profiles[0],
         })
+        return True
+
+    if path == "/api/tools/extras":
+        kind = str(body.get("kind") or "tax").strip().lower()
+        cc = str(body.get("country") or "US").strip().upper()
+        st = str(body.get("state") or "DE").strip().upper()
+        platform = str(body.get("platform") or "win_nvidia").strip().lower()
+        if kind not in ("tax", "phone", "idcard", "hardware"):
+            handler._send_json({"ok": False, "error": f"不支持的生成类型: {kind}"}, status=400)
+            return True
+
+        def _digits(n: int) -> str:
+            return "".join(str(random.randint(0, 9)) for _ in range(n))
+
+        def _letters(n: int) -> str:
+            return "".join(random.choice("ABCDEFGHJKLMNPRSTUVWXYZ") for _ in range(n))
+
+        data: Dict[str, Any]
+        if kind == "tax":
+            duns = f"{_digits(2)}-{_digits(3)}-{_digits(4)}"
+            if cc == "US":
+                p1, p2 = f"{random.randint(10, 98)}", _digits(7)
+                data = {
+                    "country_code": "US",
+                    "tax_type": "US EIN (Federal Employer ID)",
+                    "tax_id": f"{p1}{p2}",
+                    "tax_id_formatted": f"{p1}-{p2}",
+                    "duns_number": duns,
+                    "company_reg_number": f"{st or 'DE'}-{_digits(7)}",
+                    "vat_number": "",
+                }
+            elif cc in ("UK", "DE", "FR"):
+                num9 = _digits(9)
+                vat_prefix = "GB" if cc == "UK" else cc
+                data = {
+                    "country_code": cc,
+                    "tax_type": f"{vat_prefix} VAT / Tax ID",
+                    "tax_id": f"{vat_prefix}{num9}",
+                    "tax_id_formatted": f"{vat_prefix} {num9[:3]} {num9[3:7]} {num9[7:]}",
+                    "duns_number": duns,
+                    "company_reg_number": f"{vat_prefix}{_digits(8)}",
+                    "vat_number": f"{vat_prefix}{num9}",
+                }
+            else:
+                num10 = _digits(10)
+                data = {
+                    "country_code": cc,
+                    "tax_type": f"{cc} Business Tax ID",
+                    "tax_id": f"{cc}{num10}",
+                    "tax_id_formatted": f"{cc}-{num10[:4]}-{num10[4:]}",
+                    "duns_number": duns,
+                    "company_reg_number": f"REG-{cc}-{_digits(7)}",
+                    "vat_number": f"{cc}{_digits(9)}",
+                }
+        elif kind == "phone":
+            phone_meta = {
+                "US": ("United States", "+1", "AT&T / T-Mobile Mobile"),
+                "CA": ("Canada", "+1", "Rogers / Bell Mobile"),
+                "UK": ("United Kingdom", "+44", "EE / Vodafone UK"),
+                "DE": ("Germany", "+49", "Telekom / Vodafone DE"),
+                "JP": ("Japan", "+81", "NTT Docomo / SoftBank"),
+                "SG": ("Singapore", "+65", "Singtel / StarHub"),
+                "AU": ("Australia", "+61", "Telstra / Optus"),
+                "FR": ("France", "+33", "Orange / SFR"),
+                "HK": ("Hong Kong", "+852", "CSL / SmarTone"),
+            }
+            cname, dial, carrier = phone_meta.get(cc, ("United States", "+1", "Mobile Carrier"))
+            if dial == "+1":
+                a, b, c = f"{random.randint(201, 899)}", f"{random.randint(200, 999)}", _digits(4)
+                nat = f"{a}{b}{c}"
+                fmt = f"({a}) {b}-{c}"
+            elif dial in ("+65", "+852"):
+                nat = f"{random.choice(['8', '9'])}{_digits(7)}"
+                fmt = f"{nat[:4]} {nat[4:]}"
+            else:
+                nat = f"{random.choice(['7', '6', '4'])}{_digits(9)}"
+                fmt = f"{nat[:3]} {nat[3:6]} {nat[6:]}"
+            data = {
+                "country_name": cname,
+                "country_code": dial,
+                "e164": f"{dial}{nat}",
+                "national_number": nat,
+                "formatted_national": fmt,
+                "carrier_hint": carrier,
+            }
+        elif kind == "idcard":
+            if cc == "US":
+                g1, g2, g3 = f"{random.randint(100, 665)}", f"{random.randint(10, 99)}", f"{random.randint(1000, 9999)}"
+                data = {
+                    "country_code": "US",
+                    "state_code": st or "DE",
+                    "id_type": "US Synthetic ID (Mock)",
+                    "id_number": f"{g1}{g2}{g3}",
+                    "id_number_formatted": f"{g1}-{g2}-{g3}",
+                    "passport_number": f"A{_digits(8)}",
+                    "driver_license": f"{st or 'DE'}-{_letters(1)}{_digits(7)}",
+                }
+            else:
+                raw_id = f"{cc}{_letters(2)}{_digits(8)}"
+                data = {
+                    "country_code": cc,
+                    "state_code": "",
+                    "id_type": f"{cc} National ID (Mock)",
+                    "id_number": raw_id,
+                    "id_number_formatted": f"{raw_id[:4]}-{raw_id[4:8]}-{raw_id[8:]}",
+                    "passport_number": f"{_letters(2)}{_digits(7)}",
+                    "driver_license": f"DL-{cc}-{_digits(8)}",
+                }
+        else:
+            hw_presets = {
+                "win_nvidia": {
+                    "os_platform": "Win32",
+                    "cpu_cores": random.choice([8, 12, 16]),
+                    "device_memory_gb": random.choice([16, 32]),
+                    "screen_width": random.choice([1920, 2560]),
+                    "screen_height": random.choice([1080, 1440]),
+                    "device_pixel_ratio": random.choice([1, 1.25, 1.5]),
+                    "timezone_id": "America/New_York",
+                    "locale": "en-US",
+                    "webgl_vendor": "Google Inc. (NVIDIA)",
+                    "webgl_renderer": random.choice([
+                        "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                        "ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                    ]),
+                    "audio_sample_rate": 48000,
+                },
+                "mac_apple_silicon": {
+                    "os_platform": "MacIntel",
+                    "cpu_cores": random.choice([8, 10, 12]),
+                    "device_memory_gb": random.choice([16, 24, 32]),
+                    "screen_width": random.choice([1512, 1728, 2560]),
+                    "screen_height": random.choice([982, 1117, 1440]),
+                    "device_pixel_ratio": 2,
+                    "timezone_id": "America/Los_Angeles",
+                    "locale": "en-US",
+                    "webgl_vendor": "Apple Inc.",
+                    "webgl_renderer": random.choice(["Apple M2 Pro", "Apple M3", "Apple M3 Pro"]),
+                    "audio_sample_rate": 48000,
+                },
+                "win_intel": {
+                    "os_platform": "Win32",
+                    "cpu_cores": random.choice([8, 12]),
+                    "device_memory_gb": random.choice([8, 16]),
+                    "screen_width": 1920,
+                    "screen_height": 1080,
+                    "device_pixel_ratio": random.choice([1, 1.25]),
+                    "timezone_id": "America/Chicago",
+                    "locale": "en-US",
+                    "webgl_vendor": "Google Inc. (Intel)",
+                    "webgl_renderer": "ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)",
+                    "audio_sample_rate": 48000,
+                },
+            }
+            data = hw_presets.get(platform, hw_presets["win_nvidia"])
+        handler._send_json({"ok": True, "kind": kind, "data": data})
+        return True
+
+    m_st_code_post = re.fullmatch(r"/api/studio/adapters/([A-Za-z0-9_-]+)/code", path)
+    if m_st_code_post:
+        from core.ai_agent import tool_write_adapter
+
+        name = m_st_code_post.group(1)
+        code = str(body.get("code") or "")
+        if not code.strip():
+            handler._send_json({"ok": False, "error": "源码内容不能为空"}, status=400)
+            return True
+        res = tool_write_adapter(name, code)
+        if not res.get("ok"):
+            handler._send_json({"ok": False, "error": res.get("error") or "保存失败"}, status=400)
+            return True
+        handler._send_json({
+            "ok": True,
+            "name": res["name"],
+            "file": res["file"],
+            "lines": int(res.get("lines") or len(code.splitlines())),
+        })
+        return True
+
+    m_ag_skill_post = re.fullmatch(r"/api/agent/skills/([A-Za-z0-9_-]+)", path)
+    if m_ag_skill_post:
+        from core.ai_agent import write_skill
+
+        try:
+            res = write_skill(m_ag_skill_post.group(1), str(body.get("content") or ""))
+            handler._send_json(res)
+        except ValueError as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
         return True
 
     if path == "/api/studio/har":
@@ -1911,7 +2177,7 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
         return True
 
     if path == "/api/agent/config":
-        from core.ai_agent import get_available_tools_meta, save_agent_config
+        from core.ai_agent import get_available_tools_meta, list_skills, save_agent_config
 
         try:
             saved = save_agent_config(body)
@@ -1919,6 +2185,7 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
                 "ok": True,
                 "agent": saved,
                 "available_tools": get_available_tools_meta(),
+                "skills": list_skills(saved.get("enabled_skills")),
                 "guard_rules": srv.agent_manager.list_guard_rules(),
                 "approvals": srv.agent_manager.list_approvals(),
             })
