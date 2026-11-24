@@ -1131,17 +1131,26 @@ class BuiltinProxyStore:
         ids: list[int] | None = None,
         *,
         target_url: str = "",
-        limit: int = 20,
-        max_workers: int = 6,
+        limit: int = 50,
+        max_workers: int = 10,
     ) -> dict[str, Any]:
         self.purge_expired_entries()
+        cap = max(1, min(int(limit), 200))
         if ids:
-            targets = [int(i) for i in ids][:limit]
+            seen_ids: set[int] = set()
+            targets = []
+            for raw_id in ids:
+                eid = int(raw_id)
+                if eid not in seen_ids:
+                    seen_ids.add(eid)
+                    targets.append(eid)
+                if len(targets) >= 200:
+                    break
         else:
             with self._connect(write=False) as conn:
                 rows = conn.execute(
                     "SELECT id FROM proxy_entries WHERE enabled=1 ORDER BY last_checked_at ASC LIMIT ?",
-                    (max(1, min(limit, 50)),),
+                    (cap,),
                 ).fetchall()
             targets = [int(r["id"]) for r in rows]
 

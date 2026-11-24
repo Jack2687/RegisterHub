@@ -139,10 +139,10 @@ def score_ip(
     clean_proxy = (proxy_url or "").strip()
     clean_target = _validate_http_url(target_url) if (target_url or "").strip() else ""
     t0 = time.perf_counter()
-    intel_timeout = min(float(timeout), 4.0)
+    intel_timeout = min(float(timeout), 6.0)
 
     # Step 1 & 2: Query api.ipapi.is (returns exit IP + full intel in 1 RTT) and ip-api.com concurrently
-    # Fallback to ipify ONLY if api.ipapi.is fails and exit IP is still unknown.
+    # Fallback to ipify ONLY if exit IP is still unknown.
     meta_proxy = clean_proxy if not clean_ip else ""
     ipcom_fields = "status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,mobile,proxy,hosting,query"
     q_ipapi = f"https://api.ipapi.is/?q={clean_ip}" if clean_ip else "https://api.ipapi.is/"
@@ -153,6 +153,10 @@ def score_ip(
         f_d2 = ex.submit(_fetch_json, q_ipcom, meta_proxy, intel_timeout)
         d1 = f_d1.result()
         d2 = f_d2.result()
+
+    # api.ipapi.is 限流或报错时返回 {"error": "..."}，必须置空，防止跳过兜底或误判成功
+    if isinstance(d1, dict) and (d1.get("error") or (not clean_ip and not d1.get("ip"))):
+        d1 = None
 
     if d2 and d2.get("status") != "success":
         d2 = None
@@ -166,7 +170,7 @@ def score_ip(
         elif d2 and d2.get("query"):
             clean_ip = str(d2["query"]).strip()
 
-    if not clean_ip and not d1:
+    if not clean_ip:
         ip_resp = _fetch_json("https://api.ipify.org?format=json", proxy_url=clean_proxy, timeout=intel_timeout)
         if ip_resp and ip_resp.get("ip"):
             clean_ip = str(ip_resp["ip"]).strip()
@@ -175,7 +179,7 @@ def score_ip(
                 if d2 and d2.get("status") != "success":
                     d2 = None
 
-    if not clean_ip and not d1 and not d2:
+    if not clean_ip:
         return {
             "ok": False,
             "ip": "",
@@ -189,19 +193,42 @@ def score_ip(
             "signals": {},
         }
 
-    # Step 3: Merge structured signals
-    loc1 = (d1.get("location") or {}) if isinstance(d1, dict) else {}
-    asn1 = (d1.get("asn") or {}) if isinstance(d1, dict) else {}
-    comp1 = (d1.get("company") or {}) if isinstance(d1, dict) else {}
+    # Step 3: Merge structured signals（同时兼容 api.ipapi.is 嵌套 dict 与扁平 str 两种响应格式）
+    raw_loc = d1.get("location") if isinstance(d1, dict) else None
+    raw_asn = d1.get("asn") if isinstance(d1, dict) else None
+    raw_comp = d1.get("company") if isinstance(d1, dict) else None
+    loc1 = raw_loc if isinstance(raw_loc, dict) else {}
+    asn1 = raw_asn if isinstance(raw_asn, dict) else {}
+    comp1 = raw_comp if isinstance(raw_comp, dict) else {}
 
-    country = str(loc1.get("country") or (d2 or {}).get("country") or "")
-    country_code = str(loc1.get("country_code") or (d2 or {}).get("countryCode") or "")
-    region = str(loc1.get("state") or (d2 or {}).get("regionName") or "")
-    city = str(loc1.get("city") or (d2 or {}).get("city") or "")
-    timezone = str(loc1.get("timezone") or (d2 or {}).get("timezone") or "")
-    isp = str(comp1.get("name") or asn1.get("org") or (d2 or {}).get("isp") or "")
-    org = str(asn1.get("org") or (d2 or {}).get("org") or isp)
-    asn_str = str(f"AS{asn1['asn']}" if asn1.get("asn") else ((d2 or {}).get("as") or "").split(" ")[0])
+    flat_country = str(d1.get("country") or "").strip() if isinstance(d1, dict) and isinstance(d1.get("country"), str) else ""
+    flat_region = str(d1.get("region") or "").strip() if isinstance(d1, dict) and isinstance(d1.get("region"), str) else ""
+    flat_city = str(d1.get("city") or "").strip() if isinstance(d1, dict) and isinstance(d1.get("city"), str) else ""
+    flat_tz = str(d1.get("timezone") or "").strip() if isinstance(d1, dict) and isinstance(d1.get("timezone"), str) else ""
+    flat_comp = raw_comp.strip() if isinstance(raw_comp, str) else ""
+    flat_asn_num = ""
+    flat_asn_org = ""
+    if isinstance(raw_asn, str) and raw_asn.strip():
+        asn_parts = raw_asn.strip().split(" ", 1)
+        flat_asn_num = asn_parts[0]
+        flat_asn_org = asn_parts[1].strip() if len(asn_parts) > 1 else ""
+
+    country = str(loc1.get("country") or (d2 or {}).get("country") or flat_country or "")
+    country_code = str(
+        loc1.get("country_code")
+        or (d2 or {}).get("countryCode")
+        or (flat_country if len(flat_country) == 2 and flat_country.isalpha() else "")
+    )
+    region = str(loc1.get("state") or (d2 or {}).get("regionName") or flat_region or "")
+    city = str(loc1.get("city") or (d2 or {}).get("city") or flat_city or "")
+    timezone = str(loc1.get("timezone") or (d2 or {}).get("timezone") or flat_tz or "")
+    isp = str(comp1.get("name") or asn1.get("org") or (d2 or {}).get("isp") or flat_comp or flat_asn_org or "")
+    org = str(asn1.get("org") or (d2 or {}).get("org") or flat_asn_org or isp)
+    asn_str = str(
+        f"AS{asn1['asn']}"
+        if asn1.get("asn")
+        else (((d2 or {}).get("as") or "").split(" ")[0] or flat_asn_num)
+    )
 
     is_datacenter = bool((d1 or {}).get("is_datacenter") or (d2 or {}).get("hosting") or str(comp1.get("type") or "").lower() == "hosting")
     is_mobile = bool((d1 or {}).get("is_mobile") or (d2 or {}).get("mobile"))

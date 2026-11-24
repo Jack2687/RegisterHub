@@ -1876,8 +1876,8 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
     if path == "/api/mail/builtin/verify":
         store = _get_builtin_mail_store(srv)
         emails = body.get("emails") if isinstance(body.get("emails"), list) else []
-        clean_emails = [str(e) for e in emails[:100] if str(e or "").strip()]
-        lim = _parse_int_param(body.get("limit"), 30, 1, 100)
+        clean_emails = [str(e) for e in emails[:200] if str(e or "").strip()]
+        lim = _parse_int_param(body.get("limit"), 50, 1, 200)
         handler._send_json(store.verify_batch(emails=clean_emails or None, limit=lim))
         return True
 
@@ -2042,12 +2042,12 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
                 return True
         raw_ids = body.get("ids") if isinstance(body.get("ids"), list) else []
         clean_ids: List[int] = []
-        for x in raw_ids[:50]:
+        for x in raw_ids[:200]:
             try:
                 clean_ids.append(int(x))
             except Exception:
                 pass
-        lim = _parse_int_param(body.get("limit"), 20, 1, 50)
+        lim = _parse_int_param(body.get("limit"), 50, 1, 200)
         store = _get_builtin_proxy_store(srv)
         handler._send_json(store.probe_batch(ids=clean_ids or None, target_url=target_url, limit=lim))
         return True

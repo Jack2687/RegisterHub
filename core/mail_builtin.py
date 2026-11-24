@@ -1631,9 +1631,18 @@ class BuiltinMailStore:
             prev = str(row["status"] or "unknown")
             return _commit_status(prev, str(row["protocol"] or "unknown"), f"IMAP XOAUTH2 探活异常: {e2}")
 
-    def verify_batch(self, emails: list[str] | None = None, *, limit: int = 30, max_workers: int = 6) -> dict[str, Any]:
+    def verify_batch(self, emails: list[str] | None = None, *, limit: int = 50, max_workers: int = 8) -> dict[str, Any]:
+        cap = max(1, min(int(limit), 200))
         if emails:
-            targets = [e.strip().lower() for e in emails if e and e.strip()][:limit]
+            seen_em: set[str] = set()
+            targets = []
+            for e in emails:
+                em = (e or "").strip().lower()
+                if em and em not in seen_em:
+                    seen_em.add(em)
+                    targets.append(em)
+                if len(targets) >= 200:
+                    break
         else:
             with self._connect(write=False) as conn:
                 rows = conn.execute(
@@ -1643,7 +1652,7 @@ class BuiltinMailStore:
                     ORDER BY CASE status WHEN 'unknown' THEN 0 ELSE 1 END, last_checked_at ASC
                     LIMIT ?
                     """,
-                    (max(1, min(limit, 100)),),
+                    (cap,),
                 ).fetchall()
             targets = [str(r["email"]) for r in rows]
 
