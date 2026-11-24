@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from core import llm_client
+from core import llm_client, llm_profiles
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 SITES_DIR = ROOT_DIR / "sites"
@@ -936,6 +936,8 @@ class AgentSession:
         events: Optional[List[Dict[str, Any]]] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
         next_seq: Optional[int] = None,
+        llm_profile_id: str = "",
+        llm_model: str = "",
     ) -> None:
         now_s = time.strftime("%Y-%m-%d %H:%M:%S")
         self.id = session_id
@@ -943,6 +945,8 @@ class AgentSession:
         self.target_url = target_url
         self.status = status
         self.last_error = str(last_error or "")
+        self.llm_profile_id = str(llm_profile_id or "").strip()
+        self.llm_model = str(llm_model or "").strip()
         self.created_at = created_at or now_s
         self.updated_at = updated_at or now_s
         self.plan: List[Dict[str, str]] = list(plan or [])
@@ -978,7 +982,7 @@ class AgentSession:
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._steer_queue: queue.Queue[str] = queue.Queue()
-        self._subs: List[queue.Queue[Optional[Dict[str, Any]]]] = []
+        self._subs: List[Tuple[queue.Queue[Optional[Dict[str, Any]]], bool]] = []
         self._active_proc: Optional[subprocess.Popen[str]] = None
         self._active_pid: Optional[int] = None
         self._active_tool_name: Optional[str] = None
@@ -1066,36 +1070,37 @@ class AgentSession:
             if len(self.events) > 500:
                 self.events = self.events[-400:]
             subs = list(self._subs)
-        for q in subs:
+        for q, _ in subs:
             try:
                 q.put_nowait(ev)
             except queue.Full:
                 pass
         return ev
 
-    def close_streams(self) -> None:
+    def close_streams(self, *, force_all: bool = False) -> None:
         with self._lock:
             subs = list(self._subs)
-        for q in subs:
+        for q, keep_open in subs:
+            if not force_all and keep_open:
+                continue
             try:
                 q.put_nowait(None)
             except queue.Full:
                 pass
 
-    def subscribe(self) -> Tuple[List[Dict[str, Any]], queue.Queue[Optional[Dict[str, Any]]]]:
+    def subscribe(self, *, keep_open: bool = False) -> Tuple[List[Dict[str, Any]], queue.Queue[Optional[Dict[str, Any]]]]:
         q: queue.Queue[Optional[Dict[str, Any]]] = queue.Queue(maxsize=500)
         with self._lock:
             hist = list(self.events)
-            if self.status == "running":
-                self._subs.append(q)
+            if self.status == "running" or keep_open:
+                self._subs.append((q, keep_open))
             else:
                 q.put_nowait(None)
         return hist, q
 
     def unsubscribe(self, q: queue.Queue[Optional[Dict[str, Any]]]) -> None:
         with self._lock:
-            if q in self._subs:
-                self._subs.remove(q)
+            self._subs = [(sq, ko) for sq, ko in self._subs if sq is not q]
 
     def stop(self) -> str:
         abort_note = ""
@@ -1132,6 +1137,8 @@ class AgentSession:
                 "target_url": self.target_url,
                 "status": self.status,
                 "error": self.last_error,
+                "llm_profile_id": self.llm_profile_id,
+                "llm_model": self.llm_model,
                 "created_at": self.created_at,
                 "updated_at": self.updated_at,
                 "plan": list(self.plan),
@@ -1148,6 +1155,8 @@ class AgentSession:
                 "target_url": self.target_url,
                 "status": self.status,
                 "error": self.last_error,
+                "llm_profile_id": self.llm_profile_id,
+                "llm_model": self.llm_model,
                 "created_at": self.created_at,
                 "updated_at": self.updated_at,
                 "plan": list(self.plan),
@@ -1284,6 +1293,8 @@ class AgentSession:
                 "target_url": self.target_url,
                 "status": self.status,
                 "error": self.last_error,
+                "llm_profile_id": self.llm_profile_id,
+                "llm_model": self.llm_model,
                 "created_at": self.created_at,
                 "updated_at": self.updated_at,
                 "plan": list(self.plan),
@@ -1322,6 +1333,8 @@ class AgentSession:
             events=data.get("events") if isinstance(data.get("events"), list) else [],
             messages=_repair_dangling_tool_calls(raw_msgs),
             next_seq=raw_next_seq if isinstance(raw_next_seq, int) and not isinstance(raw_next_seq, bool) else None,
+            llm_profile_id=str(data.get("llm_profile_id") or ""),
+            llm_model=str(data.get("llm_model") or ""),
         )
 
 
@@ -1433,9 +1446,20 @@ class SingleAgentManager:
         rows.sort(key=lambda x: str(x.get("updated_at") or x.get("created_at") or ""), reverse=True)
         return rows[:30]
 
-    def create_session(self, title: str = "", target_url: str = "") -> AgentSession:
+    def create_session(
+        self,
+        title: str = "",
+        target_url: str = "",
+        *,
+        llm_profile_id: str = "",
+        llm_model: str = "",
+    ) -> AgentSession:
         clean_url = str(target_url or "").strip()
         clean_title = str(title or "").strip()[:80]
+        raw_pid = str(llm_profile_id or "").strip()
+        clean_pid = "" if raw_pid == "__follow_global__" else raw_pid
+        raw_mod = str(llm_model or "").strip()
+        clean_mod = "" if raw_mod == "__follow_profile__" else raw_mod
         if not clean_title:
             if clean_url:
                 host = (urlparse(clean_url).hostname or "").replace("www.", "")
@@ -1443,7 +1467,13 @@ class SingleAgentManager:
             else:
                 clean_title = f"AI 会话 {time.strftime('%H:%M:%S')}"
         sid = f"ag_{int(time.time())}_{secrets.token_hex(3)}"
-        sess = AgentSession(sid, title=clean_title, target_url=clean_url)
+        sess = AgentSession(
+            sid,
+            title=clean_title,
+            target_url=clean_url,
+            llm_profile_id=clean_pid,
+            llm_model=clean_mod,
+        )
         with self._lock:
             self._sessions[sid] = sess
         sess.persist()
@@ -1505,8 +1535,17 @@ class SingleAgentManager:
         for s in sessions:
             if s.status == "running":
                 s.stop()
+            s.close_streams(force_all=True)
 
-    def send_message(self, session_id: str, message: str, target_url: str = "") -> Dict[str, Any]:
+    def send_message(
+        self,
+        session_id: str,
+        message: str,
+        target_url: str = "",
+        *,
+        llm_profile_id: Optional[str] = None,
+        llm_model: Optional[str] = None,
+    ) -> Dict[str, Any]:
         sess = self.get_session(session_id)
         if sess is None:
             raise KeyError(f"会话不存在: {session_id}")
@@ -1519,6 +1558,21 @@ class SingleAgentManager:
         prompt_for_llm = user_text
         if clean_url and clean_url not in user_text:
             prompt_for_llm = f"目标 URL: {clean_url}\n指令: {user_text}"
+
+        if llm_profile_id is not None or llm_model is not None:
+            with sess._lock:
+                if llm_profile_id is not None:
+                    rp = str(llm_profile_id or "").strip()
+                    if rp == "__follow_global__":
+                        sess.llm_profile_id = ""
+                    elif rp:
+                        sess.llm_profile_id = rp
+                if llm_model is not None:
+                    rm = str(llm_model or "").strip()
+                    if rm == "__follow_profile__":
+                        sess.llm_model = ""
+                    elif rm:
+                        sess.llm_model = rm
 
         turn_stop_ev: Optional[threading.Event] = None
         steered = False
@@ -1621,8 +1675,23 @@ class SingleAgentManager:
 
     def _run_turn(self, sess: AgentSession, stop_ev: threading.Event) -> None:
         empty_nudges = 0
+        saved_cfg = _load_saved_agent_config_if_exists()
+        max_steps = int(saved_cfg["max_steps"]) if (saved_cfg and saved_cfg.get("max_steps")) else MAX_STEPS_PER_TURN
+        eff_system_prompt = str(saved_cfg.get("system_prompt") or AGENT_SYSTEM_PROMPT) if saved_cfg else AGENT_SYSTEM_PROMPT
+        eff_tools = TOOL_SCHEMAS
+        if saved_cfg and isinstance(saved_cfg.get("enabled_tools"), list):
+            allowed = set(saved_cfg["enabled_tools"])
+            eff_tools = [t for t in TOOL_SCHEMAS if t["function"]["name"] in allowed]
+        default_cfg_pid = str(saved_cfg.get("llm_profile_id") or "").strip() if saved_cfg else ""
+
+        def _resolve_ov(prof_id: str, mod_ov: str) -> Optional[Dict[str, Any]]:
+            eff_pid = prof_id or default_cfg_pid
+            if eff_pid or mod_ov or llm_profiles._profiles_file().exists():
+                return llm_profiles.resolve_runtime_override(profile_id=eff_pid, model_override=mod_ov)
+            return None
+
         try:
-            for step in range(1, MAX_STEPS_PER_TURN + 1):
+            for step in range(1, max_steps + 1):
                 if stop_ev.is_set():
                     return
 
@@ -1630,11 +1699,15 @@ class SingleAgentManager:
 
                 with sess._lock:
                     history_snapshot = _repair_dangling_tool_calls(_slice_messages_safely(sess.messages, 80))
+                    prof_id = sess.llm_profile_id
+                    mod_ov = sess.llm_model
 
+                runtime_ov = _resolve_ov(prof_id, mod_ov)
                 resp = llm_client.chat_completion(
                     messages=history_snapshot,
-                    tools=TOOL_SCHEMAS,
-                    system_prompt=AGENT_SYSTEM_PROMPT,
+                    tools=eff_tools,
+                    system_prompt=eff_system_prompt,
+                    config_override=runtime_ov,
                 )
 
                 if stop_ev.is_set():
@@ -1648,7 +1721,7 @@ class SingleAgentManager:
 
                 # Resilience #1: Thinking-Only Empty-Turn Nudge (max 2 nudges)
                 if not content and not tool_calls:
-                    if empty_nudges < MAX_EMPTY_NUDGES and step < MAX_STEPS_PER_TURN:
+                    if empty_nudges < MAX_EMPTY_NUDGES and step < max_steps:
                         empty_nudges += 1
                         with sess._lock:
                             sess.messages.append({
@@ -1683,7 +1756,7 @@ class SingleAgentManager:
                     with self._lock:
                         if stop_ev.is_set() or sess._stop_event is not stop_ev:
                             return
-                        if sess.has_pending_steer() and step < MAX_STEPS_PER_TURN:
+                        if sess.has_pending_steer() and step < max_steps:
                             keep_going = True
                         else:
                             with sess._lock:
@@ -1778,8 +1851,10 @@ class SingleAgentManager:
             self._inject_steers(sess)
             with sess._lock:
                 wrapup_history = _repair_dangling_tool_calls(_slice_messages_safely(sess.messages, 80))
+                prof_id = sess.llm_profile_id
+                mod_ov = sess.llm_model
             wrapup_prompt = (
-                f"已达到单轮最大步数上限（{MAX_STEPS_PER_TURN} 步），当前已关闭工具调用。"
+                f"已达到单轮最大步数上限（{max_steps} 步），当前已关闭工具调用。"
                 "请立即用简洁中文做收尾总结：1) 本轮已完成的探测/改动进展；"
                 "2) 已创建或修改的适配器文件与试跑产出账号情况；3) 剩余未完成事项与下一步建议。"
             )
@@ -1788,7 +1863,8 @@ class SingleAgentManager:
                 wrap_resp = llm_client.chat_completion(
                     messages=wrapup_history + [{"role": "user", "content": wrapup_prompt}],
                     tools=[],
-                    system_prompt=AGENT_SYSTEM_PROMPT,
+                    system_prompt=eff_system_prompt,
+                    config_override=_resolve_ov(prof_id, mod_ov),
                 )
                 if stop_ev.is_set():
                     return
@@ -1801,16 +1877,104 @@ class SingleAgentManager:
                 return
 
             if not wrap_text:
-                wrap_text = f"已达到单轮最大推理/工具步数上限（{MAX_STEPS_PER_TURN} 步），已安全暂停。如需继续请发送「继续」。"
+                wrap_text = f"已达到单轮最大推理/工具步数上限（{max_steps} 步），已安全暂停。如需继续请发送「继续」。"
 
             with sess._lock:
                 sess.messages.append({"role": "assistant", "content": wrap_text})
-            sess.emit("assistant_msg", content=wrap_text, step=MAX_STEPS_PER_TURN, wrap_up=True)
+            sess.emit("assistant_msg", content=wrap_text, step=max_steps, wrap_up=True)
             self._finish_turn_status(sess, stop_ev, "done")
         except Exception as exc:
             if stop_ev.is_set():
                 return
             self._finish_turn_status(sess, stop_ev, "error", error=str(exc))
+
+
+_AGENT_CFG_LOCK = threading.Lock()
+
+
+def _agent_config_file() -> Path:
+    return RESULTS_DIR / "agent_config.json"
+
+
+def _default_agent_config() -> Dict[str, Any]:
+    return {
+        "name": "RegisterHub 开源单线程 Agent",
+        "description": "纯 Python 标准库驱动的自主注册工程师 Agent（单线程安全模式）",
+        "llm_profile_id": "",
+        "max_steps": MAX_STEPS_PER_TURN,
+        "system_prompt": AGENT_SYSTEM_PROMPT,
+        "enabled_tools": [t["function"]["name"] for t in TOOL_SCHEMAS],
+        "enabled_skills": [],
+    }
+
+
+def _load_saved_agent_config_if_exists() -> Optional[Dict[str, Any]]:
+    fp = _agent_config_file()
+    if not fp.is_file():
+        return None
+    with _AGENT_CFG_LOCK:
+        try:
+            raw = json.loads(fp.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                return raw
+        except Exception:
+            return None
+    return None
+
+
+def load_agent_config() -> Dict[str, Any]:
+    base = _default_agent_config()
+    saved = _load_saved_agent_config_if_exists()
+    if not saved:
+        return base
+    valid_tool_names = {t["function"]["name"] for t in TOOL_SCHEMAS}
+    out = dict(base)
+    if isinstance(saved.get("name"), str) and saved["name"].strip():
+        out["name"] = saved["name"].strip()[:80]
+    if isinstance(saved.get("description"), str):
+        out["description"] = saved["description"].strip()[:300]
+    if isinstance(saved.get("llm_profile_id"), str):
+        out["llm_profile_id"] = saved["llm_profile_id"].strip()
+    try:
+        ms = int(saved.get("max_steps") or MAX_STEPS_PER_TURN)
+        out["max_steps"] = max(1, min(60, ms))
+    except (TypeError, ValueError):
+        pass
+    if isinstance(saved.get("system_prompt"), str) and saved["system_prompt"].strip():
+        out["system_prompt"] = saved["system_prompt"]
+    if isinstance(saved.get("enabled_tools"), list):
+        out["enabled_tools"] = [str(x) for x in saved["enabled_tools"] if str(x) in valid_tool_names]
+    return out
+
+
+def save_agent_config(updates: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(updates, dict):
+        raise ValueError("Agent 配置必须为 JSON 对象")
+    valid_tool_names = {t["function"]["name"] for t in TOOL_SCHEMAS}
+    with _AGENT_CFG_LOCK:
+        cur = load_agent_config()
+        if "name" in updates and isinstance(updates.get("name"), str) and updates["name"].strip():
+            cur["name"] = updates["name"].strip()[:80]
+        if "description" in updates and isinstance(updates.get("description"), str):
+            cur["description"] = updates["description"].strip()[:300]
+        if "llm_profile_id" in updates:
+            raw_pid = str(updates.get("llm_profile_id") or "").strip()
+            cur["llm_profile_id"] = "" if raw_pid == "__follow_global__" else raw_pid
+        if "max_steps" in updates:
+            try:
+                cur["max_steps"] = max(1, min(60, int(updates["max_steps"])))
+            except (TypeError, ValueError):
+                pass
+        if "system_prompt" in updates and isinstance(updates.get("system_prompt"), str):
+            cur["system_prompt"] = updates["system_prompt"] or AGENT_SYSTEM_PROMPT
+        if "enabled_tools" in updates and isinstance(updates.get("enabled_tools"), list):
+            cur["enabled_tools"] = [str(x) for x in updates["enabled_tools"] if str(x) in valid_tool_names]
+        fp = _agent_config_file()
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        tmp = fp.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(cur, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp, fp)
+        return cur
 
 
 agent_manager = SingleAgentManager()

@@ -6,7 +6,11 @@ __pycache__/
 # 运行产生的结果与凭据（绝对不能进版本库）
 results/
 results/llm_config.json
+results/llm_profiles.json
+results/llm_calls.jsonl
+results/agent_config.json
 results/agent_sessions/
+results/agent_uploads/
 accounts.txt
 failed.txt
 clean_keys.txt

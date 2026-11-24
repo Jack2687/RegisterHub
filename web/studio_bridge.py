@@ -605,36 +605,42 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
         return True
 
     if path == "/api/llm/profiles":
-        pub = srv.llm_client.get_public_llm_config()
-        prof = {
-            "id": "community_default",
-            "name": "OpenAI 兼容主力接口",
-            "format": "openai",
-            "model": str(pub.get("model") or "gpt-4o-mini"),
-            "base_url": str(pub.get("base_url") or "https://api.openai.com/v1"),
-            "proxy_url": str(pub.get("proxy_url") or ""),
-            "api_key_hint": str(pub.get("api_key_hint") or ""),
-            "has_key": bool(pub.get("has_key")),
-            "max_tokens": int(pub.get("max_tokens") or 4096),
-            "max_tokens_field": str(pub.get("max_tokens_field") or "max_tokens"),
-            "temperature": float(pub.get("temperature") if pub.get("temperature") is not None else 0.2),
-            "priority": 1,
-            "reasoning_effort": "none",
-            "active": True,
-            "enabled": True,
-            "health": {"status": "ok" if pub.get("has_key") else "unconfigured"},
-        }
+        from core import llm_profiles
+
+        handler._send_json(llm_profiles.list_profiles_response())
+        return True
+
+    m_err_det = re.fullmatch(r"/api/fleet/([^/]+)/error-detail/([^/]+)", path)
+    if m_err_det:
+        err_dir = m_err_det.group(2)
+        fails = srv.list_failures()
+        matched = next(
+            (f for f in fails if f.get("snapshot") == err_dir or f"fail_{f.get('id', 0)}" == err_dir),
+            None,
+        )
         handler._send_json({
-            "active_id": "community_default",
-            "active_profile_id": "community_default",
-            "profiles": [prof],
-            "pool": {"enabled": False},
-            "recent_calls": [],
+            "dir": err_dir,
+            "detail": matched or {"reason": f"失败快照 {err_dir}"},
+            "html_excerpt": "",
         })
         return True
 
     if path == "/api/llm/calls":
-        handler._send_json({"ok": True, "calls": [], "total": 0})
+        try:
+            lim = max(1, min(500, int((qs.get("limit") or ["200"])[0])))
+        except Exception:
+            lim = 200
+        calls = srv.llm_client.list_llm_calls(limit=lim)
+        handler._send_json({"ok": True, "calls": calls, "total": len(calls)})
+        return True
+
+    m_call_id = re.fullmatch(r"/api/llm/calls/([^/]+)", path)
+    if m_call_id:
+        item = srv.llm_client.get_llm_call(m_call_id.group(1))
+        if item is None:
+            handler._send_json({"ok": False, "error": "Call log not found"}, status=404)
+            return True
+        handler._send_json({"ok": True, "call": item})
         return True
 
     if path == "/api/llm/magpie/status":
@@ -642,7 +648,7 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
         return True
 
     if path == "/api/agent/config":
-        from core.ai_agent import AGENT_SYSTEM_PROMPT, MAX_STEPS_PER_TURN, TOOL_SCHEMAS
+        from core.ai_agent import TOOL_SCHEMAS, load_agent_config
 
         tools = [
             {
@@ -653,17 +659,8 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
             }
             for t in TOOL_SCHEMAS
         ]
-        tool_names = [t["name"] for t in tools]
         handler._send_json({
-            "agent": {
-                "name": "RegisterHub 开源单线程 Agent",
-                "description": "纯 Python 标准库驱动的自主注册工程师 Agent（单线程安全模式）",
-                "llm_profile_id": "community_default",
-                "max_steps": MAX_STEPS_PER_TURN,
-                "system_prompt": AGENT_SYSTEM_PROMPT,
-                "enabled_tools": tool_names,
-                "enabled_skills": [],
-            },
+            "agent": load_agent_config(),
             "available_tools": tools,
             "skills": [],
             "guard_rules": [],
@@ -868,20 +865,120 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
         return True
 
     if path == "/api/keys/verify":
+        from core.net_guard import (
+            PrivateAddressBlockedError,
+            build_safe_urllib_opener,
+            validate_proxy_url,
+            validate_public_http_url,
+        )
+
         items = body.get("keys") if isinstance(body.get("keys"), list) else []
         base_url = str(body.get("base_url") or "").strip().rstrip("/")
-        results = []
-        for it in items[:50]:
-            k = str((it.get("key") if isinstance(it, dict) else it) or "").strip()
-            proj = str((it.get("project") if isinstance(it, dict) else "") or "community")
-            ok_fmt = len(k) >= 12
-            results.append({
-                "key": k,
-                "project": proj,
-                "status": "valid" if ok_fmt else "invalid",
-                "detail": "格式校验通过（提供 Base URL 可测在线模型列表）" if (ok_fmt and not base_url) else ("格式有效" if ok_fmt else "Key 长度不足"),
-            })
-        handler._send_json({"ok": True, "results": results})
+        cfg = srv._load_raw_config_dict()
+        raw_px = str((cfg.get("browser") or {}).get("proxy") or "").strip()
+
+        clean_base = ""
+        base_err = ""
+        opener = None
+        if base_url:
+            try:
+                clean_base = validate_public_http_url(base_url, resolve_dns=True).rstrip("/")
+                px = validate_proxy_url(raw_px) if raw_px else ""
+                opener = build_safe_urllib_opener(proxy=px or "")
+            except (PrivateAddressBlockedError, ValueError) as e:
+                base_err = str(e)
+
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        handler.send_header("Cache-Control", "no-cache")
+        handler.send_header("Connection", "close")
+        handler.end_headers()
+
+        live_cnt = 0
+        dead_cnt = 0
+        batch = items[:50]
+        try:
+            for idx, it in enumerate(batch, 1):
+                k = str((it.get("key") if isinstance(it, dict) else it) or "").strip()
+                proj = str((it.get("project") if isinstance(it, dict) else "") or "demo")
+                if not base_url:
+                    ev = {
+                        "type": "item",
+                        "index": idx,
+                        "key": k,
+                        "project": proj,
+                        "ok": False,
+                        "status": "unverifiable",
+                        "detail": "请先填写 Base URL 再执行在线验活",
+                    }
+                elif base_err or opener is None:
+                    dead_cnt += 1
+                    ev = {
+                        "type": "item",
+                        "index": idx,
+                        "key": k,
+                        "project": proj,
+                        "ok": False,
+                        "status": "invalid",
+                        "detail": base_err or "Base URL 校验失败",
+                    }
+                else:
+                    models_url = f"{clean_base}/models" if clean_base.endswith("/v1") else f"{clean_base}/v1/models"
+                    req = urllib.request.Request(
+                        models_url,
+                        headers={"Authorization": f"Bearer {k}", "Accept": "application/json", "User-Agent": "RegisterHub/2.1"},
+                    )
+                    t0 = time.perf_counter()
+                    try:
+                        with opener.open(req, timeout=10) as r:
+                            raw = r.read(65536).decode("utf-8", errors="ignore")
+                            cnt = 0
+                            try:
+                                j = json.loads(raw)
+                                if isinstance(j, dict) and isinstance(j.get("data"), list):
+                                    cnt = len(j["data"])
+                            except Exception:
+                                pass
+                            ms = round((time.perf_counter() - t0) * 1000, 1)
+                            live_cnt += 1
+                            ev = {
+                                "type": "item",
+                                "index": idx,
+                                "key": k,
+                                "project": proj,
+                                "ok": True,
+                                "status": "valid",
+                                "detail": f"HTTP {r.status} · {cnt} 模型 · {ms}ms",
+                            }
+                    except urllib.error.HTTPError as he:
+                        dead_cnt += 1
+                        ev = {
+                            "type": "item",
+                            "index": idx,
+                            "key": k,
+                            "project": proj,
+                            "ok": False,
+                            "status": "invalid",
+                            "detail": f"HTTP {he.code}",
+                        }
+                    except Exception as e:
+                        dead_cnt += 1
+                        ev = {
+                            "type": "item",
+                            "index": idx,
+                            "key": k,
+                            "project": proj,
+                            "ok": False,
+                            "status": "invalid",
+                            "detail": str(e)[:120],
+                        }
+                handler.wfile.write(f"data: {json.dumps(ev, ensure_ascii=False)}\n\n".encode("utf-8"))
+                handler.wfile.flush()
+            done_ev = {"type": "done", "total": len(batch), "live": live_cnt, "dead": dead_cnt}
+            handler.wfile.write(f"data: {json.dumps(done_ev, ensure_ascii=False)}\n\n".encode("utf-8"))
+            handler.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
         return True
 
     if path == "/api/keys/oneapi":
@@ -936,21 +1033,324 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
         return True
 
     if path == "/api/llm/profiles":
-        saved = srv.llm_client.save_llm_config(body)
-        handler._send_json({"ok": True, "id": "community_default", "config": saved})
+        from core import llm_profiles
+
+        try:
+            prof = llm_profiles.upsert_profile(body)
+            handler._send_json({"ok": True, "id": prof["id"], "profile": prof})
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
+        return True
+
+    if path == "/api/llm/models":
+        from core import llm_profiles
+
+        pid = str(body.get("profile_id") or "").strip()
+        ov = llm_profiles.resolve_runtime_override(profile_id=pid, extra_overrides=body) if pid else (body if body else None)
+        res = srv.llm_client.discover_models(overrides=ov)
+        saved_flag = False
+        if res.get("ok") and bool(body.get("save_catalog")) and pid and res.get("models"):
+            if llm_profiles.save_catalog_models(pid, res["models"], ctx_map=res.get("model_context_windows")):
+                saved_flag = True
+        handler._send_json({**res, "saved": saved_flag})
+        return True
+
+    if path == "/api/llm/import-vault":
+        from core import llm_profiles
+        from core.exporter import parse_accounts_file
+
+        accounts = parse_accounts_file(srv.ACCOUNTS_FILE)
+        keys = [str(a.get("api_key") or "").strip() for a in accounts if str(a.get("api_key") or "").strip()]
+        keys = list(dict.fromkeys(keys))
+        if not keys:
+            handler._send_json({"ok": False, "error": "本地账号台账中暂无可导入的 API Key"}, status=400)
+            return True
+        pid = str(body.get("profile_id") or "").strip()
+        try:
+            if pid and not bool(body.get("replace_keys")):
+                prof, added = llm_profiles.mutate_profile_keys(pid, "add", keys=keys)
+                if prof is None:
+                    upsert_body = dict(body)
+                    upsert_body["id"] = pid
+                    upsert_body["api_keys"] = keys
+                    prof = llm_profiles.upsert_profile(upsert_body)
+                    added = len(keys)
+            else:
+                upsert_body = dict(body)
+                if pid:
+                    upsert_body["id"] = pid
+                upsert_body["api_keys"] = keys
+                if bool(body.get("replace_keys")):
+                    upsert_body["clear_api_key"] = False
+                prof = llm_profiles.upsert_profile(upsert_body)
+                added = len(keys)
+            handler._send_json({"ok": True, "imported_keys": added, "total_keys": prof.get("key_count", added), "profile": prof})
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
+        return True
+
+    if path == "/api/llm/pool/config":
+        handler._send_json({"ok": True, "pool": {"enabled": False}, "retry_policy": body.get("retry_policy") or {}})
+        return True
+
+    if path == "/api/llm/pool/reset":
+        from core import llm_profiles
+
+        cnt = llm_profiles.reset_pool_cooldown(str(body.get("profile_id") or ""))
+        handler._send_json({"ok": True, "reset": cnt})
+        return True
+
+    m_prof_keys = re.fullmatch(r"/api/llm/profiles/([^/]+)/keys", path)
+    if m_prof_keys:
+        from core import llm_profiles
+
+        pid = m_prof_keys.group(1)
+        action = str(body.get("action") or "add").strip().lower()
+        raw_keys = body.get("keys") if isinstance(body.get("keys"), list) else ([body["key"]] if body.get("key") else [])
+        try:
+            prof, delta = llm_profiles.mutate_profile_keys(
+                pid,
+                action,
+                keys=[str(k) for k in raw_keys],
+                key_id=str(body.get("key_id") or ""),
+            )
+            if prof is None:
+                handler._send_json({"ok": False, "error": f"供应商不存在: {pid}"}, status=404)
+                return True
+            handler._send_json({"ok": True, "added": delta, "removed": delta, "profile": prof})
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
         return True
 
     m_prof_act = re.fullmatch(r"/api/llm/profiles/([^/]+)/(test|activate)", path)
     if m_prof_act:
+        from core import llm_profiles
+
+        pid = m_prof_act.group(1)
         action = m_prof_act.group(2)
         if action == "activate":
-            handler._send_json({"ok": True, "active_id": m_prof_act.group(1)})
+            prof = llm_profiles.activate_profile(pid)
+            if prof is None:
+                handler._send_json({"ok": False, "error": f"供应商不存在: {pid}"}, status=404)
+                return True
+            handler._send_json({"ok": True, "active_id": pid, "profile": prof})
         else:
-            handler._send_json(srv.llm_client.test_connection(overrides=body if body else None))
+            ov = llm_profiles.resolve_runtime_override(
+                profile_id=pid,
+                model_override=str(body.get("model") or ""),
+                key_id=str(body.get("key_id") or ""),
+                extra_overrides=body if body else None,
+            )
+            res = srv.llm_client.test_connection(overrides=ov)
+            llm_profiles.record_profile_test_result(
+                pid,
+                ok=bool(res.get("ok")),
+                latency_ms=float(res.get("latency_ms") or 0.0),
+                error=str(res.get("error") or ""),
+            )
+            handler._send_json(res)
+        return True
+
+    m_ag_btw = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/side-question/stream", path)
+    if m_ag_btw:
+        import secrets
+        from core import llm_profiles
+
+        sid = m_ag_btw.group(1)
+        sess = srv.agent_manager.get_session(sid)
+        if not sess:
+            handler._send_json({"ok": False, "error": "Agent session not found"}, status=404)
+            return True
+        question = str(body.get("question") or "").strip()
+        if not question:
+            handler._send_json({"ok": False, "error": "提问内容不能为空"}, status=400)
+            return True
+
+        with sess._lock:
+            prof_id = str(body.get("llm_profile_id") or sess.llm_profile_id or "").strip()
+            mod_ov = str(body.get("llm_model") or sess.llm_model or "").strip()
+            recent = [
+                f"{m.get('role')}: {str(m.get('content') or '')[:400]}"
+                for m in sess.messages[-8:]
+                if isinstance(m, dict) and m.get("content")
+            ]
+        ov = llm_profiles.resolve_runtime_override(profile_id=prof_id, model_override=mod_ov)
+        ctx_blob = "\n".join(recent)
+        prompt = f"以下是当前任务会话的最近上下文：\n{ctx_blob}\n\n用户旁路提问（不中断主任务，简洁中文作答）：\n{question}" if ctx_blob else question
+        sq_id = f"sq_{int(time.time() * 1000)}_{secrets.token_hex(3)}"
+
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        handler.send_header("Cache-Control", "no-cache")
+        handler.send_header("Connection", "close")
+        handler.end_headers()
+        t0 = time.perf_counter()
+        try:
+            handler.wfile.write(f"data: {json.dumps({'type': 'start', 'id': sq_id}, ensure_ascii=False)}\n\n".encode("utf-8"))
+            handler.wfile.flush()
+            resp = srv.llm_client.chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                tools=None,
+                system_prompt="你是 RegisterHub 旁路答疑助手，请基于上下文用简洁中文直接回答用户问题。",
+                config_override=ov,
+                timeout=45.0,
+            )
+            answer = str(resp.get("content") or "").strip() or "（模型未返回正文）"
+            thinking = str(resp.get("thinking") or "").strip()
+            ms = round((time.perf_counter() - t0) * 1000, 1)
+            usage = resp.get("usage") or {}
+            item_obj = {
+                "id": sq_id,
+                "question": question,
+                "answer": answer,
+                "thinking": thinking,
+                "model": resp.get("model", ""),
+                "latency_ms": ms,
+                "input_tokens": int(usage.get("prompt_tokens") or 0),
+                "output_tokens": int(usage.get("completion_tokens") or 0),
+                "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            if thinking:
+                handler.wfile.write(f"data: {json.dumps({'type': 'thinking_delta', 'delta': thinking}, ensure_ascii=False)}\n\n".encode("utf-8"))
+            handler.wfile.write(f"data: {json.dumps({'type': 'delta', 'delta': answer}, ensure_ascii=False)}\n\n".encode("utf-8"))
+            handler.wfile.write(
+                f"data: {json.dumps({'type': 'done', 'ok': True, 'item': item_obj, 'answer': answer, 'model': item_obj['model'], 'latency_ms': ms}, ensure_ascii=False)}\n\n".encode("utf-8")
+            )
+            handler.wfile.flush()
+        except Exception as e:
+            handler.wfile.write(f"data: {json.dumps({'type': 'error', 'error': str(e)}, ensure_ascii=False)}\n\n".encode("utf-8"))
+            handler.wfile.flush()
+        return True
+
+    m_ag_up = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/upload", path)
+    if m_ag_up:
+        import base64
+
+        sid = m_ag_up.group(1)
+        sess = srv.agent_manager.get_session(sid)
+        if not sess:
+            handler._send_json({"ok": False, "error": "Agent session not found"}, status=404)
+            return True
+        raw_name = Path(str(body.get("filename") or "upload.bin")).name
+        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", raw_name).strip("._") or "upload.bin"
+        b64 = str(body.get("content_b64") or "")
+        try:
+            data = base64.b64decode(b64, validate=False)
+        except Exception as e:
+            handler._send_json({"ok": False, "error": f"附件编码非法: {e}"}, status=400)
+            return True
+        if len(data) > 5 * 1024 * 1024:
+            handler._send_json({"ok": False, "error": "附件超过 5MB 上限"}, status=400)
+            return True
+        up_dir = (srv.RESULTS_DIR / "agent_uploads" / sid).resolve()
+        up_dir.mkdir(parents=True, exist_ok=True)
+        dest = (up_dir / safe_name).resolve()
+        if dest.parent != up_dir:
+            handler._send_json({"ok": False, "error": "非法附件路径"}, status=400)
+            return True
+        dest.write_bytes(data)
+        rel_path = f"results/agent_uploads/{sid}/{safe_name}"
+        file_meta = {
+            "name": safe_name,
+            "path": rel_path,
+            "size_bytes": len(data),
+            "uploaded_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        handler._send_json({"ok": True, "file": file_meta})
+        return True
+
+    m_ag_compact = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/compact", path)
+    if m_ag_compact:
+        sess = srv.agent_manager.get_session(m_ag_compact.group(1))
+        if not sess:
+            handler._send_json({"ok": False, "error": "Agent session not found"}, status=404)
+            return True
+        with sess._lock:
+            before = len(sess.messages)
+            if before > 16:
+                sess.messages = sess.messages[-16:]
+            after = len(sess.messages)
+        sess.persist()
+        handler._send_json({"ok": True, "before": before, "after": after, "message": f"已保留最近 {after} 条核心上下文"})
         return True
 
     if path == "/api/agent/config":
-        handler._send_json({"ok": True, "note": "开源社区版单线程 Agent 使用固定安全工具集"})
+        from core.ai_agent import save_agent_config
+
+        try:
+            saved = save_agent_config(body)
+            handler._send_json({"ok": True, "agent": saved})
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
+        return True
+
+    return False
+
+
+def handle_studio_put(handler: Any, srv: Any, path: str, body: Dict[str, Any]) -> bool:
+    """Handle Studio PUT routes."""
+    m_prof = re.fullmatch(r"/api/llm/profiles/([^/]+)", path)
+    if m_prof:
+        from core import llm_profiles
+
+        pid = m_prof.group(1)
+        try:
+            prof = llm_profiles.upsert_profile({**body, "id": pid})
+            handler._send_json({"ok": True, "id": prof["id"], "profile": prof})
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
+        return True
+    return False
+
+
+def handle_studio_patch(handler: Any, srv: Any, path: str, body: Dict[str, Any]) -> bool:
+    """Handle Studio PATCH routes."""
+    m_prof = re.fullmatch(r"/api/llm/profiles/([^/]+)", path)
+    if m_prof:
+        from core import llm_profiles
+
+        pid = m_prof.group(1)
+        try:
+            prof = llm_profiles.upsert_profile({**body, "id": pid})
+            handler._send_json({"ok": True, "id": prof["id"], "profile": prof})
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
+        return True
+    return False
+
+
+def handle_studio_delete(handler: Any, srv: Any, path: str) -> bool:
+    """Handle Studio DELETE routes."""
+    m_prof = re.fullmatch(r"/api/llm/profiles/([^/]+)", path)
+    if m_prof:
+        from core import llm_profiles
+
+        pid = m_prof.group(1)
+        ok = llm_profiles.delete_profile(pid)
+        if not ok:
+            handler._send_json({"ok": False, "error": f"供应商不存在: {pid}"}, status=404)
+            return True
+        handler._send_json({"ok": True, "deleted": pid})
+        return True
+
+    m_fl_err = re.fullmatch(r"/api/fleet/([^/]+)/errors", path)
+    if m_fl_err:
+        from core.locks import atomic_write_text_safe, interprocess_file_lock
+
+        removed = 0
+        if srv.FAILED_FILE.exists():
+            with interprocess_file_lock(srv.FAILED_FILE):
+                if srv.FAILED_FILE.exists():
+                    atomic_write_text_safe(srv.FAILED_FILE, "")
+                    removed += 1
+        if srv.SNAPSHOTS_DIR.exists():
+            for fp in srv.SNAPSHOTS_DIR.glob("*.png"):
+                try:
+                    fp.unlink()
+                    removed += 1
+                except OSError:
+                    pass
+        handler._send_json({"ok": True, "removed": removed})
         return True
 
     return False

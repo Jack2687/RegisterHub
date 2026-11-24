@@ -1134,16 +1134,20 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                     since = max(0, int(last_id_hdr) + 1)
                 except Exception:
                     pass
+            keep_open = ("text/event-stream" in (self.headers.get("Accept") or "").lower()) or ("after_seq" in qs)
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "keep-alive")
             self.end_headers()
-            hist, sub_q = sess.subscribe()
+            hist, sub_q = sess.subscribe(keep_open=keep_open)
             sent_live_terminal = False
             last_error = ""
             try:
                 max_seen_seq = sess.next_seq - 1
+                if keep_open:
+                    conn_ev = {"type": "connected", "seq": max(0, sess.next_seq - 1), "status": sess.status}
+                    self.wfile.write(f"data: {json.dumps(conn_ev, ensure_ascii=False)}\n\n".encode("utf-8"))
                 for idx, item in enumerate(hist):
                     raw_seq = item.get("seq")
                     ev_seq = raw_seq if isinstance(raw_seq, int) and not isinstance(raw_seq, bool) else idx
@@ -1162,7 +1166,11 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                     try:
                         ev = sub_q.get(timeout=12.0)
                     except queue.Empty:
-                        self.wfile.write(b": keepalive\n\n")
+                        if keep_open:
+                            ping_ev = {"type": "ping", "seq": max(0, sess.next_seq - 1)}
+                            self.wfile.write(f"data: {json.dumps(ping_ev, ensure_ascii=False)}\n\n".encode("utf-8"))
+                        else:
+                            self.wfile.write(b": keepalive\n\n")
                         self.wfile.flush()
                         continue
                     if ev is None:
@@ -1502,9 +1510,9 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                         user_col = parts[2] if len(parts) > 2 else ""
                         ak = parts[3] if len(parts) >= 4 else ""
                         if not ak:
-                            if pwd_col.startswith(("hms-", "sk-", "gsk_", "coa_")):
+                            if pwd_col.startswith(("sk-", "gsk_", "rk_", "api_")):
                                 ak = pwd_col
-                            elif len(parts) == 3 and user_col.startswith(("hms-", "sk-", "gsk_", "coa_")):
+                            elif len(parts) == 3 and user_col.startswith(("sk-", "gsk_", "rk_", "api_")):
                                 ak = user_col
                         hit_idx = None
                         for ti, (te, tk) in enumerate(remaining):
@@ -1548,9 +1556,9 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                     user_col = parts[2] if len(parts) > 2 else ""
                     ak = parts[3] if len(parts) >= 4 else ""
                     if not ak:
-                        if pwd_col.startswith(("hms-", "sk-", "gsk_", "coa_")):
+                        if pwd_col.startswith(("sk-", "gsk_", "rk_", "api_")):
                             ak = pwd_col
-                        elif len(parts) == 3 and user_col.startswith(("hms-", "sk-", "gsk_", "coa_")):
+                        elif len(parts) == 3 and user_col.startswith(("sk-", "gsk_", "rk_", "api_")):
                             ak = user_col
                     email_ok = (not target_email) or (em == target_email)
                     key_ok = (not target_key) or (ak == target_key)
@@ -1823,7 +1831,14 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/agent/sessions":
             title = str(body.get("title") or "").strip()
             target_url = str(body.get("target_url") or "").strip()
-            sess = agent_manager.create_session(title=title, target_url=target_url)
+            llm_pid = str(body.get("llm_profile_id") or "").strip()
+            llm_mod = str(body.get("llm_model") or "").strip()
+            sess = agent_manager.create_session(
+                title=title,
+                target_url=target_url,
+                llm_profile_id=llm_pid,
+                llm_model=llm_mod,
+            )
             self._send_json({"ok": True, "session": studio_bridge.enrich_agent_detail(sess.to_detail())})
             return
 
@@ -1832,8 +1847,16 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             sid = m_ag_msg.group(1)
             msg_text = str(body.get("message") or body.get("content") or "").strip()
             target_url = str(body.get("target_url") or "").strip()
+            llm_pid = body.get("llm_profile_id") if "llm_profile_id" in body else None
+            llm_mod = body.get("llm_model") if "llm_model" in body else None
             try:
-                res = agent_manager.send_message(sid, msg_text, target_url=target_url)
+                res = agent_manager.send_message(
+                    sid,
+                    msg_text,
+                    target_url=target_url,
+                    llm_profile_id=str(llm_pid) if llm_pid is not None else None,
+                    llm_model=str(llm_mod) if llm_mod is not None else None,
+                )
                 self._send_json(res)
             except KeyError as ke:
                 self._send_json({"ok": False, "error": str(ke)}, status=404)
@@ -1858,17 +1881,17 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         body = self._read_json()
 
-        m_prof = re.fullmatch(r"/api/llm/profiles/([^/]+)", path)
-        if m_prof:
-            try:
-                saved = llm_client.save_llm_config(body)
-                self._send_json({"ok": True, "id": m_prof.group(1), "config": saved})
-            except Exception as e:
-                self._send_json({"ok": False, "error": str(e)}, status=400)
+        if studio_bridge.handle_studio_put(self, sys.modules[__name__], path, body):
             return
 
         if path == "/api/agent/config":
-            self._send_json({"ok": True, "note": "开源社区版单线程 Agent 使用固定安全工具集"})
+            from core.ai_agent import save_agent_config
+
+            try:
+                saved = save_agent_config(body)
+                self._send_json({"ok": True, "agent": saved})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, status=400)
             return
 
         self._send_json({"error": "Not Found"}, status=404)
@@ -1876,6 +1899,9 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
     def do_PATCH(self) -> None:
         path = urlparse(self.path).path
         body = self._read_json()
+
+        if studio_bridge.handle_studio_patch(self, sys.modules[__name__], path, body):
+            return
 
         m_ag_patch = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)", path)
         if m_ag_patch:
@@ -1900,6 +1926,16 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                 if not sess:
                     self._send_json({"ok": False, "error": "Agent session not found"}, status=404)
                     return
+                with sess._lock:
+                    if "llm_profile_id" in body:
+                        sess.llm_profile_id = str(body.get("llm_profile_id") or "").strip()
+                    if "llm_model" in body:
+                        raw_m = str(body.get("llm_model") or "").strip()
+                        sess.llm_model = "" if raw_m == "__follow_profile__" else raw_m
+                    if "target_url" in body and isinstance(body.get("target_url"), str):
+                        sess.target_url = body["target_url"].strip()
+                    sess.updated_at = time.strftime("%Y-%m-%d %H:%M:%S")
+                sess.persist()
                 self._send_json({"ok": True, "session": studio_bridge.enrich_agent_summary(sess.to_summary())})
                 return
             self._send_json({"ok": False, "error": "会话标题不能为空"}, status=400)
@@ -1909,6 +1945,9 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         path = urlparse(self.path).path
+
+        if studio_bridge.handle_studio_delete(self, sys.modules[__name__], path):
+            return
 
         m_ag_del = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)", path)
         if m_ag_del:
