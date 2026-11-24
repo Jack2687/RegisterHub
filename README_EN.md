@@ -187,7 +187,7 @@ The AI will precisely map and automate your verified human interaction chain, el
 
 ## Proxy & Email Verification Configuration
 
-Manage pools and egress strategies directly inside **Assets → Built-in Mail Pool**, **Proxies → Built-in Proxy Pool**, or **Settings** (persisted atomically to `config.json` and `results/*.db`):
+Manage pools and egress strategies directly inside the top-level **Mail Pool**, **Proxy Pool**, or **Settings** views (persisted atomically to `config.json` and `results/*.db`):
 
 1. **Built-in Proxy Pool (`builtin`, Recommended) & Custom Proxy**:
    - Bulk-import static HTTP/HTTPS/SOCKS5 proxies, configure dynamic residential gateways (Smartproxy / IPRoyal / Oxylabs / Bright Data / custom Sticky Session templates), or attach short-lived API extract URLs—all encrypted locally via DPAPI with automatic credential masking.

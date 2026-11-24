@@ -180,13 +180,13 @@ AI 将直接对照你跑通的真实人类行为路径进行精确代码装配�
 
 ## 关于代理与邮箱接码配置 (Proxy & Email Strategies)
 
-在 Web 工作台 **「资产中心 → 内置邮箱池」**、**「代理网络 → 内置代理池」** 或 **「系统设置」**（同步持久化至 `config.json` 与 `results/*.db`）中，开源版支持零搭建开箱即用的双池与单通道模式：
+在 Web 工作台左侧独立导航 **「邮箱池」**、**「代理池」** 或 **「系统设置」**（同步持久化至 `config.json` 与 `results/*.db`）中，开源版支持零搭建开箱即用的双池与单通道模式：
 
 1. **内置代理池（`builtin`，推荐，零外部依赖）与单代理接入**：
-   - 在 **「代理网络 → 内置代理池」** 批量粘贴静态 HTTP/HTTPS/SOCKS5 代理、配置动态住宅代理网关（Smartproxy / IPRoyal / Oxylabs / Bright Data / 自定义 Sticky Session 模板）或粘贴短效 API 提取链接，所有账密均经本地 DPAPI 加密落盘并自动脱敏展示；
-   - 亦支持 **直连 / 系统代理（`direct`）**、**单条自定义代理（`proxy`）** 及 **外部指纹浏览器 CDP 桥接**，并可一键实测出口延迟与住宅纯净度评分。
+   - 在 **「代理池」** 批量粘贴静态 HTTP/HTTPS/SOCKS5 代理、配置动态住宅代理网关（Smartproxy / IPRoyal / Oxylabs / Bright Data / 自定义 Sticky Session 模板）或粘贴短效 API 提取链接，所有账密均经本地 DPAPI 加密落盘并自动脱敏展示；
+   - 亦支持 **直连 / 系统代理（`direct`）**、**单条自定义代理（`proxy`）** 及 **外部指纹浏览器 CDP 桥接**，支持一键全量测活与住宅纯净度评分。
 2. **内置邮箱池（`builtin`，推荐，零 Docker）**：
-   - 在 **「资产中心 → 内置邮箱池」** 智能混合粘贴导入 **Outlook OAuth2（三/四段正反序）**、**iCloud 接码链接** 或 **QQ/163/Gmail/自定义 IMAP**，支持导入前脱敏预览、批量在线验活、收件箱原文查看/验证码提取与事务租约（任务结束自动释放）；
+   - 在 **「邮箱池」** 智能混合粘贴导入 **Outlook OAuth2（三/四段正反序）**、**iCloud 接码链接** 或 **QQ/163/Gmail/自定义 IMAP**，支持导入前脱敏预览、一键全量验活、收件箱原文查看/验证码提取与事务租约（任务结束自动释放）；
    - 一键切换为 `mail.provider = "builtin"` 后，脚手架 `--scaffold` 生成的适配器与 AI Agent 会自动通过 `BuiltinPoolMailClient` 租借接码。
 3. **默认免费临时邮箱（`tempmail`）与单账号 IMAP（`imap`）**：
    - 首次零配置即可用 `DisposableMailClient` 三通道公网临时邮快速验证；也可在「系统设置」填入单个自有 IMAP 账号一键测试连通并无损收码（`BODY.PEEK[]`）。

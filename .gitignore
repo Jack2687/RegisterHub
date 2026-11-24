@@ -5,6 +5,10 @@ __pycache__/
 
 # 运行产生的结果与凭据（绝对不能进版本库）
 results/
+data/
+*.db
+*.db-wal
+*.db-shm
 results/llm_config.json
 results/llm_profiles.json
 results/llm_calls.jsonl
