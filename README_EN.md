@@ -102,11 +102,15 @@ RegisterHub ships exclusively with clean local & public benchmark adapters—zer
 
 ## Official Standalone Derived Projects
 
-To keep the core `RegisterHub` repository clean and free of hardcoded commercial targets, production protocol reference implementations are maintained as standalone open-source repositories:
+To keep the core `RegisterHub` repository clean and free of hardcoded commercial targets, production workflow implementations are decoupled into 100% self-contained standalone open-source repositories:
 
 | Standalone Project | Architecture & Highlights | Repository |
 | :--- | :--- | :--- |
 | **[TokenHarbor Register](https://github.com/waw666waw666/tokenharbor-register)** | **100% Pure Protocol (Zero Browser)** · Next.js Server Action self-healing IDs + Tempmail / IMAP activation + automatic `:free` route consent unlock & live OpenAI-compatible `thk_live_` Key verification | [GitHub](https://github.com/waw666waw666/tokenharbor-register) |
+| **[Deepgram Register](https://github.com/waw666waw666/deepgram-register)** | Official **$200 USD Free Credit Allowance** · reCAPTCHA v2 penetration + pure REST protocol 40-char API key minting | [GitHub](https://github.com/waw666waw666/deepgram-register) |
+| **[100MilionSeek Register](https://github.com/waw666waw666/100milionseek-register)** | **100M Tokens/day Free Allowance** · Turnstile clearance + instant on-page key extraction (no email confirmation) + referral pool | [GitHub](https://github.com/waw666waw666/100milionseek-register) |
+| **[AMD AI Dev Register](https://github.com/waw666waw666/amd-register)** | Official AMD AI Developer Program · Akamai telemetry parity + OneTrust modal clearance & credential extraction | [GitHub](https://github.com/waw666waw666/amd-register) |
+| **[Coarena Register](https://github.com/waw666waw666/coarena-register)** | **Post-Google OAuth Pure REST Key Minting** · Session capture + pure protocol terms acceptance & daily quota verification | [GitHub](https://github.com/waw666waw666/coarena-register) |
 
 ---
 
