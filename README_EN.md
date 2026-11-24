@@ -91,6 +91,16 @@ RegisterHub ships exclusively with clean local & public benchmark adapters—zer
 
 ---
 
+## Official Standalone Derived Projects
+
+To keep the core `RegisterHub` repository clean and free of hardcoded commercial targets, production protocol reference implementations are maintained as standalone open-source repositories:
+
+| Standalone Project | Architecture & Highlights | Repository |
+| :--- | :--- | :--- |
+| **[TokenHarbor Register](https://github.com/waw666waw666/tokenharbor-register)** | **100% Pure Protocol (Zero Browser)** · Next.js Server Action self-healing IDs + Tempmail / IMAP activation + automatic `:free` route consent unlock & live OpenAI-compatible `thk_live_` Key verification | [GitHub](https://github.com/waw666waw666/tokenharbor-register) |
+
+---
+
 ## Quickstart
 
 ### 1. Prerequisites and Installation

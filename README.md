@@ -84,6 +84,16 @@ RegisterHub 开箱内置纯本地与公开测试靶场示范适配器，零第�
 
 ---
 
+## 官方独立实战派生工程 (Official Standalone Derived Projects)
+
+为保持主框架仓库纯粹（零商业站点硬编码），特定平台的纯协议实战案例已解耦为独立自包含开源项目，开箱即用并与主框架保持双向联动：
+
+| 独立开源项目 | 核心架构与技术特性 | 仓库直达 |
+| :--- | :--- | :--- |
+| **[TokenHarbor Register](https://github.com/waw666waw666/tokenharbor-register)** | **100% 纯协议（零浏览器依赖）** · Next.js Server Action 动态哈希自愈 + 三通道临时邮 / IMAP 接码 + 自动解锁 `:free` 免费模型路由并在线验活 OpenAI 兼容 `thk_live_` Key | [GitHub 仓库](https://github.com/waw666waw666/tokenharbor-register) |
+
+---
+
 ## 快速上手
 
 ### 1. 环境准备与依赖安装
