@@ -55,6 +55,9 @@ RUN_ADAPTER_TIMEOUT_S = 120
 _AUTO_COMPACT_CONTEXT_RATIO = 0.85
 _AUTO_COMPACT_COOLDOWN_STEPS = 4
 _DEFAULT_KEEP_RECENT_TOKENS = 6000
+_HISTORY_HARD_CAP_MESSAGES = 400
+_HISTORY_HARD_CAP_TARGET = 300
+_PERSIST_MAX_MESSAGES = 400
 _MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 2
 _GOAL_DEFAULT_MAX_STEPS = 60
 _GOAL_MAX_CONSECUTIVE_NUDGES = 3
@@ -2715,7 +2718,7 @@ class AgentSession:
         if not _SAFE_SESSION_ID_RE.fullmatch(self.id):
             return
         with self._lock:
-            trimmed_msgs = _slice_messages_safely(self.messages, 80)
+            trimmed_msgs = _slice_messages_safely(self.messages, _PERSIST_MAX_MESSAGES)
             payload = {
                 "id": self.id,
                 "title": self.title,
@@ -4380,7 +4383,13 @@ class SingleAgentManager:
                 self._inject_steers(sess)
 
                 with sess._lock:
-                    history_snapshot = _repair_dangling_tool_calls(_slice_messages_safely(sess.messages, 80))
+                    # Keep the message prefix strictly append-only across turns so LLM KV
+                    # prompt caching hits 95%+ (85% context-window auto-compaction trims cleanly).
+                    # Only if compaction repeatedly fails and raw length hits the hard failsafe
+                    # cap, drop a coarse chunk in-place once instead of shifting every step.
+                    if len(sess.messages) > _HISTORY_HARD_CAP_MESSAGES:
+                        sess.messages = _slice_messages_safely(sess.messages, _HISTORY_HARD_CAP_TARGET)
+                    history_snapshot = _repair_dangling_tool_calls(list(sess.messages))
                     prof_id = sess.llm_profile_id
                     mod_ov = sess.llm_model
                     rec_ctx = sess.context_tokens
@@ -4748,7 +4757,7 @@ class SingleAgentManager:
                 return
             self._inject_steers(sess)
             with sess._lock:
-                wrapup_history = _repair_dangling_tool_calls(_slice_messages_safely(sess.messages, 80))
+                wrapup_history = _repair_dangling_tool_calls(list(sess.messages))
                 prof_id = sess.llm_profile_id
                 mod_ov = sess.llm_model
             wrapup_prompt = (

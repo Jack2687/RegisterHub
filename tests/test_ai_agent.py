@@ -1090,6 +1090,96 @@ def test_agent_stop_mid_tool_records_diagnostic_note(tmp_path, monkeypatch):
         srv.server_close()
 
 
+def test_prompt_cache_prefix_stability_past_80_messages_and_anthropic_breakpoints(tmp_path, monkeypatch):
+    """Regression: never shift a fixed 80-message sliding window on every step (destroys KV prompt cache!)."""
+    sessions_dir = tmp_path / "agent_sessions"
+    monkeypatch.setattr(ai_agent, "AGENT_SESSIONS_DIR", sessions_dir)
+    monkeypatch.setattr(ai_agent.agent_manager, "_sessions", {})
+    monkeypatch.setattr(ai_agent, "MAX_STEPS_PER_TURN", 60)
+    monkeypatch.setattr(ai_agent, "tool_list_adapters", lambda: {"ok": True, "count": 0, "adapters": []})
+
+    seen_histories = []
+
+    def _mock_chat(messages, tools=None, system_prompt="", **kwargs):
+        seen_histories.append(json.loads(json.dumps(messages)))
+        step_n = len(seen_histories)
+        if step_n <= 46:
+            return {
+                "content": f"step {step_n}",
+                "tool_calls": [
+                    {
+                        "id": f"call_cache_{step_n}",
+                        "type": "function",
+                        "function": {"name": "list_adapters", "arguments": "{}"},
+                    }
+                ],
+                "usage": {"prompt_tokens": 500 + step_n * 80, "completion_tokens": 20, "total_tokens": 520 + step_n * 80},
+                "model": "deepseek-v4",
+                "finish_reason": "tool_calls",
+            }
+        return {
+            "content": "完成全部 46 步。",
+            "tool_calls": [],
+            "usage": {"prompt_tokens": 4500, "completion_tokens": 15, "total_tokens": 4515},
+            "model": "deepseek-v4",
+            "finish_reason": "stop",
+        }
+
+    monkeypatch.setattr(llm_client, "chat_completion", _mock_chat)
+
+    s = ai_agent.agent_manager.create_session(title="KV Cache Prefix Test")
+    ai_agent.agent_manager.send_message(s.id, "连续跑 46 步验证前缀稳定性")
+    for _ in range(100):
+        if s.status == "done":
+            break
+        time.sleep(0.05)
+
+    assert s.status == "done"
+    assert len(seen_histories) == 47
+    # Past step 40 (>80 messages!), history MUST remain strictly append-only (100% identical prefix!)
+    assert len(seen_histories[-1]) > 90
+    for idx in range(1, len(seen_histories)):
+        prev_h = seen_histories[idx - 1]
+        cur_h = seen_histories[idx]
+        assert len(cur_h) > len(prev_h), f"History unexpectedly shrank at turn {idx}"
+        assert cur_h[: len(prev_h)] == prev_h, f"KV cache prefix invalidated at turn {idx}!"
+
+    # Persisted session JSON also keeps >80 messages (up to _PERSIST_MAX_MESSAGES)
+    disk_obj = json.loads((sessions_dir / f"{s.id}.json").read_text(encoding="utf-8"))
+    assert len(disk_obj["messages"]) == len(s.messages) and len(disk_obj["messages"]) > 90
+
+    # Anthropic format emits all 3 ephemeral prompt cache breakpoints (system, tools[-1], rolling last message)
+    cfg = {
+        "format": "anthropic",
+        "base_url": "https://api.anthropic.com",
+        "model": "claude-sonnet-4-5",
+        "api_key": "sk-ant-test-1234567890",
+        "temperature": 0.2,
+        "max_tokens_field": "max_tokens",
+        "thinking_mode": "none",
+        "reasoning_effort": "none",
+    }
+    fmt, _, _, payload = llm_client._build_request_spec(
+        messages=[
+            {"role": "user", "content": "probe site"},
+            {
+                "role": "assistant",
+                "content": "checking",
+                "tool_calls": [{"id": "t1", "type": "function", "function": {"name": "list_adapters", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "t1", "name": "list_adapters", "content": '{"ok":true}'},
+        ],
+        tools=ai_agent.TOOL_SCHEMAS[:2],
+        system_prompt="System prompt",
+        cfg=cfg,
+        max_tok=2048,
+    )
+    assert fmt == "anthropic"
+    assert isinstance(payload["system"], list) and payload["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert payload["tools"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert payload["messages"][-1]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+
+
 def test_stdlib_only_imports_in_llm_and_agent():
     import ast
     import sys

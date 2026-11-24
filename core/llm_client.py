@@ -781,13 +781,47 @@ def _build_request_spec(
 
     if fmt == "anthropic":
         sys_txt, anth_msgs = _openai_messages_to_anthropic(messages, system_prompt)
+        anth_msgs = anth_msgs or [{"role": "user", "content": "Hello"}]
+        # Prompt cache breakpoint 3 (rolling history tail): mark the last cacheable block
+        if len(anth_msgs) >= 2:
+            last_msg = dict(anth_msgs[-1])
+            last_content = last_msg.get("content")
+            if isinstance(last_content, str):
+                if last_content.strip():
+                    last_msg["content"] = [
+                        {
+                            "type": "text",
+                            "text": last_content,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ]
+                    anth_msgs[-1] = last_msg
+            elif isinstance(last_content, list) and last_content:
+                copied_blocks = list(last_content)
+                for b_idx in range(len(copied_blocks) - 1, -1, -1):
+                    blk = copied_blocks[b_idx]
+                    if not isinstance(blk, dict):
+                        continue
+                    btype = blk.get("type")
+                    if (btype == "text" and str(blk.get("text") or "").strip()) or btype == "tool_result":
+                        copied_blocks[b_idx] = {**blk, "cache_control": {"type": "ephemeral"}}
+                        last_msg["content"] = copied_blocks
+                        anth_msgs[-1] = last_msg
+                        break
         payload: Dict[str, Any] = {
             "model": cfg["model"],
             "max_tokens": int(max_tok),
-            "messages": anth_msgs or [{"role": "user", "content": "Hello"}],
+            "messages": anth_msgs,
         }
         if sys_txt:
-            payload["system"] = sys_txt
+            # Prompt cache breakpoint 1 (stable system prompt)
+            payload["system"] = [
+                {
+                    "type": "text",
+                    "text": sys_txt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
         if thinking_mode == "enabled" and int(max_tok) > 1280:
             budget = min(max(1024, int(max_tok) // 2), int(max_tok) - 256)
             payload["thinking"] = {"type": "enabled", "budget_tokens": budget}
@@ -795,6 +829,8 @@ def _build_request_spec(
             payload["temperature"] = cfg["temperature"]
         anth_tools = _openai_tools_to_anthropic(tools)
         if anth_tools:
+            # Prompt cache breakpoint 2 (stable tool definitions)
+            anth_tools[-1] = {**anth_tools[-1], "cache_control": {"type": "ephemeral"}}
             payload["tools"] = anth_tools
         if stream:
             payload["stream"] = True
