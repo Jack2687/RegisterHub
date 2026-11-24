@@ -454,6 +454,7 @@ def _load_raw_config_dict() -> Dict[str, Any]:
             "timeout": 30000,
             "enable_stealth": True,
             "use_chrome_channel": True,
+            "proxy_mode": "direct",
             "proxy": None,
             "cdp_endpoint": None,
         },
@@ -464,6 +465,7 @@ def _load_raw_config_dict() -> Dict[str, Any]:
             "use_disposable_mail": True,
         },
         "mail": {
+            "provider": "tempmail",
             "imap_server": "",
             "imap_port": 993,
             "imap_user": "",
@@ -475,10 +477,18 @@ def _load_raw_config_dict() -> Dict[str, Any]:
     try:
         raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         if isinstance(raw, dict):
+            raw_browser = raw.get("browser") or {}
+            raw_defaults = raw.get("defaults") or {}
+            raw_mail = raw.get("mail") or {}
             merged = dict(default_cfg)
-            merged["browser"] = {**default_cfg["browser"], **(raw.get("browser") or {})}
-            merged["defaults"] = {**default_cfg["defaults"], **(raw.get("defaults") or {})}
-            merged["mail"] = {**default_cfg["mail"], **(raw.get("mail") or {})}
+            merged["browser"] = {**default_cfg["browser"], **raw_browser}
+            merged["defaults"] = {**default_cfg["defaults"], **raw_defaults}
+            merged["mail"] = {**default_cfg["mail"], **raw_mail}
+            if "proxy_mode" not in raw_browser:
+                merged["browser"]["proxy_mode"] = "proxy" if str(merged["browser"].get("proxy") or "").strip() else "direct"
+            if "provider" not in raw_mail:
+                has_imap = bool(str(merged["mail"].get("imap_server") or "").strip())
+                merged["mail"]["provider"] = "imap" if (has_imap and not merged["defaults"].get("use_disposable_mail", True)) else "tempmail"
             if raw.get("output_dir"):
                 merged["output_dir"] = str(raw["output_dir"])
             return merged
@@ -511,9 +521,15 @@ def save_config_dict(updates: Dict[str, Any]) -> Dict[str, Any]:
         b["enable_stealth"] = bool(updates["enable_stealth"])
     if "use_chrome_channel" in updates:
         b["use_chrome_channel"] = bool(updates["use_chrome_channel"])
+    if "proxy_mode" in updates:
+        pm = str(updates["proxy_mode"] or "direct").strip().lower()
+        if pm in ("direct", "proxy", "builtin"):
+            b["proxy_mode"] = pm
     if "proxy" in updates:
         val = str(updates["proxy"] or "").strip()
         b["proxy"] = val or None
+        if "proxy_mode" not in updates and b.get("proxy_mode") != "builtin":
+            b["proxy_mode"] = "proxy" if val else "direct"
     if "cdp_endpoint" in updates:
         val = str(updates["cdp_endpoint"] or "").strip()
         b["cdp_endpoint"] = val or None
@@ -522,8 +538,18 @@ def save_config_dict(updates: Dict[str, Any]) -> Dict[str, Any]:
         d["country"] = str(updates["country"]).upper()
     if "password_length" in updates:
         d["password_length"] = max(10, min(32, int(updates["password_length"] or 14)))
-    if "use_disposable_mail" in updates:
-        d["use_disposable_mail"] = bool(updates["use_disposable_mail"])
+    if "mail_provider" in updates:
+        mp = str(updates["mail_provider"] or "tempmail").strip().lower()
+        if mp in ("tempmail", "imap", "builtin"):
+            m["provider"] = mp
+            d["use_disposable_mail"] = mp == "tempmail"
+    elif "use_disposable_mail" in updates:
+        use_disp = bool(updates["use_disposable_mail"])
+        d["use_disposable_mail"] = use_disp
+        if use_disp:
+            m["provider"] = "tempmail"
+        elif m.get("provider") == "tempmail":
+            m["provider"] = "imap"
 
     if "imap_server" in updates:
         m["imap_server"] = str(updates["imap_server"] or "").strip()

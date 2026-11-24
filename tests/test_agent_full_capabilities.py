@@ -418,11 +418,13 @@ def test_new_community_tools_checkpoints_guards_and_config_migration(isolated_en
     )
     st, cfg_res = _http_json(base_url, "GET", "/api/agent/config")
     assert st == 200
-    assert len(cfg_res["available_tools"]) == 14
+    assert len(cfg_res["available_tools"]) == 16
     enabled = set(cfg_res["agent"]["enabled_tools"])
     assert "patch_adapter" in enabled
     assert "read_core_file" in enabled
     assert "run_scratch_python" in enabled
+    assert "manage_builtin_mail" in enabled
+    assert "manage_builtin_proxies" in enabled
     assert "read_adapter" not in enabled  # manually disabled tool respected!
 
     # 2. Create session + upload HAR + test read_session_file & analyze_har

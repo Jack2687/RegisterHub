@@ -10,7 +10,7 @@ Strictly single-thread safe for Community Edition:
   - Step-level adapter checkpoints with one-click restore, persistent Guard Rules
     with human-in-the-loop approval gates, follow-up queue, `/goal` mode, and
     streaming `/btw` side questions.
-  - Exposes 14 pure-Community tools via Function Calling (zero private leaks).
+  - Exposes 16 pure-Community tools via Function Calling (zero private leaks).
 """
 
 from __future__ import annotations
@@ -121,14 +121,14 @@ AGENT_SYSTEM_PROMPT = """你是 RegisterHub 开源社区版（单线程安全模
 
 工作区契约：
 - 站点适配器位于 `sites/<name>.py`，必须定义继承 `core.adapter.BaseSiteAdapter` 的类，实现 `target_url()`、`prepare_identity()`、`fill_form(identity)`、`submit_and_confirm()`。
-- 可复用工具：`core.identity.generate_identity`、`core.pilot.{human_type, smart_click, smart_agree_tos}`、`core.mail_client.DisposableMailClient`、`core.imap_mail.SingleImapMailClient`。如需确认方法签名，优先用 `read_core_file` 只读查阅 `core/*.py` 或 `sites/_template.py`。
+- 可复用工具：`core.identity.generate_identity`、`core.pilot.{human_type, smart_click, smart_agree_tos}`、`core.mail_client.DisposableMailClient`、`core.imap_mail.{SingleImapMailClient, BuiltinPoolMailClient}`、`core.mail_builtin.get_builtin_mail_store`、`core.proxy_builtin.get_builtin_proxy_store`。如需确认方法签名，优先用 `read_core_file` 只读查阅 `core/*.py` 或 `sites/_template.py`。
 - 成功账号由 `StandardRunner` 自动写入 `results/accounts.txt`（支持 4 列 `email----password----username----api_key`），失败日志写入 `results/failed.txt`。
 
 核心工程红线：
 1. 开工第一步先调用 `update_plan` 列出 3-5 个清晰步骤，并随进展更新状态（pending / in_progress / done / failed）。
 2. 严禁虚构成功或写入假占位符（例如禁止将 `"Active"`、`"OK"`、`"placeholder"` 塞进 `account_data["api_key"]`）。`submit_and_confirm()` 必须在明确检测到注册成功标志时才返回 `True`。
 3. 编写适配器前先用 `probe_url` 探测目标页表单与风控特征；用户上传了 HAR/日志时用 `read_session_file` / `analyze_har` 分析；对已有适配器做小改动优先用 `patch_adapter` 精准修补而非整文件重写。
-4. 需要排查代理/网络/IMAP/依赖问题时调用 `check_infra`；需要做短时 API 或算法诊断验证时调用 `run_scratch_python`。
+4. 需要排查代理/网络/IMAP/依赖与内置邮箱池/内置代理池余量时调用 `check_infra`；批量导入、验活、查收件箱或维护本地邮箱/IP池时调用 `manage_builtin_mail` / `manage_builtin_proxies`；需要做短时 API 或算法诊断验证时调用 `run_scratch_python`。
 5. 写完或修完适配器后用 `run_adapter_once` 单线程试跑 1 个号，检查退出码、`accounts_delta` 与输出日志；失败时读取 `read_failures` 精准定位根因并修复；必要时调用 `verify_accounts` 盘点/验活已落盘凭据。
 6. 严格单线程串行执行，回答用简洁中文，明确交代探测结果、改动文件、试跑结论与下一步建议。
 """
@@ -147,6 +147,8 @@ TOOL_META: Dict[str, Dict[str, str]] = {
     "read_session_file": {"label": "读取会话上传附件", "risk": "read", "category": "session"},
     "analyze_har": {"label": "解析 HAR 抓包链路", "risk": "read", "category": "recon"},
     "check_infra": {"label": "诊断本地代理/环境", "risk": "read", "category": "infra"},
+    "manage_builtin_mail": {"label": "管理内置邮箱池", "risk": "write", "category": "infra"},
+    "manage_builtin_proxies": {"label": "管理内置代理池", "risk": "write", "category": "infra"},
     "verify_accounts": {"label": "核验账号台账与 Key", "risk": "read", "category": "assets"},
 }
 
@@ -327,12 +329,65 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "check_infra",
-            "description": "诊断本地社区版运行环境：运行 doctor 环境体检、查看脱敏代理/邮箱配置，可选实时检测当前出口 IP 纯净度评分。",
+            "description": "诊断本地社区版运行环境：运行 doctor 环境体检、查看脱敏代理/邮箱配置、盘点内置邮箱池与内置代理池余量，可选实时检测出口 IP 纯净度评分。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "check_ip_score": {"type": "boolean", "description": "是否同时发起实时出口 IP 纯净度打分（默认 false）"},
                 },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_builtin_mail",
+            "description": "管理本地 SQLite + DPAPI 内置邮箱池（零 Docker，支持 Outlook OAuth2 / iCloud 接码链接 / 通用 IMAP）：查看库存、批量导入、在线验活、查收件箱验证码、租借/释放、清理死号。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["status", "list", "preview", "import", "verify", "inbox", "lease", "release", "cleanup_dead"],
+                        "description": "操作类型",
+                    },
+                    "text": {"type": "string", "description": "action=preview/import 时的多行导入文本"},
+                    "format": {"type": "string", "description": "导入模板格式，默认 auto 自动识别"},
+                    "email": {"type": "string", "description": "action=inbox/release/verify 时的目标邮箱"},
+                    "status": {"type": "string", "description": "action=list 时的状态过滤（all/valid/unknown/dead）"},
+                    "mark_status": {"type": "string", "description": "action=release 时可选标记状态（valid/dead/unknown）"},
+                    "limit": {"type": "integer", "description": "列表/验活条数上限（默认 20，最大 50）"},
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_builtin_proxies",
+            "description": "管理本地 SQLite + DPAPI 内置代理池（零外部依赖，支持批量导入 HTTP/HTTPS/SOCKS5 静态代理、添加动态住宅网关、配置 API 提取源、连通性测活打分与清理失效代理）。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["status", "list", "import", "add_gateway", "add_api_source", "pull_source", "probe", "cleanup_dead"],
+                        "description": "操作类型",
+                    },
+                    "text": {"type": "string", "description": "action=import 时的多行代理文本"},
+                    "default_scheme": {"type": "string", "description": "默认协议（http/https/socks5/socks5h）"},
+                    "gateway_url": {"type": "string", "description": "action=add_gateway 时的住宅代理网关 URL"},
+                    "preset": {"type": "string", "description": "住宅网关预设（smartproxy/iproyal/oxylabs/brightdata/custom）"},
+                    "country": {"type": "string", "description": "出口国家代码（如 us/jp/gb）"},
+                    "label": {"type": "string", "description": "自定义标签名"},
+                    "url": {"type": "string", "description": "action=add_api_source 时的公网 API 提取链接"},
+                    "source_id": {"type": "integer", "description": "action=pull_source 时的提取源 ID"},
+                    "pull_now": {"type": "boolean", "description": "添加 API 提取源后是否立即拉取"},
+                    "target_url": {"type": "string", "description": "action=probe 时的可选目标探测 URL"},
+                    "limit": {"type": "integer", "description": "列表/探测条数上限（默认 20，最大 50）"},
+                },
+                "required": ["action"],
             },
         },
     },
@@ -1465,7 +1520,11 @@ def tool_check_infra(*, check_ip_score: bool = False) -> Dict[str, Any]:
     except Exception as exc:
         report = {"ready": False, "checks": [], "error": str(exc)}
 
-    cfg_summary: Dict[str, Any] = {"proxy_configured": False, "mail_mode": "disposable_tempmail"}
+    cfg_summary: Dict[str, Any] = {
+        "proxy_mode": "direct",
+        "proxy_configured": False,
+        "mail_mode": "tempmail",
+    }
     raw_proxy = ""
     try:
         if CONFIG_FILE.is_file():
@@ -1476,21 +1535,46 @@ def tool_check_infra(*, check_ip_score: bool = False) -> Dict[str, Any]:
                 d = raw.get("defaults") or {}
                 raw_proxy = str(b.get("proxy") or "").strip()
                 p_parsed = urlparse(raw_proxy) if raw_proxy else None
+                pm = str(b.get("proxy_mode") or ("proxy" if raw_proxy else "direct")).strip().lower()
+                mp = str(m.get("provider") or ("tempmail" if d.get("use_disposable_mail", True) else "imap")).strip().lower()
                 cfg_summary = {
+                    "proxy_mode": pm,
                     "proxy_configured": bool(raw_proxy),
                     "proxy_host": f"{p_parsed.scheme}://{p_parsed.hostname}:{p_parsed.port}" if (p_parsed and p_parsed.hostname) else "",
                     "headless": bool(b.get("headless", False)),
-                    "mail_mode": "disposable_tempmail" if d.get("use_disposable_mail", True) else "imap",
+                    "mail_mode": mp,
                     "imap_configured": bool(str(m.get("imap_server") or "").strip() and str(m.get("imap_user") or "").strip()),
                 }
     except Exception as exc:
         cfg_summary["config_error"] = str(exc)
+
+    mail_stats: Dict[str, Any] = {"total": 0, "valid": 0, "unknown": 0, "dead": 0, "available": 0, "leased": 0}
+    mail_db = RESULTS_DIR / "builtin_mail.db"
+    if mail_db.is_file():
+        try:
+            from core.mail_builtin import get_builtin_mail_store
+
+            mail_stats = get_builtin_mail_store(mail_db).get_stats()
+        except Exception as exc:
+            mail_stats = {"error": str(exc)}
+
+    proxy_stats: Dict[str, Any] = {"total": 0, "enabled": 0, "available": 0, "browser_compatible": 0}
+    proxy_db = RESULTS_DIR / "builtin_proxies.db"
+    if proxy_db.is_file():
+        try:
+            from core.proxy_builtin import get_builtin_proxy_store
+
+            proxy_stats = get_builtin_proxy_store(proxy_db).get_stats()
+        except Exception as exc:
+            proxy_stats = {"error": str(exc)}
 
     out: Dict[str, Any] = {
         "ok": True,
         "ready": bool(report.get("ready", False)),
         "checks": report.get("checks") or [],
         "config": cfg_summary,
+        "builtin_mail": mail_stats,
+        "builtin_proxies": proxy_stats,
     }
     if check_ip_score:
         try:
@@ -1507,6 +1591,150 @@ def tool_check_infra(*, check_ip_score: bool = False) -> Dict[str, Any]:
         except Exception as exc:
             out["ip_score"] = {"ok": False, "error": str(exc)}
     return out
+
+
+def tool_manage_builtin_mail(
+    action: str,
+    *,
+    text: str = "",
+    fmt: str = "auto",
+    email: str = "",
+    status: str = "all",
+    mark_status: Optional[str] = None,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    """Tool: Manage local SQLite + DPAPI built-in mail pool (pure stdlib)."""
+    from core.mail_builtin import get_builtin_mail_store
+    from core.secrets import sanitize_error_text
+
+    act = str(action or "status").strip().lower()
+    lim = max(1, min(50, int(limit or 20)))
+    db_path = RESULTS_DIR / "builtin_mail.db"
+    store = get_builtin_mail_store(db_path)
+
+    try:
+        if act == "status":
+            return {"ok": True, "stats": store.get_stats()}
+        if act == "list":
+            res = store.list_accounts(status=status or "all", limit=lim)
+            return {"ok": True, "total": res["total"], "items": res["items"], "stats": res["stats"]}
+        if act == "preview":
+            if not str(text or "").strip():
+                return {"ok": False, "error": "preview 操作需要提供 text"}
+            return {"ok": True, **store.preview_import(str(text), fmt=fmt or "auto", limit=min(lim, 12))}
+        if act == "import":
+            if not str(text or "").strip():
+                return {"ok": False, "error": "import 操作需要提供 text"}
+            return {"ok": True, **store.import_accounts(str(text), fmt=fmt or "auto")}
+        if act == "verify":
+            targets = [email.strip()] if str(email or "").strip() else None
+            return {"ok": True, **store.verify_batch(emails=targets, limit=min(lim, 20))}
+        if act == "inbox":
+            if not str(email or "").strip():
+                return {"ok": False, "error": "inbox 操作需要提供 email"}
+            return {"ok": True, **store.inspect_inbox(email.strip(), top=min(lim, 10), force=True)}
+        if act == "lease":
+            acc = store.lease_account(owner="ai_agent", ttl_s=900, include_unknown=True)
+            return {"ok": acc is not None, "account": acc, "stats": store.get_stats()}
+        if act == "release":
+            if not str(email or "").strip():
+                return {"ok": False, "error": "release 操作需要提供 email"}
+            ok = store.release_lease(email.strip(), mark_status=mark_status)
+            return {"ok": ok, "released": ok, "stats": store.get_stats()}
+        if act == "cleanup_dead":
+            deleted = store.cleanup_dead_accounts()
+            return {"ok": True, "deleted": deleted, "stats": store.get_stats()}
+        return {"ok": False, "error": f"未知内置邮箱池操作: {act}"}
+    except Exception as exc:
+        return {"ok": False, "error": sanitize_error_text(str(exc))}
+
+
+def tool_manage_builtin_proxies(
+    action: str,
+    *,
+    text: str = "",
+    default_scheme: str = "http",
+    gateway_url: str = "",
+    preset: str = "smartproxy",
+    country: str = "us",
+    label: str = "",
+    url: str = "",
+    source_id: int = 0,
+    pull_now: bool = False,
+    target_url: str = "",
+    limit: int = 20,
+) -> Dict[str, Any]:
+    """Tool: Manage local SQLite + DPAPI built-in proxy pool (pure stdlib)."""
+    from core.net_guard import validate_public_http_url
+    from core.proxy_builtin import get_builtin_proxy_store
+    from core.secrets import sanitize_error_text
+
+    act = str(action or "status").strip().lower()
+    lim = max(1, min(50, int(limit or 20)))
+    db_path = RESULTS_DIR / "builtin_proxies.db"
+    store = get_builtin_proxy_store(db_path)
+
+    try:
+        if act == "status":
+            return {"ok": True, "stats": store.get_stats(), "sources_count": len(store.list_sources())}
+        if act == "list":
+            res = store.list_entries(enabled_only=False)
+            return {
+                "ok": True,
+                "items": res["items"][:lim],
+                "sources": res["sources"],
+                "stats": res["stats"],
+            }
+        if act == "import":
+            if not str(text or "").strip():
+                return {"ok": False, "error": "import 操作需要提供 text"}
+            scheme = str(default_scheme or "http").strip().lower()
+            if scheme not in ("http", "https", "socks5", "socks5h"):
+                scheme = "http"
+            return {"ok": True, **store.import_static_proxies(str(text), default_scheme=scheme)}
+        if act == "add_gateway":
+            if not str(gateway_url or "").strip():
+                return {"ok": False, "error": "add_gateway 操作需要提供 gateway_url"}
+            return {
+                "ok": True,
+                **store.add_residential_gateway(
+                    gateway_url=str(gateway_url).strip(),
+                    label=str(label or "")[:80],
+                    preset=str(preset or "smartproxy")[:32],
+                    country=str(country or "us")[:16],
+                ),
+            }
+        if act == "add_api_source":
+            if not str(url or "").strip():
+                return {"ok": False, "error": "add_api_source 操作需要提供 url"}
+            scheme = str(default_scheme or "http").strip().lower()
+            if scheme not in ("http", "https", "socks5", "socks5h"):
+                scheme = "http"
+            res = store.add_source(
+                kind="api_extract",
+                url=str(url).strip(),
+                label=str(label or "")[:80],
+                default_scheme=scheme,
+            )
+            if pull_now and res.get("source"):
+                res["pull"] = store.pull_api_source(int(res["source"]["id"]))
+                res["stats"] = store.get_stats()
+            return {"ok": True, **res}
+        if act == "pull_source":
+            if int(source_id or 0) < 1:
+                return {"ok": False, "error": "pull_source 操作需要提供 source_id"}
+            return store.pull_api_source(int(source_id))
+        if act == "probe":
+            clean_target = str(target_url or "").strip()
+            if clean_target:
+                clean_target = validate_public_http_url(clean_target, resolve_dns=False)
+            return {"ok": True, **store.probe_batch(target_url=clean_target, limit=min(lim, 20))}
+        if act == "cleanup_dead":
+            deleted = store.cleanup_unavailable_entries()
+            return {"ok": True, "deleted": deleted, "stats": store.get_stats()}
+        return {"ok": False, "error": f"未知内置代理池操作: {act}"}
+    except Exception as exc:
+        return {"ok": False, "error": sanitize_error_text(str(exc))}
 
 
 def tool_verify_accounts(*, base_url: str = "", limit: int = 10) -> Dict[str, Any]:
@@ -2622,6 +2850,31 @@ def _execute_tool_call(
         )
     if name == "check_infra":
         return tool_check_infra(check_ip_score=bool(args.get("check_ip_score", False)))
+    if name == "manage_builtin_mail":
+        return tool_manage_builtin_mail(
+            str(args.get("action") or "status"),
+            text=str(args.get("text") or ""),
+            fmt=str(args.get("format") or "auto"),
+            email=str(args.get("email") or ""),
+            status=str(args.get("status") or "all"),
+            mark_status=str(args["mark_status"]) if args.get("mark_status") is not None else None,
+            limit=int(args.get("limit") or 20),
+        )
+    if name == "manage_builtin_proxies":
+        return tool_manage_builtin_proxies(
+            str(args.get("action") or "status"),
+            text=str(args.get("text") or ""),
+            default_scheme=str(args.get("default_scheme") or "http"),
+            gateway_url=str(args.get("gateway_url") or ""),
+            preset=str(args.get("preset") or "smartproxy"),
+            country=str(args.get("country") or "us"),
+            label=str(args.get("label") or ""),
+            url=str(args.get("url") or ""),
+            source_id=int(args.get("source_id") or 0),
+            pull_now=bool(args.get("pull_now", False)),
+            target_url=str(args.get("target_url") or ""),
+            limit=int(args.get("limit") or 20),
+        )
     if name == "verify_accounts":
         return tool_verify_accounts(
             base_url=str(args.get("base_url") or ""),

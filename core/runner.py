@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Type, Optional
+from typing import Dict, Any, Type, Optional, Tuple
 from playwright.sync_api import sync_playwright, Page
 
 _ORIG_PLAYWRIGHT_SYNC = sync_playwright
@@ -67,6 +67,9 @@ class StandardRunner:
         self.enable_stealth = browser_cfg.get("enable_stealth", True)
         self.use_chrome_channel = browser_cfg.get("use_chrome_channel", True)
         self.stealth_backend = str(browser_cfg.get("stealth_backend", "auto") or "auto")
+        self.proxy_mode = str(
+            browser_cfg.get("proxy_mode") or ("proxy" if browser_cfg.get("proxy") else "direct")
+        ).strip().lower()
         self.proxy_server = browser_cfg.get("proxy") or os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
         self.cdp_endpoint = cdp_endpoint or browser_cfg.get("cdp_endpoint")
         self.output_dir = Path(config.get("output_dir", "./results"))
@@ -148,9 +151,10 @@ class StandardRunner:
             "ignore_default_args": ["--enable-automation"]
         }
 
-        if self.proxy_server:
-            self.log("info", f"Using proxy server: {self.proxy_server}")
-            launch_kwargs["proxy"] = {"server": self.proxy_server}
+        pw_proxy, proxy_label = self._resolve_launch_proxy()
+        if pw_proxy:
+            self.log("info", f"Using proxy server: {proxy_label}")
+            launch_kwargs["proxy"] = pw_proxy
 
         # Try launching official Google Chrome first if available
         if self.use_chrome_channel:
@@ -161,6 +165,46 @@ class StandardRunner:
                 self.log("warn", f"Official Google Chrome not available ({e}), falling back to bundled Chromium.")
 
         return p.chromium.launch(**launch_kwargs)
+
+    def _resolve_launch_proxy(self) -> Tuple[Optional[Dict[str, str]], str]:
+        """Resolve Playwright proxy dict from built-in proxy pool or config (credentials masked in logs)."""
+        from core.secrets import mask_proxy_url, proxy_url_to_playwright_dict
+
+        if self.proxy_mode == "builtin":
+            db_path = self.output_dir / "builtin_proxies.db"
+            if db_path.is_file():
+                try:
+                    from core.proxy_builtin import get_builtin_proxy_store
+
+                    store = get_builtin_proxy_store(db_path)
+                    entries = store.list_runtime_entries(browser_only=True, auto_replenish=True)
+                    if entries:
+                        picked = entries[0]
+                        if picked.get("kind") == "residential_gateway":
+                            fresh = store.materialize_gateway_by_id(int(picked["id"]))
+                            if fresh:
+                                picked = fresh
+                        pw_dict = picked.get("playwright_proxy")
+                        if isinstance(pw_dict, dict) and pw_dict.get("server"):
+                            label = f"builtin:{picked.get('label') or picked.get('id')} ({picked.get('masked_url') or pw_dict['server']})"
+                            return pw_dict, label
+                except Exception as exc:
+                    self.log("warn", f"Built-in proxy pool resolution failed ({exc}); falling back to direct/config.")
+            self.log("warn", "Built-in proxy pool has no enabled browser-compatible proxy; falling back.")
+
+        if self.proxy_server and self.proxy_mode != "direct":
+            try:
+                return proxy_url_to_playwright_dict(str(self.proxy_server)), mask_proxy_url(str(self.proxy_server))
+            except Exception:
+                return {"server": str(self.proxy_server)}, mask_proxy_url(str(self.proxy_server))
+
+        if self.proxy_server and self.proxy_mode == "direct":
+            # Respect explicit HTTP_PROXY / HTTPS_PROXY env or legacy config when proxy_server is set
+            try:
+                return proxy_url_to_playwright_dict(str(self.proxy_server)), mask_proxy_url(str(self.proxy_server))
+            except Exception:
+                return {"server": str(self.proxy_server)}, mask_proxy_url(str(self.proxy_server))
+        return None, ""
 
     def execute_adapter(self, adapter_cls: Type[BaseSiteAdapter], count: int = 1) -> int:
         success_count = 0
@@ -226,6 +270,12 @@ class StandardRunner:
                         self.log("info", "Keeping window visible for 6 seconds before closing...")
                         time.sleep(6)
                 finally:
+                    mc = getattr(adapter, "mail_client", None)
+                    if mc is not None and callable(getattr(mc, "release", None)):
+                        try:
+                            mc.release()
+                        except Exception:
+                            pass
                     page.close()
 
             if not self.cdp_endpoint:

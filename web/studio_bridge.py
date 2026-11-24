@@ -24,6 +24,69 @@ _HEALTH_CACHE_LOCK = threading.Lock()
 _HEALTH_CACHE: Dict[str, Any] = {"ts": 0.0, "payload": None}
 _HEALTH_CACHE_TTL_S = 30.0
 
+_BUILTIN_STORE_LOCK = threading.Lock()
+_BUILTIN_MAIL_STORES: Dict[str, Any] = {}
+_BUILTIN_PROXY_STORES: Dict[str, Any] = {}
+
+
+def _get_builtin_mail_store(srv: Any) -> Any:
+    from core.mail_builtin import BuiltinMailStore
+
+    db_path = (Path(srv.RESULTS_DIR) / "builtin_mail.db").resolve()
+    key = str(db_path)
+    with _BUILTIN_STORE_LOCK:
+        store = _BUILTIN_MAIL_STORES.get(key)
+        if store is None or not db_path.exists():
+            store = BuiltinMailStore(db_path)
+            _BUILTIN_MAIL_STORES[key] = store
+        return store
+
+
+def _get_builtin_proxy_store(srv: Any) -> Any:
+    from core.proxy_builtin import BuiltinProxyStore
+
+    db_path = (Path(srv.RESULTS_DIR) / "builtin_proxies.db").resolve()
+    key = str(db_path)
+    with _BUILTIN_STORE_LOCK:
+        store = _BUILTIN_PROXY_STORES.get(key)
+        if store is None or not db_path.exists():
+            store = BuiltinProxyStore(db_path)
+            _BUILTIN_PROXY_STORES[key] = store
+        return store
+
+
+def _is_loopback_client(handler: Any) -> bool:
+    addr = getattr(handler, "client_address", None)
+    host = str(addr[0] if isinstance(addr, (tuple, list)) and addr else "").strip().lower()
+    return host in ("127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost")
+
+
+def _community_kernel_status(srv: Any, store: Any) -> Dict[str, Any]:
+    bin_path = Path(srv.ROOT_DIR) / "bin" / "easy_proxies.exe"
+    stats = store.get_stats()
+    return {
+        "running": False,
+        "binary_exists": bin_path.is_file(),
+        "binary_label": "bin/easy_proxies.exe",
+        "pid": 0,
+        "subscription_count": int(stats.get("subscription_sources") or 0),
+        "node_count": int(stats.get("subscription_nodes") or 0),
+        "available_nodes": 0,
+        "started_at": 0,
+        "last_error": "",
+    }
+
+
+def _parse_int_param(raw: Any, default: int, lo: int, hi: int) -> int:
+    try:
+        return max(lo, min(hi, int(raw)))
+    except Exception:
+        return default
+
+
+def _parse_bool_qs(qs: Dict[str, List[str]], key: str) -> bool:
+    return str((qs.get(key) or ["0"])[0]).strip().lower() in ("1", "true", "yes", "on")
+
 
 COMMUNITY_META: Dict[str, Any] = {
     "edition": "community",
@@ -46,15 +109,15 @@ COMMUNITY_META: Dict[str, Any] = {
         "pro_adapters": True,
         "adapter_editor": False,
         "scheduler": False,
-        "proxy_import": False,
+        "proxy_import": True,
         "accounts": True,
         "accounts_delete": True,
         "tools": True,
         "tools_extras": False,
         "password_change": False,
         "ai_agent": True,
-        "builtin_mail": False,
-        "builtin_proxies": False,
+        "builtin_mail": True,
+        "builtin_proxies": True,
         "single_thread_only": True,
         "demo_mode": False,
     },
@@ -593,13 +656,20 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
         return True
 
     if path == "/api/services/proxies":
+        db_p = Path(srv.RESULTS_DIR) / "builtin_proxies.db"
+        p_stats: Dict[str, Any] = {}
+        if db_p.is_file():
+            try:
+                p_stats = _get_builtin_proxy_store(srv).get_stats()
+            except Exception:
+                p_stats = {}
         handler._send_json({
-            "source": "community",
+            "source": "builtin" if p_stats.get("total") else "community",
             "online": True,
             "latency_ms": 0,
-            "total": 0,
-            "available": 0,
-            "clean_count": 0,
+            "total": int(p_stats.get("total") or 0),
+            "available": int(p_stats.get("available") or 0),
+            "clean_count": int(p_stats.get("browser_compatible") or 0),
             "nodes": [],
         })
         return True
@@ -672,12 +742,18 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
         m = cfg.get("mail") or {}
         has_proxy = bool(str(b.get("proxy") or "").strip())
         has_imap = bool(str(m.get("imap_server") or "").strip() and not d.get("use_disposable_mail", True))
+        proxy_mode = str(b.get("proxy_mode") or ("proxy" if has_proxy else "direct")).strip().lower()
+        if proxy_mode not in ("direct", "proxy", "builtin"):
+            proxy_mode = "proxy" if has_proxy else "direct"
+        mail_provider = str(m.get("provider") or ("imap" if has_imap else "tempmail")).strip().lower()
+        if mail_provider not in ("tempmail", "imap", "builtin"):
+            mail_provider = "imap" if has_imap else "tempmail"
         handler._send_json({
             "edition": "community",
-            "proxy_mode": "proxy" if has_proxy else "direct",
+            "proxy_mode": proxy_mode,
             "proxy_residential_url": str(b.get("proxy") or ""),
             "proxy_cdp_endpoint": str(b.get("cdp_endpoint") or ""),
-            "mail_provider": "imap" if has_imap else "tempmail",
+            "mail_provider": mail_provider,
             "mail_hub_api": "",
             "mail_cf_wildcard_domain": "",
             "mail_imap_server": str(m.get("imap_server") or ""),
@@ -767,6 +843,79 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
         handler._send_json({"ok": True, "events": evs, "last_seq": detail.get("next_seq", 0), "has_more": False})
         return True
 
+    if path == "/api/mail/builtin/formats":
+        from core.mail_builtin import IMPORT_FORMATS
+
+        handler._send_json({"formats": list(IMPORT_FORMATS.values())})
+        return True
+
+    if path == "/api/mail/builtin/accounts":
+        from core.mail_builtin import IMPORT_FORMATS
+
+        store = _get_builtin_mail_store(srv)
+        status = str((qs.get("status") or ["all"])[0] or "all")
+        provider_kind = str((qs.get("provider_kind") or ["all"])[0] or "all")
+        query = str((qs.get("query") or [""])[0] or "")
+        limit = _parse_int_param((qs.get("limit") or ["200"])[0], 200, 1, 1000)
+        offset = _parse_int_param((qs.get("offset") or ["0"])[0], 0, 0, 1_000_000)
+        data = store.list_accounts(
+            status=status,
+            provider_kind=provider_kind,
+            query=query,
+            limit=limit,
+            offset=offset,
+        )
+        data["formats"] = list(IMPORT_FORMATS.values())
+        handler._send_json(data)
+        return True
+
+    if path == "/api/proxies/builtin/presets":
+        from core.proxy_builtin import RESIDENTIAL_PRESETS
+
+        handler._send_json({"presets": list(RESIDENTIAL_PRESETS.values())})
+        return True
+
+    if path == "/api/proxies/builtin/entries":
+        from core.proxy_builtin import RESIDENTIAL_PRESETS
+
+        store = _get_builtin_proxy_store(srv)
+        enabled_only = _parse_bool_qs(qs, "enabled_only")
+        data = store.list_entries(enabled_only=enabled_only)
+        data["presets"] = list(RESIDENTIAL_PRESETS.values())
+        data["kernel"] = _community_kernel_status(srv, store)
+        handler._send_json(data)
+        return True
+
+    if path == "/api/proxies/builtin/sources":
+        store = _get_builtin_proxy_store(srv)
+        kind = str((qs.get("kind") or [""])[0] or "")
+        handler._send_json({
+            "sources": store.list_sources(kind=kind),
+            "kernel": _community_kernel_status(srv, store),
+            "stats": store.get_stats(),
+        })
+        return True
+
+    if path == "/api/proxies/builtin/kernel/status":
+        store = _get_builtin_proxy_store(srv)
+        handler._send_json({"kernel": _community_kernel_status(srv, store)})
+        return True
+
+    if path == "/api/proxies/builtin/runtime-entries":
+        if not _is_loopback_client(handler):
+            handler._send_json({"detail": "仅允许本机回环进程访问代理运行态 Broker 接口"}, status=403)
+            return True
+        store = _get_builtin_proxy_store(srv)
+        browser_only = _parse_bool_qs(qs, "browser_only")
+        auto_replenish = _parse_bool_qs(qs, "auto_replenish")
+        handler._send_json({
+            "items": store.list_runtime_entries(
+                browser_only=browser_only,
+                auto_replenish=auto_replenish,
+            )
+        })
+        return True
+
     return False
 
 
@@ -799,14 +948,23 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
 
     if path == "/api/settings/config":
         updates: Dict[str, Any] = {}
-        if "proxy_mode" in body or "proxy_residential_url" in body:
-            mode = str(body.get("proxy_mode") or "direct")
+        if "proxy_mode" in body:
+            mode = str(body.get("proxy_mode") or "direct").strip().lower()
+            if mode in ("direct", "proxy", "builtin"):
+                updates["proxy_mode"] = mode
+        if "proxy_residential_url" in body:
             px = str(body.get("proxy_residential_url") or "").strip()
-            updates["proxy"] = px if mode != "direct" else ""
+            eff_mode = updates.get("proxy_mode")
+            updates["proxy"] = "" if eff_mode == "direct" else px
+        elif updates.get("proxy_mode") == "direct":
+            updates["proxy"] = ""
         if "proxy_cdp_endpoint" in body:
             updates["cdp_endpoint"] = str(body.get("proxy_cdp_endpoint") or "").strip()
         if "mail_provider" in body:
-            updates["use_disposable_mail"] = str(body.get("mail_provider") or "tempmail") != "imap"
+            prov = str(body.get("mail_provider") or "tempmail").strip().lower()
+            if prov in ("tempmail", "imap", "builtin"):
+                updates["mail_provider"] = prov
+                updates["use_disposable_mail"] = prov == "tempmail"
         for k in ("mail_imap_server", "mail_imap_port", "mail_imap_user", "mail_imap_password"):
             if k in body:
                 updates[k.replace("mail_", "")] = body[k]
@@ -1404,6 +1562,354 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
             handler._send_json({"ok": False, "error": str(e)}, status=400)
         return True
 
+    # ------------------------------------------------------------------
+    # 内置邮箱池 (/api/mail/builtin/*)
+    # ------------------------------------------------------------------
+    if path == "/api/mail/builtin/preview":
+        from core.secrets import sanitize_error_text
+
+        text = str(body.get("text") or "")
+        if not text.strip() or len(text) > 2_000_000:
+            handler._send_json({"detail": "待预览文本不能为空且不能超过 2MB"}, status=400)
+            return True
+        store = _get_builtin_mail_store(srv)
+        try:
+            res = store.preview_import(
+                text,
+                fmt=str(body.get("format") or "auto")[:64],
+                delimiter=str(body.get("delimiter") or "auto")[:16],
+                limit=_parse_int_param(body.get("limit"), 8, 1, 20),
+            )
+            handler._send_json(res)
+        except ValueError as e:
+            handler._send_json({"detail": sanitize_error_text(str(e))}, status=400)
+        return True
+
+    if path == "/api/mail/builtin/import":
+        from core.secrets import sanitize_error_text
+
+        text = str(body.get("text") or "")
+        if not text.strip() or len(text) > 2_000_000:
+            handler._send_json({"detail": "待导入文本不能为空且不能超过 2MB"}, status=400)
+            return True
+        store = _get_builtin_mail_store(srv)
+        try:
+            res = store.import_accounts(
+                text,
+                fmt=str(body.get("format") or "auto")[:64],
+                delimiter=str(body.get("delimiter") or "auto")[:16],
+                overwrite_existing=bool(body.get("overwrite_existing", False)),
+            )
+            handler._send_json(res)
+        except ValueError as e:
+            handler._send_json({"detail": sanitize_error_text(str(e))}, status=400)
+        except Exception as e:
+            handler._send_json({"detail": sanitize_error_text(str(e))}, status=500)
+        return True
+
+    if path == "/api/mail/builtin/verify":
+        store = _get_builtin_mail_store(srv)
+        emails = body.get("emails") if isinstance(body.get("emails"), list) else []
+        clean_emails = [str(e) for e in emails[:100] if str(e or "").strip()]
+        lim = _parse_int_param(body.get("limit"), 30, 1, 100)
+        handler._send_json(store.verify_batch(emails=clean_emails or None, limit=lim))
+        return True
+
+    if path == "/api/mail/builtin/inbox":
+        from core.secrets import sanitize_error_text
+
+        em = str(body.get("email") or "").strip()
+        if len(em) < 3 or len(em) > 254:
+            handler._send_json({"detail": "邮箱地址格式非法"}, status=400)
+            return True
+        store = _get_builtin_mail_store(srv)
+        try:
+            res = store.inspect_inbox(
+                em,
+                top=_parse_int_param(body.get("top"), 8, 1, 20),
+                force=bool(body.get("force", False)),
+            )
+            handler._send_json(res)
+        except ValueError as e:
+            handler._send_json({"detail": str(e)}, status=404)
+        except Exception as e:
+            handler._send_json({"detail": sanitize_error_text(str(e))}, status=502)
+        return True
+
+    if path == "/api/mail/builtin/message":
+        from core.secrets import sanitize_error_text
+
+        em = str(body.get("email") or "").strip()
+        mid = str(body.get("msg_id") or "").strip()
+        if not em or not mid:
+            handler._send_json({"detail": "缺少 email 或 msg_id"}, status=400)
+            return True
+        store = _get_builtin_mail_store(srv)
+        try:
+            handler._send_json(store.inspect_message(em, mid))
+        except (ValueError, KeyError) as e:
+            handler._send_json({"detail": str(e)}, status=404)
+        except Exception as e:
+            handler._send_json({"detail": sanitize_error_text(str(e))}, status=502)
+        return True
+
+    if path == "/api/mail/builtin/messages":
+        from core.secrets import sanitize_error_text
+
+        em = str(body.get("email") or "").strip()
+        if len(em) < 3:
+            handler._send_json({"detail": "邮箱地址格式非法"}, status=400)
+            return True
+        try:
+            since_val = max(0.0, float(body.get("since") or 0.0))
+        except Exception:
+            since_val = 0.0
+        store = _get_builtin_mail_store(srv)
+        try:
+            msgs = store.list_messages(em, top=_parse_int_param(body.get("top"), 8, 1, 20), since=since_val)
+            handler._send_json({"email": em.lower(), "messages": msgs})
+        except ValueError as e:
+            handler._send_json({"detail": str(e)}, status=404)
+        except Exception as e:
+            handler._send_json({"detail": sanitize_error_text(str(e))}, status=502)
+        return True
+
+    if path == "/api/mail/builtin/delete":
+        store = _get_builtin_mail_store(srv)
+        emails = body.get("emails") if isinstance(body.get("emails"), list) else []
+        deleted = store.delete_accounts([str(e) for e in emails[:500]])
+        handler._send_json({"deleted": deleted, "stats": store.get_stats()})
+        return True
+
+    if path == "/api/mail/builtin/cleanup-dead":
+        store = _get_builtin_mail_store(srv)
+        deleted = store.cleanup_dead_accounts()
+        handler._send_json({"deleted": deleted, "stats": store.get_stats()})
+        return True
+
+    if path == "/api/mail/builtin/reset":
+        store = _get_builtin_mail_store(srv)
+        emails = body.get("emails") if isinstance(body.get("emails"), list) else []
+        clean_emails = [str(e) for e in emails[:500] if str(e or "").strip()]
+        reset_n = store.reset_accounts(clean_emails or None)
+        handler._send_json({"reset": reset_n, "stats": store.get_stats()})
+        return True
+
+    if path == "/api/mail/builtin/lease":
+        store = _get_builtin_mail_store(srv)
+        owner = str(body.get("owner") or "runner").strip()[:80] or "runner"
+        ttl_s = _parse_int_param(body.get("ttl_s"), 900, 30, 7200)
+        include_unknown = bool(body.get("include_unknown", False))
+        acc = store.lease_account(owner=owner, ttl_s=ttl_s, include_unknown=include_unknown)
+        handler._send_json({"account": acc, "stats": store.get_stats()})
+        return True
+
+    if path == "/api/mail/builtin/release":
+        store = _get_builtin_mail_store(srv)
+        em = str(body.get("email") or "").strip()
+        if len(em) < 3:
+            handler._send_json({"detail": "邮箱地址格式非法"}, status=400)
+            return True
+        mark = body.get("mark_status")
+        if mark is not None and str(mark) not in ("valid", "dead", "unknown"):
+            handler._send_json({"detail": "mark_status 仅支持 valid / dead / unknown"}, status=400)
+            return True
+        ok = store.release_lease(
+            em,
+            owner=str(body.get("owner") or "")[:80],
+            mark_status=str(mark) if mark is not None else None,
+        )
+        handler._send_json({"released": ok, "stats": store.get_stats()})
+        return True
+
+    # ------------------------------------------------------------------
+    # 统一内置代理池 (/api/proxies/builtin/*)
+    # ------------------------------------------------------------------
+    if path == "/api/proxies/builtin/import":
+        from core.secrets import sanitize_error_text
+
+        text = str(body.get("text") or "")
+        if not text.strip() or len(text) > 1_000_000:
+            handler._send_json({"detail": "代理文本不能为空且不能超过 1MB"}, status=400)
+            return True
+        scheme = str(body.get("default_scheme") or "http").strip().lower()
+        if scheme not in ("http", "https", "socks5", "socks5h"):
+            handler._send_json({"detail": "default_scheme 仅支持 http / https / socks5 / socks5h"}, status=400)
+            return True
+        store = _get_builtin_proxy_store(srv)
+        try:
+            handler._send_json(store.import_static_proxies(text, default_scheme=scheme))
+        except ValueError as e:
+            handler._send_json({"detail": sanitize_error_text(str(e))}, status=400)
+        return True
+
+    if path == "/api/proxies/builtin/gateway":
+        from core.secrets import sanitize_error_text
+
+        gw_url = str(body.get("gateway_url") or "").strip()
+        if len(gw_url) < 5 or len(gw_url) > 1024:
+            handler._send_json({"detail": "请填写合法的动态住宅代理网关地址"}, status=400)
+            return True
+        store = _get_builtin_proxy_store(srv)
+        try:
+            res = store.add_residential_gateway(
+                gateway_url=gw_url,
+                label=str(body.get("label") or "")[:80],
+                preset=str(body.get("preset") or "smartproxy")[:32],
+                session_template=str(body.get("session_template") or "")[:160],
+                country=str(body.get("country") or "us")[:16],
+            )
+            handler._send_json(res)
+        except ValueError as e:
+            handler._send_json({"detail": sanitize_error_text(str(e))}, status=400)
+        return True
+
+    if path == "/api/proxies/builtin/probe":
+        from core.net_guard import validate_public_http_url
+
+        target_url = str(body.get("target_url") or "").strip()
+        if target_url:
+            try:
+                target_url = validate_public_http_url(target_url, resolve_dns=False)
+            except ValueError as e:
+                handler._send_json({"detail": str(e)}, status=400)
+                return True
+        raw_ids = body.get("ids") if isinstance(body.get("ids"), list) else []
+        clean_ids: List[int] = []
+        for x in raw_ids[:50]:
+            try:
+                clean_ids.append(int(x))
+            except Exception:
+                pass
+        lim = _parse_int_param(body.get("limit"), 20, 1, 50)
+        store = _get_builtin_proxy_store(srv)
+        handler._send_json(store.probe_batch(ids=clean_ids or None, target_url=target_url, limit=lim))
+        return True
+
+    if path == "/api/proxies/builtin/toggle":
+        raw_ids = body.get("ids") if isinstance(body.get("ids"), list) else []
+        clean_ids = [int(x) for x in raw_ids[:500] if str(x).isdigit()]
+        if not clean_ids:
+            handler._send_json({"detail": "请至少选择一条代理"}, status=400)
+            return True
+        store = _get_builtin_proxy_store(srv)
+        updated = store.toggle_entries(clean_ids, enabled=bool(body.get("enabled", True)))
+        handler._send_json({"updated": updated, "stats": store.get_stats()})
+        return True
+
+    if path == "/api/proxies/builtin/delete":
+        raw_ids = body.get("ids") if isinstance(body.get("ids"), list) else []
+        clean_ids = [int(x) for x in raw_ids[:500] if str(x).isdigit()]
+        if not clean_ids:
+            handler._send_json({"detail": "请至少选择一条代理"}, status=400)
+            return True
+        store = _get_builtin_proxy_store(srv)
+        deleted = store.delete_entries(clean_ids)
+        handler._send_json({"deleted": deleted, "stats": store.get_stats()})
+        return True
+
+    if path == "/api/proxies/builtin/cleanup-dead":
+        store = _get_builtin_proxy_store(srv)
+        deleted = store.cleanup_unavailable_entries()
+        handler._send_json({"deleted": deleted, "stats": store.get_stats()})
+        return True
+
+    if path == "/api/proxies/builtin/sources":
+        from core.secrets import sanitize_error_text
+
+        kind = str(body.get("kind") or "").strip().lower()
+        url = str(body.get("url") or "").strip()
+        scheme = str(body.get("default_scheme") or "http").strip().lower()
+        if kind not in ("api_extract", "subscription"):
+            handler._send_json({"detail": "kind 仅支持 api_extract 或 subscription"}, status=400)
+            return True
+        if len(url) < 8 or len(url) > 2048:
+            handler._send_json({"detail": "请填写合法的代理源 URL"}, status=400)
+            return True
+        if scheme not in ("http", "https", "socks5", "socks5h"):
+            handler._send_json({"detail": "default_scheme 仅支持 http / https / socks5 / socks5h"}, status=400)
+            return True
+        store = _get_builtin_proxy_store(srv)
+        try:
+            res = store.add_source(
+                kind=kind,
+                url=url,
+                label=str(body.get("label") or "")[:80],
+                default_scheme=scheme,
+                min_available=_parse_int_param(body.get("min_available"), 3, 1, 100),
+                ttl_minutes=_parse_int_param(body.get("ttl_minutes"), 15, 1, 1440),
+            )
+        except ValueError as e:
+            handler._send_json({"detail": sanitize_error_text(str(e))}, status=400)
+            return True
+        if bool(body.get("pull_now", False)) and kind == "api_extract" and res.get("source"):
+            pull_res = store.pull_api_source(int(res["source"]["id"]))
+            res["pull"] = pull_res
+            res["sources"] = store.list_sources()
+            res["stats"] = store.get_stats()
+        res["kernel"] = _community_kernel_status(srv, store)
+        handler._send_json(res)
+        return True
+
+    m_px_src_toggle = re.fullmatch(r"/api/proxies/builtin/sources/(\d+)/toggle", path)
+    if m_px_src_toggle:
+        sid = int(m_px_src_toggle.group(1))
+        store = _get_builtin_proxy_store(srv)
+        ok = store.toggle_source(sid, enabled=bool(body.get("enabled", True)))
+        if not ok:
+            handler._send_json({"detail": "代理源不存在"}, status=404)
+            return True
+        handler._send_json({
+            "ok": True,
+            "sources": store.list_sources(),
+            "kernel": _community_kernel_status(srv, store),
+            "stats": store.get_stats(),
+        })
+        return True
+
+    m_px_src_pull = re.fullmatch(r"/api/proxies/builtin/sources/(\d+)/pull", path)
+    if m_px_src_pull:
+        sid = int(m_px_src_pull.group(1))
+        store = _get_builtin_proxy_store(srv)
+        res = store.pull_api_source(sid)
+        if not res.get("ok") and res.get("error") == "API 提取源不存在":
+            handler._send_json({"detail": "API 提取源不存在"}, status=404)
+            return True
+        handler._send_json(res)
+        return True
+
+    if path in ("/api/proxies/builtin/kernel/start", "/api/proxies/builtin/kernel/stop", "/api/proxies/builtin/kernel/sync"):
+        store = _get_builtin_proxy_store(srv)
+        handler._send_json({
+            "ok": False,
+            "error": "开源社区版采用零外部依赖设计：静态代理、动态住宅网关与 API 提取链接已全部开箱可用；订阅托管内核需额外配置 bin/easy_proxies.exe。",
+            "kernel": _community_kernel_status(srv, store),
+        })
+        return True
+
+    if path == "/api/proxies/builtin/materialize-gateway":
+        if not _is_loopback_client(handler):
+            handler._send_json({"detail": "仅允许本机回环进程访问代理运行态 Broker 接口"}, status=403)
+            return True
+        try:
+            eid = int(body.get("id") or 0)
+        except Exception:
+            eid = 0
+        if eid < 1:
+            handler._send_json({"detail": "缺少合法的网关 id"}, status=400)
+            return True
+        store = _get_builtin_proxy_store(srv)
+        raw_sid = body.get("session_id")
+        entry = store.materialize_gateway_by_id(
+            eid,
+            session_id=str(raw_sid)[:32] if raw_sid is not None else None,
+        )
+        if not entry:
+            handler._send_json({"detail": "动态住宅网关不存在或已禁用"}, status=404)
+            return True
+        handler._send_json({"entry": entry})
+        return True
+
     if path == "/api/agent/config":
         from core.ai_agent import get_available_tools_meta, save_agent_config
 
@@ -1483,6 +1989,18 @@ def handle_studio_delete(handler: Any, srv: Any, path: str) -> bool:
             handler._send_json(srv.agent_manager.remove_queued_message(m_ag_q_del.group(1), m_ag_q_del.group(2)))
         except KeyError as e:
             handler._send_json({"ok": False, "error": str(e)}, status=404)
+        return True
+
+    m_px_src_del = re.fullmatch(r"/api/proxies/builtin/sources/(\d+)", path)
+    if m_px_src_del:
+        sid = int(m_px_src_del.group(1))
+        store = _get_builtin_proxy_store(srv)
+        res = store.delete_source(sid)
+        if not res.get("deleted"):
+            handler._send_json({"detail": "代理源不存在"}, status=404)
+            return True
+        res["kernel"] = _community_kernel_status(srv, store)
+        handler._send_json(res)
         return True
 
     m_fl_err = re.fullmatch(r"/api/fleet/([^/]+)/errors", path)

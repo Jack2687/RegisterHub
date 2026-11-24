@@ -13,7 +13,8 @@ import email.utils
 import imaplib
 import re
 import time
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
 
 
 def _decode_header_text(val: Optional[str]) -> str:
@@ -155,3 +156,70 @@ class SingleImapMailClient:
                         pass
             time.sleep(4)
         return None
+
+
+class BuiltinPoolMailClient:
+    """Built-in SQLite + DPAPI Mail Pool Client (Outlook OAuth2 / iCloud links / IMAP)."""
+
+    def __init__(
+        self,
+        db_path: Optional[Union[str, Path]] = None,
+        owner: str = "runner",
+        include_unknown: bool = True,
+    ):
+        from core.mail_builtin import get_builtin_mail_store
+
+        default_db = Path(__file__).resolve().parent.parent / "results" / "builtin_mail.db"
+        self.db_path = Path(db_path) if db_path is not None else default_db
+        self.owner = (owner or "runner").strip() or "runner"
+        self.include_unknown = bool(include_unknown)
+        self.store = get_builtin_mail_store(self.db_path)
+        self.email: Optional[str] = None
+        self._leased_at: float = 0.0
+
+    def create_mailbox(self) -> str:
+        """Lease an available mailbox from the built-in SQLite pool."""
+        acc = self.store.lease_account(
+            owner=self.owner,
+            ttl_s=900,
+            include_unknown=self.include_unknown,
+        )
+        if not acc or not acc.get("email"):
+            raise RuntimeError("内置邮箱池暂无可用邮箱，请先在控制台「内置邮箱池」导入账号")
+        self.email = str(acc["email"]).strip().lower()
+        self._leased_at = time.time()
+        return self.email
+
+    def poll_for_verification_code(
+        self,
+        timeout_secs: int = 90,
+        pattern: str = r"\b\d{4,8}\b",
+        since_ts: Optional[float] = None,
+    ) -> Optional[str]:
+        """Poll verification code from the leased mailbox via BuiltinMailStore."""
+        if not self.email:
+            raise RuntimeError("尚未从内置邮箱池租借邮箱，请先调用 create_mailbox()")
+        cutoff = float(since_ts if since_ts is not None else (self._leased_at or time.time())) - 120.0
+        deadline = time.time() + max(5, int(timeout_secs))
+        while time.time() < deadline:
+            try:
+                msgs = self.store.list_messages(self.email, top=10, since=cutoff)
+                for msg in msgs:
+                    subj = str(msg.get("subject") or "")
+                    txt = str(msg.get("text") or "")
+                    htm = re.sub(r"<[^>]+>", " ", str(msg.get("html") or ""))
+                    m = re.search(pattern, f"{subj}\n{txt}\n{htm}")
+                    if m:
+                        return m.group(0)
+            except Exception:
+                pass
+            time.sleep(4)
+        return None
+
+    def release(self, mark_status: Optional[str] = None) -> bool:
+        """Release the currently leased mailbox back to the pool."""
+        if not self.email:
+            return False
+        em = self.email
+        self.email = None
+        return self.store.release_lease(em, owner=self.owner, mark_status=mark_status)

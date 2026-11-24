@@ -12,12 +12,13 @@ SCAFFOLD_CODE_TEMPLATE = '''"""
 Automated registration adapter for {site_name}.
 """
 import time
+from pathlib import Path
 from typing import Dict, Any, Optional
 from core.adapter import BaseSiteAdapter
 from core.identity import generate_identity
 from core.pilot import human_type, smart_click, smart_agree_tos
 from core.mail_client import DisposableMailClient
-from core.imap_mail import SingleImapMailClient
+from core.imap_mail import BuiltinPoolMailClient, SingleImapMailClient
 
 
 class {class_name}(BaseSiteAdapter):
@@ -34,16 +35,18 @@ class {class_name}(BaseSiteAdapter):
         return {target_url_repr}
 
     def prepare_identity(self) -> Dict[str, Any]:
-        """Generate synthetic credentials matching target requirements (auto-wires tempmail or IMAP)."""
+        """Generate synthetic credentials matching target requirements (auto-wires builtin mail pool, tempmail, or IMAP)."""
         defaults = self.config.get("defaults") or {{}}
         mail_cfg = self.config.get("mail") or {{}}
+        mail_provider = str(mail_cfg.get("provider") or "").strip().lower()
         use_disposable = defaults.get("use_disposable_mail", self.config.get("use_disposable_mail", True))
         locale = defaults.get("country", "US")
         pwd_len = int(defaults.get("password_length", 14) or 14)
-        if use_disposable:
-            self.mail_client = DisposableMailClient()
+        if mail_provider == "builtin":
+            db_path = Path(self.config.get("output_dir", "./results")) / "builtin_mail.db"
+            self.mail_client = BuiltinPoolMailClient(db_path=db_path, owner="{site_name}")
             ident = generate_identity(locale=locale, mail_client=self.mail_client, password_length=pwd_len)
-        else:
+        elif mail_provider == "imap" or (not mail_provider and not use_disposable):
             ident = generate_identity(locale=locale, password_length=pwd_len)
             imap_server = str(mail_cfg.get("imap_server") or "").strip()
             imap_user = str(mail_cfg.get("imap_user") or "").strip()
@@ -58,6 +61,9 @@ class {class_name}(BaseSiteAdapter):
                 ident["email"] = imap_user
             elif self.config.get("email"):
                 ident["email"] = str(self.config["email"]).strip()
+        else:
+            self.mail_client = DisposableMailClient()
+            ident = generate_identity(locale=locale, mail_client=self.mail_client, password_length=pwd_len)
 
         self.account_data = ident
         return self.account_data
