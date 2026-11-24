@@ -2,6 +2,7 @@
 Standard Single-Thread Runner.
 Manages browser lifecycle, logging, failure snapshot capture, and account ledger exports.
 """
+import json
 import os
 import sys
 import time
@@ -9,6 +10,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Type, Optional, Tuple
 from playwright.sync_api import sync_playwright, Page
+from core.locks import atomic_write_text_safe, interprocess_file_lock
 
 _ORIG_PLAYWRIGHT_SYNC = sync_playwright
 
@@ -45,6 +47,19 @@ C_CYAN = "\033[96m"
 C_RESET = "\033[0m"
 
 
+def _resolve_adapter_site_name(adapter_cls: Type[BaseSiteAdapter]) -> str:
+    """Resolve canonical site adapter slug for ledger attribution."""
+    explicit = str(getattr(adapter_cls, "site_name", "") or "").strip().lower()
+    if explicit:
+        return explicit.replace("-", "_")
+    mod = str(getattr(adapter_cls, "__module__", "") or "").strip()
+    if mod:
+        stem = mod.rsplit(".", 1)[-1].strip().lower()
+        if stem and stem not in ("__main__", "adapter", "runner"):
+            return stem.replace("-", "_")
+    return str(getattr(adapter_cls, "__name__", "") or "unknown").strip().lower()
+
+
 class StandardRunner:
     """Manages automation execution, failure snapshots, and ledger recording."""
 
@@ -77,6 +92,7 @@ class StandardRunner:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
         self.success_file = self.output_dir / "accounts.txt"
+        self.meta_file = self.output_dir / "accounts_meta.json"
         self.failed_file = self.output_dir / "failed.txt"
 
     def log(self, level: str, msg: str):
@@ -104,20 +120,59 @@ class StandardRunner:
             self.log("warn", f"Could not capture snapshot: {e}")
             return None
 
-    def save_success(self, account: Dict[str, Any]):
+    def _record_account_meta(self, email: str, api_key: str, site_name: str) -> None:
+        clean_site = str(site_name or "").strip().lower()
+        clean_email = str(email or "").strip().lower()
+        if not clean_site or not clean_email:
+            return
+        now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with interprocess_file_lock(self.meta_file):
+            data: Dict[str, Any] = {"by_key": {}, "by_email": {}}
+            if self.meta_file.exists():
+                try:
+                    raw = json.loads(self.meta_file.read_text(encoding="utf-8"))
+                    if not isinstance(raw, dict):
+                        self.log("error", f"Corrupt accounts_meta.json (non-dict), skipping overwrite: {self.meta_file}")
+                        return
+                    data["by_key"] = dict(raw.get("by_key") or {}) if isinstance(raw.get("by_key"), dict) else {}
+                    data["by_email"] = dict(raw.get("by_email") or {}) if isinstance(raw.get("by_email"), dict) else {}
+                except Exception as exc:
+                    self.log("error", f"Corrupt accounts_meta.json, refusing to overwrite ({exc})")
+                    return
+            entry = {"site": clean_site, "created_at": now_ts}
+            data["by_email"][clean_email] = entry
+            if api_key:
+                data["by_key"][f"{clean_email}|{api_key}"] = entry
+            atomic_write_text_safe(self.meta_file, json.dumps(data, ensure_ascii=False, indent=2))
+
+    def save_success(self, account: Dict[str, Any], site_name: str = ""):
         api_key = str(account.get("api_key", "") or "").strip()
         password = str(account.get("password", "") or "")
         extra = f"----{api_key}" if api_key and api_key != password else ""
-        line = f"{account.get('email', '')}----{password}----{account.get('username', '')}{extra}\n"
-        with open(self.success_file, "a", encoding="utf-8") as f:
-            f.write(line)
+        email = str(account.get("email", "") or "")
+        line = f"{email}----{password}----{account.get('username', '')}{extra}\n"
+        with interprocess_file_lock(self.success_file):
+            with open(self.success_file, "a", encoding="utf-8") as f:
+                f.write(line)
+        eff_site = str(site_name or account.get("site") or "").strip().lower()
+        if eff_site:
+            self._record_account_meta(email, api_key if extra else "", eff_site)
         self.log("success", f"Credential saved to {self.success_file}")
 
-    def save_failed(self, reason: str, account: Dict[str, Any], snapshot_path: Optional[Path] = None):
+    def save_failed(
+        self,
+        reason: str,
+        account: Dict[str, Any],
+        snapshot_path: Optional[Path] = None,
+        site_name: str = "",
+    ):
         snap_info = f" | Snapshot: {snapshot_path.name}" if snapshot_path else ""
-        line = f"{datetime.now().isoformat()} | {reason} | {account}{snap_info}\n"
-        with open(self.failed_file, "a", encoding="utf-8") as f:
-            f.write(line)
+        eff_site = str(site_name or account.get("site") or "").strip().lower()
+        site_info = f" | Site: {eff_site}" if eff_site else ""
+        line = f"{datetime.now().isoformat()} | {reason} | {account}{snap_info}{site_info}\n"
+        with interprocess_file_lock(self.failed_file):
+            with open(self.failed_file, "a", encoding="utf-8") as f:
+                f.write(line)
 
     def _launch_browser(self, p):
         """Launch browser with calibrated geometry (if available), stealth and genuine Chrome channel."""
@@ -208,6 +263,7 @@ class StandardRunner:
 
     def execute_adapter(self, adapter_cls: Type[BaseSiteAdapter], count: int = 1) -> int:
         success_count = 0
+        site_name = _resolve_adapter_site_name(adapter_cls)
         mode_desc = f"external CDP ({self.cdp_endpoint})" if self.cdp_endpoint else f"desktop browser (headless={self.headless})"
         engine_name, pw_factory = resolve_browser_engine(
             stealth_backend=self.stealth_backend,
@@ -250,14 +306,14 @@ class StandardRunner:
                     elapsed = round(time.time() - task_start, 2)
                     if ok:
                         self.log("success", f"Task [{idx}/{count}] finished successfully in {elapsed}s!")
-                        self.save_success(adapter.account_data)
+                        self.save_success(adapter.account_data, site_name=site_name)
                         success_count += 1
                         if not self.headless:
                             time.sleep(2)
                     else:
                         snap = self.capture_snapshot(page, f"task_{idx}_failed")
                         self.log("warn", f"Task [{idx}/{count}] failed after {elapsed}s.")
-                        self.save_failed("Form submission returned False", adapter.account_data, snap)
+                        self.save_failed("Form submission returned False", adapter.account_data, snap, site_name=site_name)
                         if not self.headless:
                             self.log("info", "Keeping window visible for 5 seconds for review...")
                             time.sleep(5)
@@ -265,7 +321,7 @@ class StandardRunner:
                     elapsed = round(time.time() - task_start, 2)
                     snap = self.capture_snapshot(page, f"task_{idx}_exception")
                     self.log("error", f"Task [{idx}/{count}] encountered exception after {elapsed}s: {e}")
-                    self.save_failed(str(e), adapter.account_data, snap)
+                    self.save_failed(str(e), adapter.account_data, snap, site_name=site_name)
                     if not self.headless:
                         self.log("info", "Keeping window visible for 6 seconds before closing...")
                         time.sleep(6)

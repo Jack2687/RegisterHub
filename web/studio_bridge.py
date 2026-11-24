@@ -9,16 +9,21 @@ with zero additional external dependencies and 100% backward compatibility.
 
 from __future__ import annotations
 
+import base64
 import datetime
 import json
+import os
 import random
 import re
+import subprocess
+import sys
 import threading
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 _HEALTH_CACHE_LOCK = threading.Lock()
 _HEALTH_CACHE: Dict[str, Any] = {"ts": 0.0, "payload": None}
@@ -144,8 +149,249 @@ def _classify_key(val: str) -> str:
     return "API Key"
 
 
-def _infer_project_from_account(acc: Dict[str, Any], adapters: List[Dict[str, Any]]) -> str:
-    return adapters[0]["name"] if adapters else "demo"
+_HINT_STOPWORDS = frozenset({
+    "http", "https", "www", "com", "org", "net", "api", "site", "sites", "adapter",
+    "base", "core", "class", "return", "import", "from", "true", "false", "none",
+    "self", "page", "email", "token", "auth", "user", "name", "data", "json",
+    "code", "test", "demo", "form", "signup", "register", "login", "connect",
+    "byjwt", "client", "server", "account", "accounts", "password", "username",
+    "config", "proxy", "mail", "html", "text", "utf", "dict", "list", "str",
+    "flow", "only", "required", "protocol", "browser", "interaction",
+})
+
+_DEMO_EMAIL_DOMAINS = frozenset({
+    "demo-community.org",
+    "testbench-community.org",
+    "example.com",
+})
+
+_SAFE_OPEN_EXTS = frozenset({".txt", ".json", ".csv", ".log", ".md", ".py", ".yaml", ".yml", ".ini"})
+_UNSAFE_REL_CHARS = set("<>|*?\"\x00")
+
+
+def _load_accounts_meta(srv: Any) -> Dict[str, Dict[str, Dict[str, str]]]:
+    meta_path = Path(srv.ACCOUNTS_FILE).with_name("accounts_meta.json")
+    if not meta_path.is_file():
+        return {"by_key": {}, "by_email": {}}
+    try:
+        raw = json.loads(meta_path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            return {
+                "by_key": raw.get("by_key") if isinstance(raw.get("by_key"), dict) else {},
+                "by_email": raw.get("by_email") if isinstance(raw.get("by_email"), dict) else {},
+            }
+    except Exception:
+        pass
+    return {"by_key": {}, "by_email": {}}
+
+
+def _decode_jwt_claims_unverified(token: str) -> Dict[str, Any]:
+    s = str(token or "").strip()
+    if not (s.startswith("eyJ") and s.count(".") == 2):
+        return {}
+    try:
+        seg = s.split(".")[1]
+        seg += "=" * (-len(seg) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(seg).decode("utf-8", errors="ignore"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _format_ts_value(val: Any) -> str:
+    if val is None or val == "":
+        return ""
+    if isinstance(val, (int, float)) and val > 1_000_000_000:
+        try:
+            sec = float(val) / 1000.0 if val > 10_000_000_000 else float(val)
+            return datetime.datetime.fromtimestamp(sec).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return ""
+    s = str(val).strip()
+    if len(s) >= 19 and s[4] == "-" and s[7] == "-":
+        return s[:19].replace("T", " ")
+    return s[:32]
+
+
+def _build_adapter_hints(srv: Any, adapters: List[Dict[str, Any]]) -> Dict[str, set[str]]:
+    hints: Dict[str, set[str]] = {}
+    root = Path(srv.ROOT_DIR)
+    for ad in adapters:
+        name = str(ad.get("name") or "").strip().lower()
+        if not name:
+            continue
+        tokens: set[str] = {name, name.replace("_", ""), name.replace("_", "-")}
+        for part in re.split(r"[^a-z0-9]+", name):
+            if len(part) >= 3 and part not in _HINT_STOPWORDS:
+                tokens.add(part)
+        url = str(ad.get("target_url") or "").strip()
+        if url.startswith(("http://", "https://")):
+            host = (urlparse(url).hostname or "").lower()
+            if host:
+                tokens.add(host)
+                for part in re.split(r"[^a-z0-9]+", host):
+                    if len(part) >= 3 and part not in _HINT_STOPWORDS:
+                        tokens.add(part)
+        rel_file = str(ad.get("file") or f"sites/{name}.py")
+        fp = root / rel_file
+        if fp.is_file():
+            try:
+                head = fp.read_text(encoding="utf-8", errors="ignore")[:1500].lower()
+                for w in re.findall(r"[a-z][a-z0-9]{3,28}", head):
+                    if w not in _HINT_STOPWORDS:
+                        tokens.add(w)
+            except Exception:
+                pass
+        hints[name] = tokens
+    return hints
+
+
+def _canonicalize_site_name(raw_site: str, adapter_names: set[str]) -> str:
+    clean = str(raw_site or "").strip().lower().replace("-", "_")
+    if not clean:
+        return ""
+    if clean in adapter_names:
+        return clean
+    if f"{clean}_site" in adapter_names:
+        return f"{clean}_site"
+    if clean.endswith("_site") and clean[:-5] in adapter_names:
+        return clean[:-5]
+    return clean
+
+
+def _infer_project_and_time(
+    acc: Dict[str, Any],
+    adapters: List[Dict[str, Any]],
+    meta_map: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None,
+    adapter_hints: Optional[Dict[str, set[str]]] = None,
+) -> Tuple[str, str]:
+    adapter_names = {str(ad.get("name") or "").lower() for ad in adapters if ad.get("name")}
+    email_low = str(acc.get("email") or "").strip().lower()
+    api_key = str(acc.get("api_key") or "").strip()
+    created_at = _format_ts_value(acc.get("created_at"))
+
+    # 1. Authoritative sidecar metadata recorded by StandardRunner.save_success
+    if meta_map:
+        by_key = meta_map.get("by_key") or {}
+        by_email = meta_map.get("by_email") or {}
+        rec = (by_key.get(f"{email_low}|{api_key}") if api_key else None) or by_email.get(email_low)
+        if isinstance(rec, dict) and rec.get("site"):
+            site = _canonicalize_site_name(str(rec.get("site") or ""), adapter_names)
+            ts = _format_ts_value(rec.get("created_at")) or created_at
+            if site:
+                return site, ts
+
+    # 2. Explicit site field if present
+    explicit_site = _canonicalize_site_name(str(acc.get("site") or acc.get("project") or ""), adapter_names)
+    if explicit_site:
+        return explicit_site, created_at
+
+    # 3. Retroactive JWT claim matching (e.g. URnetwork ES256 JWT iss="urnetwork:byjwt" -> ur_io)
+    if api_key.startswith("eyJ") and api_key.count(".") == 2:
+        claims = _decode_jwt_claims_unverified(api_key)
+        if not created_at:
+            created_at = _format_ts_value(claims.get("create_time") or claims.get("iat"))
+        claim_vals: List[str] = []
+        for k in ("iss", "aud", "azp", "domain", "provider"):
+            v = claims.get(k)
+            if isinstance(v, str):
+                claim_vals.append(v)
+            elif isinstance(v, list):
+                claim_vals.extend(str(x) for x in v if x)
+        jwt_tokens = {
+            t for v in claim_vals for t in re.split(r"[^a-z0-9]+", v.lower())
+            if len(t) >= 4 and t not in _HINT_STOPWORDS
+        }
+        if jwt_tokens and adapter_hints:
+            best_name = ""
+            best_score = 0
+            for ad in adapters:
+                aname = str(ad.get("name") or "").lower()
+                if not aname:
+                    continue
+                overlap = len(jwt_tokens & adapter_hints.get(aname, set()))
+                if overlap > best_score:
+                    best_score = overlap
+                    best_name = aname
+            if best_name:
+                return best_name, created_at
+
+    # 4. Built-in demo / testbench email domains
+    if "@" in email_low:
+        dom = email_low.rsplit("@", 1)[-1]
+        if dom in _DEMO_EMAIL_DOMAINS:
+            demo_target = "demo_site" if "demo_site" in adapter_names else ("demo" if "demo" in adapter_names else "demo_site")
+            return demo_target, created_at
+
+    # 5. Never falsely attribute unknown historical rows to adapters[0]
+    return "未归属", created_at
+
+
+def _infer_project_from_account(
+    acc: Dict[str, Any],
+    adapters: List[Dict[str, Any]],
+    meta_map: Optional[Dict[str, Dict[str, Dict[str, str]]]] = None,
+    adapter_hints: Optional[Dict[str, set[str]]] = None,
+) -> str:
+    proj, _ = _infer_project_and_time(acc, adapters, meta_map=meta_map, adapter_hints=adapter_hints)
+    return proj
+
+
+def _collect_community_project_files(srv: Any, ad: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    root = Path(srv.ROOT_DIR).resolve()
+    files: List[Dict[str, Any]] = []
+
+    def _add(fp: Path, rel: str, label: str, kind: str) -> None:
+        if not fp.is_file():
+            return
+        try:
+            sz = fp.stat().st_size
+        except OSError:
+            sz = 0
+        files.append({
+            "rel": rel,
+            "path": str(fp.resolve()),
+            "name": fp.name,
+            "label": label,
+            "kind": kind,
+            "size_bytes": sz,
+            "exists": True,
+            "is_dir": False,
+        })
+
+    ad_rel = str(ad.get("file") or f"sites/{ad['name']}.py").replace("\\", "/")
+    _add(Path(srv.ACCOUNTS_FILE), "results/accounts.txt", "成号总台账", "accounts")
+    _add(root / ad_rel, ad_rel, "站点适配器脚本", "extra")
+    _add(Path(srv.FAILED_FILE), "results/failed.txt", "失败记录", "failed")
+    _add(Path(srv.CONFIG_FILE), "config.json", "全局运行配置", "config")
+
+    primary = next((f for f in files if f["rel"] == ad_rel), None) or (files[0] if files else None)
+    if primary is None:
+        primary = {
+            "rel": "",
+            "path": str(root),
+            "name": root.name,
+            "label": "工程目录",
+            "exists": True,
+            "is_dir": True,
+            "size_bytes": 0,
+        }
+    return primary, files
+
+
+def _open_local_path_community(target: Path, mode: str) -> None:
+    if os.name == "nt":
+        norm_target = os.path.normpath(str(target))
+        if mode == "reveal" and target.is_file():
+            subprocess.Popen(["explorer.exe", f"/select,{norm_target}"])
+        else:
+            os.startfile(norm_target)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        cmd = ["open", "-R", str(target)] if (mode == "reveal" and target.is_file()) else ["open", str(target)]
+        subprocess.Popen(cmd)
+    else:
+        dest = target.parent if (mode == "reveal" and target.is_file()) else target
+        subprocess.Popen(["xdg-open", str(dest)])
 
 
 def enrich_agent_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
@@ -356,11 +602,17 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
 
         adapters = srv.list_community_adapters()
         accounts = parse_accounts_file(srv.ACCOUNTS_FILE)
+        meta_map = _load_accounts_meta(srv)
+        adapter_hints = _build_adapter_hints(srv, adapters)
+        resolved_accounts: List[Tuple[Dict[str, str], str, str]] = [
+            (a, *_infer_project_and_time(a, adapters, meta_map=meta_map, adapter_hints=adapter_hints))
+            for a in accounts
+        ]
         fails = srv.list_failures()
         jobs = srv.job_manager.list_jobs()
         act = srv.job_manager.active_job()
 
-        with_key_rows = [a for a in accounts if str(a.get("api_key") or "").strip()]
+        with_key_rows = [(a, p, ts) for (a, p, ts) in resolved_accounts if str(a.get("api_key") or "").strip()]
         dead_cnt = sum(1 for f in fails if f.get("category") == "dead")
         soft_cnt = sum(1 for f in fails if f.get("category") in ("soft", "captcha"))
 
@@ -397,31 +649,29 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
         avg_dur = round(sum(durations) / len(durations), 1) if durations else 0.0
 
         recent_jobs = [
-            {**j, "project": j.get("adapter") or "demo", "concurrency": 1}
+            {**j, "project": j.get("adapter") or "demo_site", "concurrency": 1}
             for j in jobs[:10]
         ]
         recent_accounts = [
             {
-                "project": _infer_project_from_account(a, adapters),
+                "project": proj,
                 "email": a.get("email", ""),
                 "has_key": bool(str(a.get("api_key") or "").strip()),
                 "kind": _classify_key(str(a.get("api_key") or "")),
                 "masked_key": _mask_key(str(a.get("api_key") or "")),
                 "credential": str(a.get("api_key") or ""),
-                "created_at": "",
+                "created_at": created_at,
             }
-            for a in accounts[::-1][:8]
+            for (a, proj, created_at) in resolved_accounts[::-1][:8]
         ]
 
         top_projects = [
             {
                 "project": ad["name"],
-                "ok_total": sum(1 for a in accounts if _infer_project_from_account(a, adapters) == ad["name"]),
-                "valid_keys": sum(
-                    1 for a in with_key_rows if _infer_project_from_account(a, adapters) == ad["name"]
-                ),
+                "ok_total": sum(1 for (_, p, _) in resolved_accounts if p == ad["name"]),
+                "valid_keys": sum(1 for (_, p, _) in with_key_rows if p == ad["name"]),
                 "retriable": 0,
-                "dead": 0,
+                "dead": sum(1 for f in fails if f.get("site") == ad["name"] and f.get("category") == "dead"),
             }
             for ad in adapters
         ]
@@ -500,48 +750,75 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
 
         adapters = srv.list_community_adapters()
         accounts = parse_accounts_file(srv.ACCOUNTS_FILE)
+        meta_map = _load_accounts_meta(srv)
+        adapter_hints = _build_adapter_hints(srv, adapters)
+        adapter_names = {ad["name"] for ad in adapters}
+        resolved_accounts = [
+            (a, *_infer_project_and_time(a, adapters, meta_map=meta_map, adapter_hints=adapter_hints))
+            for a in accounts
+        ]
         fails = srv.list_failures()
         snaps = srv.list_snapshots()
 
-        recent_errors = [
-            {
-                "dir": f.get("snapshot") or f"fail_{f.get('id', 0)}",
-                "reason": str(f.get("reason") or ""),
-                "has_screenshot": bool(f.get("snapshot_url")),
-                "screenshot_url": str(f.get("snapshot_url") or ""),
-            }
-            for f in fails[:8]
-        ]
-        if not recent_errors and snaps:
-            recent_errors = [
-                {
-                    "dir": s["name"],
-                    "reason": f"失败现场截图 ({s['mtime']})",
-                    "has_screenshot": True,
-                    "screenshot_url": s["url"],
-                }
-                for s in snaps[:8]
-            ]
+        # Attribute failures strictly by recorded site tag; keep unattributed legacy
+        # snapshots visible on demo_site (or first adapter if no demo_site) without
+        # falsely inflating failed_lines/dead_count on unrelated adapters.
+        fails_by_site: Dict[str, List[Dict[str, Any]]] = {}
+        unattributed_fails: List[Dict[str, Any]] = []
+        for f in fails:
+            fsite = _canonicalize_site_name(str(f.get("site") or ""), adapter_names)
+            if fsite and fsite in adapter_names:
+                fails_by_site.setdefault(fsite, []).append(f)
+            else:
+                unattributed_fails.append(f)
+
+        legacy_snap_owner = "demo_site" if "demo_site" in adapter_names else (adapters[0]["name"] if adapters else "")
 
         projects = []
-        for idx, ad in enumerate(adapters):
+        for ad in adapters:
             name = ad["name"]
-            matched = [a for a in accounts if _infer_project_from_account(a, adapters) == name]
-            valid_k = sum(1 for a in matched if str(a.get("api_key") or "").strip())
+            matched = [(a, ts) for (a, p, ts) in resolved_accounts if p == name]
+            valid_k = sum(1 for (a, _) in matched if str(a.get("api_key") or "").strip())
+            site_fails = fails_by_site.get(name, [])
+            err_src = list(site_fails)
+            if name == legacy_snap_owner and unattributed_fails:
+                err_src.extend(unattributed_fails)
+            site_errors = [
+                {
+                    "dir": f.get("snapshot") or f"fail_{f.get('id', 0)}",
+                    "reason": str(f.get("reason") or ""),
+                    "has_screenshot": bool(f.get("snapshot_url")),
+                    "screenshot_url": str(f.get("snapshot_url") or ""),
+                }
+                for f in err_src[:8]
+            ]
+            if not site_errors and name == legacy_snap_owner and snaps:
+                site_errors = [
+                    {
+                        "dir": s["name"],
+                        "reason": f"失败现场截图 ({s['mtime']})",
+                        "has_screenshot": True,
+                        "screenshot_url": s["url"],
+                    }
+                    for s in snaps[:8]
+                ]
+            primary_file, output_files = _collect_community_project_files(srv, ad)
             projects.append({
                 "project": name,
                 "target_url": ad.get("target_url") or "",
-                "project_dir": str(srv.ROOT_DIR / "sites"),
+                "project_dir": str(srv.ROOT_DIR),
+                "primary_file": primary_file,
+                "output_files": output_files,
                 "queue_count": 0,
                 "ok_total": len(matched),
                 "valid_keys": valid_k,
-                "failed_lines": len(fails) if idx == 0 else 0,
+                "failed_lines": len(site_fails),
                 "retriable_count": 0,
-                "dead_count": sum(1 for f in fails if f.get("category") == "dead") if idx == 0 else 0,
+                "dead_count": sum(1 for f in site_fails if f.get("category") == "dead"),
                 "unknown_count": 0,
                 "top_reasons": [],
                 "metrics": {"count": len(matched), "success_rate": None, "avg_duration_s": None},
-                "recent_errors": recent_errors if idx == 0 else [],
+                "recent_errors": site_errors,
             })
         handler._send_json({"projects": projects, "total": len(projects)})
         return True
@@ -558,10 +835,23 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
     if m_act:
         from core.exporter import parse_accounts_file
 
-        proj = m_act.group(1)
         adapters = srv.list_community_adapters()
+        adapter_names = {ad["name"] for ad in adapters}
+        proj = _canonicalize_site_name(m_act.group(1), adapter_names) or m_act.group(1)
         accounts = parse_accounts_file(srv.ACCOUNTS_FILE)
+        meta_map = _load_accounts_meta(srv)
+        adapter_hints = _build_adapter_hints(srv, adapters)
+        matched_accounts = [
+            (a, ts)
+            for a in accounts
+            for (p, ts) in [_infer_project_and_time(a, adapters, meta_map=meta_map, adapter_hints=adapter_hints)]
+            if p == proj
+        ]
         fails = srv.list_failures()
+        matched_fails = [
+            f for f in fails
+            if _canonicalize_site_name(str(f.get("site") or ""), adapter_names) == proj
+        ]
         rows = [
             {
                 "email": a.get("email", ""),
@@ -571,18 +861,18 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
                 "masked_key": _mask_key(str(a.get("api_key") or "")),
                 "credential": str(a.get("api_key") or ""),
                 "ip": "",
-                "created_at": "",
+                "created_at": ts,
             }
-            for a in accounts[::-1][:20]
+            for (a, ts) in matched_accounts[::-1][:20]
         ]
         handler._send_json({
             "project": proj,
-            "ok_total": len(accounts),
-            "valid_keys": sum(1 for a in accounts if str(a.get("api_key") or "").strip()),
+            "ok_total": len(matched_accounts),
+            "valid_keys": sum(1 for (a, _) in matched_accounts if str(a.get("api_key") or "").strip()),
             "recent_accounts": rows,
             "recent_failures": [
                 {"line": f"{f.get('time', '')} | {f.get('reason', '')}", "category": f.get("category") or "unknown"}
-                for f in fails[:20]
+                for f in matched_fails[:20]
             ],
             "has_layout": srv.GEOMETRY_FILE.exists(),
             "notify_enabled": False,
@@ -595,6 +885,8 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
 
         adapters = srv.list_community_adapters()
         accounts = parse_accounts_file(srv.ACCOUNTS_FILE)
+        meta_map = _load_accounts_meta(srv)
+        adapter_hints = _build_adapter_hints(srv, adapters)
         items = []
         by_project: Dict[str, int] = {}
         by_kind: Dict[str, int] = {}
@@ -602,7 +894,7 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
             key = str(a.get("api_key") or "").strip()
             if not key:
                 continue
-            proj = _infer_project_from_account(a, adapters)
+            proj, created_at = _infer_project_and_time(a, adapters, meta_map=meta_map, adapter_hints=adapter_hints)
             kind = _classify_key(key)
             by_project[proj] = by_project.get(proj, 0) + 1
             by_kind[kind] = by_kind.get(kind, 0) + 1
@@ -613,7 +905,7 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
                 "key": key,
                 "masked_key": _mask_key(key),
                 "kind": kind,
-                "created_at": "",
+                "created_at": created_at,
                 "status": "unchecked",
                 "detail": "",
             })
@@ -625,6 +917,8 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
 
         adapters = srv.list_community_adapters()
         accounts = parse_accounts_file(srv.ACCOUNTS_FILE)
+        meta_map = _load_accounts_meta(srv)
+        adapter_hints = _build_adapter_hints(srv, adapters)
         items = []
         by_project: Dict[str, int] = {}
         with_key = 0
@@ -633,7 +927,7 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
             has_k = bool(key)
             if has_k:
                 with_key += 1
-            proj = _infer_project_from_account(a, adapters)
+            proj, created_at = _infer_project_and_time(a, adapters, meta_map=meta_map, adapter_hints=adapter_hints)
             by_project[proj] = by_project.get(proj, 0) + 1
             items.append({
                 "id": f"acc_{idx}_{a.get('email', '')}",
@@ -644,7 +938,7 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
                 "has_key": has_k,
                 "kind": _classify_key(key),
                 "ip": "",
-                "created_at": "",
+                "created_at": created_at,
             })
         handler._send_json({
             "total": len(items),
@@ -712,8 +1006,9 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
 
     m_st_code = re.fullmatch(r"/api/studio/adapters/([A-Za-z0-9_-]+)/code", path)
     if m_st_code:
-        name = m_st_code.group(1)
-        ad = next((a for a in srv.list_community_adapters() if a["name"] == name), None)
+        name = m_st_code.group(1).lower()
+        adapters = srv.list_community_adapters()
+        ad = next((a for a in adapters if a["name"] == name or a["name"] == f"{name}_site"), None)
         if not ad:
             handler._send_json({"error": f"Adapter not found: {name}"}, status=404)
             return True
@@ -935,6 +1230,8 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
 def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) -> bool:
     """Handle Studio POST routes. Returns True if handled, False to fall through."""
     if path == "/api/jobs/start":
+        from sites import discover_adapters
+
         adapter = str(body.get("project") or body.get("site") or body.get("adapter") or "").strip().lower()
         try:
             count = max(1, min(20, int(body.get("count") or 1)))
@@ -942,7 +1239,7 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
             count = 1
         raw_hf = body.get("headful")
         hl_override: Optional[bool] = (not raw_hf) if isinstance(raw_hf, bool) else None
-        known = {a["name"] for a in srv.list_community_adapters()}
+        known = set(discover_adapters().keys()) | {a["name"] for a in srv.list_community_adapters()}
         if adapter not in known:
             handler._send_json({"ok": False, "error": f"Unknown adapter: {adapter}"}, status=400)
             return True
@@ -957,6 +1254,52 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
             handler._send_json({"ok": True, "job": jd})
         except RuntimeError as e:
             handler._send_json({"ok": False, "error": str(e)}, status=409)
+        return True
+
+    m_open_path = re.fullmatch(r"/api/fleet/([^/]+)/open-path", path)
+    if m_open_path:
+        if not _is_loopback_client(handler):
+            handler._send_json({"detail": "仅允许本机回环请求打开本地路径"}, status=403)
+            return True
+        root = Path(srv.ROOT_DIR).resolve()
+        rel_raw = str(body.get("rel_path") or "").strip().replace("\\", "/")
+        mode = str(body.get("mode") or "reveal").strip().lower()
+        if mode not in ("reveal", "open"):
+            mode = "reveal"
+        if rel_raw:
+            if (
+                rel_raw.startswith("/")
+                or ":" in rel_raw
+                or ".." in rel_raw.split("/")
+                or any(ch in _UNSAFE_REL_CHARS for ch in rel_raw)
+            ):
+                handler._send_json({"detail": "非法的相对文件路径"}, status=400)
+                return True
+            target = (root / rel_raw).resolve()
+            if target != root and root not in target.parents:
+                handler._send_json({"detail": "路径越界：仅允许访问工程目录内的文件"}, status=400)
+                return True
+        else:
+            target = root
+        if not target.exists():
+            handler._send_json({"detail": f"目标文件或目录不存在: {rel_raw or root.name}"}, status=404)
+            return True
+        if mode == "open" and target.is_file() and target.suffix.lower() not in _SAFE_OPEN_EXTS:
+            handler._send_json({"detail": "仅允许直接打开文本/代码/数据文件，其余请使用定位模式"}, status=400)
+            return True
+        try:
+            _open_local_path_community(target, mode)
+        except OSError as exc:
+            handler._send_json({"detail": f"拉起本机文件管理器失败: {exc}"}, status=500)
+            return True
+        handler._send_json({
+            "ok": True,
+            "project": m_open_path.group(1),
+            "mode": mode,
+            "rel_path": rel_raw,
+            "path": str(target),
+            "is_dir": target.is_dir(),
+        })
         return True
 
     if path == "/api/settings/config":

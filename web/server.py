@@ -599,11 +599,15 @@ def list_failures() -> List[Dict[str, Any]]:
         reason = parts[1] if len(parts) >= 2 else line
         account = parts[2] if len(parts) >= 3 else ""
         snap_name = ""
+        site_name = ""
         for p in parts[2:]:
-            if p.lower().startswith("snapshot:"):
+            pl = p.lower()
+            if pl.startswith("snapshot:"):
                 cand = p.split(":", 1)[1].strip()
                 if cand in snap_names:
                     snap_name = cand
+            elif pl.startswith("site:"):
+                site_name = p.split(":", 1)[1].strip().lower()
         low_r = reason.lower()
         if any(k in low_r for k in ("already exists", "已存在", "[dead]", "domain banned", "invalid oauth", "blocked domain")):
             cat = "dead"
@@ -618,6 +622,7 @@ def list_failures() -> List[Dict[str, Any]]:
             "time": ts,
             "reason": reason[:240],
             "account": account[:200],
+            "site": site_name,
             "category": cat,
             "snapshot": snap_name,
             "snapshot_url": f"/api/snapshots/{snap_name}" if snap_name else "",
@@ -672,8 +677,18 @@ def list_community_adapters() -> List[Dict[str, Any]]:
     from sites import discover_adapters
 
     adapters = discover_adapters()
-    out: List[Dict[str, Any]] = []
+    # Deduplicate aliases (e.g. demo & demo_site pointing to the same module/class),
+    # preferring the canonical module stem so Fleet UI does not render duplicate cards.
+    canonical_by_cls: Dict[Any, tuple[str, Any, Path]] = {}
     for name, cls in sorted(adapters.items()):
+        mod_file = Path(sys.modules[cls.__module__].__file__ or "") if cls.__module__ in sys.modules else (ROOT_DIR / "sites" / f"{name}.py")
+        stem = mod_file.stem.lower() if mod_file.is_file() else name
+        prev = canonical_by_cls.get(cls)
+        if prev is None or (name == stem and prev[0] != stem):
+            canonical_by_cls[cls] = (name, cls, mod_file)
+
+    out: List[Dict[str, Any]] = []
+    for name, cls, mod_file in sorted(canonical_by_cls.values(), key=lambda x: x[0]):
         url = ""
         try:
             attr = getattr(cls, "target_url", None)
@@ -685,7 +700,12 @@ def list_community_adapters() -> List[Dict[str, Any]]:
                 url = str(attr)
         except Exception:
             url = ""
-        mod_file = Path(sys.modules[cls.__module__].__file__ or "") if cls.__module__ in sys.modules else (ROOT_DIR / "sites" / f"{name}.py")
+        if url.strip().lower().startswith("data:"):
+            display_url = "内置本地演示页 (Embedded HTML)"
+        elif len(url) <= 120:
+            display_url = url
+        else:
+            display_url = url[:80] + "…"
         lines = len(mod_file.read_text(encoding="utf-8", errors="ignore").splitlines()) if mod_file.is_file() else 0
         rel_file = f"sites/{mod_file.name}" if mod_file.is_file() else f"sites/{name}.py"
         out.append({
@@ -694,7 +714,7 @@ def list_community_adapters() -> List[Dict[str, Any]]:
             "file": rel_file,
             "lines": lines,
             "tier": _ADAPTER_TIERS.get(name, "template"),
-            "target_url": url if len(url) <= 120 else (url[:80] + "… [embedded]"),
+            "target_url": display_url,
         })
     return out
 
@@ -961,7 +981,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         if m_code:
             name = m_code.group(1).lower()
             adapters_map = {a["name"]: a for a in list_community_adapters()}
-            info = adapters_map.get(name)
+            info = adapters_map.get(name) or adapters_map.get(f"{name}_site")
             if not info:
                 self._send_json({"error": f"Adapter not found: {name}"}, status=404)
                 return
@@ -1368,8 +1388,10 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                 count = 1
             raw_hl = body.get("headless")
             hl_override: Optional[bool] = raw_hl if isinstance(raw_hl, bool) else None
+            from sites import discover_adapters
+
             custom_email = str(body.get("custom_email") or "").strip()
-            known = {a["name"] for a in list_community_adapters()}
+            known = set(discover_adapters().keys()) | {a["name"] for a in list_community_adapters()}
             if adapter not in known:
                 self._send_json({"ok": False, "error": f"Unknown adapter: {adapter}"}, status=400)
                 return
