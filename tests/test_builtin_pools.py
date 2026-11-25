@@ -321,3 +321,41 @@ def test_community_otp_extractor_hex_dedupe_and_footer_guard():
         "<p>Enter this 6-digit code:</p><b>684156</b>",
     )
     assert [c["value"] for c in c_th] == ["684156"]
+
+
+def test_posix_local_authenticated_secret_protection_and_tamper_rejection(tmp_path, monkeypatch):
+    """Cross-platform Linux/macOS secret protection uses 0600 master key + Encrypt-then-MAC and rejects tampering."""
+    import base64
+    import pytest
+    from core import secrets as sec_mod
+
+    key_file = tmp_path / "keys" / "local_master.key"
+    monkeypatch.setenv("REGISTERHUB_SECRET_KEY_FILE", str(key_file))
+    monkeypatch.setattr(sec_mod.sys, "platform", "linux")
+
+    sample = "M.C519_BAY.0.U.-CrossPlatformSecret_!@#$%^&*()_中文"
+    enc1 = sec_mod.protect_secret(sample)
+    enc2 = sec_mod.protect_secret(sample)
+    assert enc1.startswith("localv1:")
+    assert enc1 != enc2  # random 16-byte nonce per encryption
+    assert sample not in enc1
+    assert key_file.is_file() and len(key_file.read_bytes()) == 32
+    assert sec_mod.unprotect_secret(enc1) == sample
+    assert sec_mod.unprotect_secret(enc2) == sample
+
+    # Tampering a single byte must fail MAC verification
+    raw_blob = bytearray(base64.b64decode(enc1[len("localv1:"):]))
+    raw_blob[-1] ^= 0x01
+    tampered = "localv1:" + base64.b64encode(bytes(raw_blob)).decode("ascii")
+    with pytest.raises(sec_mod.SecretProtectionError):
+        sec_mod.unprotect_secret(tampered)
+
+    # Wrong master key must fail MAC verification
+    monkeypatch.setenv("REGISTERHUB_SECRET_KEY_FILE", str(tmp_path / "keys" / "other.key"))
+    with pytest.raises(sec_mod.SecretProtectionError):
+        sec_mod.unprotect_secret(enc1)
+
+    # Unknown / plaintext / cross-OS DPAPI prefixes are always rejected on POSIX
+    for bad in ("raw-plaintext", "b64:c2VjcmV0", "dpapi:QUJD", "localv1:!!!bad!!!"):
+        with pytest.raises(sec_mod.SecretProtectionError):
+            sec_mod.unprotect_secret(bad)

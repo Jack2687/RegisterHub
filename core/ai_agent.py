@@ -2340,6 +2340,7 @@ class AgentSession:
         self._active_pid: Optional[int] = None
         self._active_tool_name: Optional[str] = None
         self._active_tool_started_at: Optional[float] = None
+        self._persist_lock = threading.Lock()
 
     def is_stop_requested(self) -> bool:
         with self._lock:
@@ -2723,46 +2724,47 @@ class AgentSession:
 
         return "\n".join(lines).rstrip() + "\n"
 
-    def persist(self) -> None:
+    def persist(self, *, status_override: Optional[str] = None, error_override: Optional[str] = None) -> None:
         if not _SAFE_SESSION_ID_RE.fullmatch(self.id):
             return
-        with self._lock:
-            trimmed_msgs = _slice_messages_safely(self.messages, _PERSIST_MAX_MESSAGES)
-            payload = {
-                "id": self.id,
-                "title": self.title,
-                "target_url": self.target_url,
-                "status": self.status,
-                "error": self.last_error,
-                "llm_profile_id": self.llm_profile_id,
-                "llm_model": self.llm_model,
-                "model": self.model,
-                "steps_count": self.steps_count,
-                "cache_read_tokens": self.cache_read_tokens,
-                "cache_write_tokens": self.cache_write_tokens,
-                "context_tokens": self.context_tokens,
-                "last_tok_s": self.last_tok_s,
-                "last_ttft_ms": self.last_ttft_ms,
-                "side_questions": [dict(x) for x in self.side_questions[-30:]],
-                "uploads": [dict(x) for x in self.uploads[-50:]],
-                "queued_messages": [dict(x) for x in self.queued_messages[-20:]],
-                "goal_state": dict(self.goal_state) if self.goal_state else None,
-                "created_at": self.created_at,
-                "updated_at": self.updated_at,
-                "plan": list(self.plan),
-                "usage": dict(self.usage),
-                "next_seq": self._next_seq,
-                "events": list(self.events),
-                "messages": trimmed_msgs,
-            }
-        try:
-            AGENT_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
-            out_path = AGENT_SESSIONS_DIR / f"{self.id}.json"
-            tmp_path = out_path.with_suffix(".json.tmp")
-            tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            os.replace(tmp_path, out_path)
-        except Exception:
-            pass
+        with self._persist_lock:
+            with self._lock:
+                trimmed_msgs = _slice_messages_safely(self.messages, _PERSIST_MAX_MESSAGES)
+                payload = {
+                    "id": self.id,
+                    "title": self.title,
+                    "target_url": self.target_url,
+                    "status": self.status if status_override is None else status_override,
+                    "error": self.last_error if error_override is None else error_override,
+                    "llm_profile_id": self.llm_profile_id,
+                    "llm_model": self.llm_model,
+                    "model": self.model,
+                    "steps_count": self.steps_count,
+                    "cache_read_tokens": self.cache_read_tokens,
+                    "cache_write_tokens": self.cache_write_tokens,
+                    "context_tokens": self.context_tokens,
+                    "last_tok_s": self.last_tok_s,
+                    "last_ttft_ms": self.last_ttft_ms,
+                    "side_questions": [dict(x) for x in self.side_questions[-30:]],
+                    "uploads": [dict(x) for x in self.uploads[-50:]],
+                    "queued_messages": [dict(x) for x in self.queued_messages[-20:]],
+                    "goal_state": dict(self.goal_state) if self.goal_state else None,
+                    "created_at": self.created_at,
+                    "updated_at": self.updated_at,
+                    "plan": list(self.plan),
+                    "usage": dict(self.usage),
+                    "next_seq": self._next_seq,
+                    "events": list(self.events),
+                    "messages": trimmed_msgs,
+                }
+            try:
+                AGENT_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+                out_path = AGENT_SESSIONS_DIR / f"{self.id}.json"
+                tmp_path = out_path.with_suffix(".json.tmp")
+                tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                os.replace(tmp_path, out_path)
+            except Exception:
+                pass
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AgentSession":
@@ -4327,6 +4329,14 @@ class SingleAgentManager:
         drain_followup: bool = False,
     ) -> bool:
         """Atomically transition status ONLY if this turn still owns the session."""
+        with self._lock:
+            with sess._lock:
+                if stop_ev.is_set() or sess._stop_event is not stop_ev:
+                    return False
+        # Persist complete message history to disk BEFORE flipping status so readers
+        # observing `sess.status == "done"` never read a stale pre-final snapshot.
+        sess.persist(status_override=status, error_override=str(error or ""))
+
         next_q: Optional[Dict[str, Any]] = None
         q_snap: List[Dict[str, Any]] = []
         with self._lock:

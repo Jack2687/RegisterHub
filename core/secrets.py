@@ -12,14 +12,21 @@ from __future__ import annotations
 import base64
 import ctypes
 import hashlib
+import hmac
+import os
 import re
+import secrets as _py_secrets
 import sys
+import threading
 import urllib.parse
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 _DPAPI_ENTROPY = b"AutoRegisterStudio-DPAPI-v1"
 _DPAPI_PREFIX = "dpapi:"
+_LOCAL_V1_PREFIX = "localv1:"
+_LOCAL_KEY_LOCK = threading.Lock()
 _ALLOWED_PROXY_SCHEMES = frozenset({"http", "https", "socks5", "socks5h"})
 _CRED_URL_RE = re.compile(r"((?:https?|socks5h?)://)([^/\s@:]+):([^/\s@]+)@", re.I)
 _BEARER_RE = re.compile(r"(Bearer\s+)[A-Za-z0-9._\-~+/=]{8,}", re.I)
@@ -77,12 +84,109 @@ def _bytes_to_blob(data: bytes) -> tuple[Any, Any]:
     return blob, buf
 
 
+def _resolve_posix_master_key_path() -> Path:
+    env_override = (os.environ.get("REGISTERHUB_SECRET_KEY_FILE") or "").strip()
+    if env_override:
+        return Path(env_override).expanduser()
+    xdg_cfg = (os.environ.get("XDG_CONFIG_HOME") or "").strip()
+    base_dir = Path(xdg_cfg).expanduser() if xdg_cfg else (Path.home() / ".config")
+    return base_dir / "registerhub" / "local_master.key"
+
+
+def _load_or_create_posix_master_key() -> bytes:
+    """加载或原子创建当前用户私有 32 字节主密钥（0600 权限，独立于 SQLite 数据库存放）。"""
+    key_path = _resolve_posix_master_key_path()
+    with _LOCAL_KEY_LOCK:
+        if key_path.exists():
+            raw = key_path.read_bytes()
+            if len(raw) != 32:
+                raise SecretProtectionError(f"本地主密钥文件长度异常（需 32 字节）: {key_path}")
+            return raw
+
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(key_path.parent, 0o700)
+        except OSError:
+            pass
+
+        new_key = _py_secrets.token_bytes(32)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+        try:
+            fd = os.open(str(key_path), flags, 0o600)
+            try:
+                os.write(fd, new_key)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            try:
+                os.chmod(key_path, 0o600)
+            except OSError:
+                pass
+            return new_key
+        except FileExistsError:
+            raw = key_path.read_bytes()
+            if len(raw) != 32:
+                raise SecretProtectionError(f"本地主密钥文件长度异常（需 32 字节）: {key_path}")
+            return raw
+        except OSError as exc:
+            raise SecretProtectionError(f"无法创建本地主密钥文件 ({key_path}): {exc}") from exc
+
+
+def _xor_sha256_ctr(enc_key: bytes, nonce: bytes, data: bytes) -> bytes:
+    out = bytearray(len(data))
+    pos = 0
+    counter = 0
+    total = len(data)
+    while pos < total:
+        block = hashlib.sha256(enc_key + nonce + counter.to_bytes(4, "big")).digest()
+        chunk_len = min(32, total - pos)
+        for idx in range(chunk_len):
+            out[pos + idx] = data[pos + idx] ^ block[idx]
+        pos += chunk_len
+        counter += 1
+    return bytes(out)
+
+
+def _protect_local_v1(plaintext: str) -> str:
+    master_key = _load_or_create_posix_master_key()
+    raw = plaintext.encode("utf-8")
+    nonce = _py_secrets.token_bytes(16)
+    enc_key = hmac.digest(master_key, b"rh-localv1-enc:" + nonce, "sha256")
+    mac_key = hmac.digest(master_key, b"rh-localv1-mac:" + nonce, "sha256")
+    ct = _xor_sha256_ctr(enc_key, nonce, raw)
+    tag = hmac.digest(mac_key, b"rh-localv1:" + nonce + ct, "sha256")
+    return _LOCAL_V1_PREFIX + base64.b64encode(nonce + tag + ct).decode("ascii")
+
+
+def _unprotect_local_v1(ciphertext: str) -> str:
+    try:
+        blob = base64.b64decode(ciphertext[len(_LOCAL_V1_PREFIX):].encode("ascii"), validate=True)
+    except Exception as exc:
+        raise SecretProtectionError(f"localv1 密文 Base64 损坏: {exc}") from exc
+    if len(blob) < 48:
+        raise SecretProtectionError("localv1 密文长度不足（缺少 nonce/MAC）")
+    nonce = blob[:16]
+    tag = blob[16:48]
+    ct = blob[48:]
+    master_key = _load_or_create_posix_master_key()
+    mac_key = hmac.digest(master_key, b"rh-localv1-mac:" + nonce, "sha256")
+    expected_tag = hmac.digest(mac_key, b"rh-localv1:" + nonce + ct, "sha256")
+    if not hmac.compare_digest(expected_tag, tag):
+        raise SecretProtectionError("localv1 密文完整性校验失败（密文被篡改或密钥不匹配）")
+    enc_key = hmac.digest(master_key, b"rh-localv1-enc:" + nonce, "sha256")
+    raw = _xor_sha256_ctr(enc_key, nonce, ct)
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SecretProtectionError(f"localv1 明文 UTF-8 解码失败: {exc}") from exc
+
+
 def protect_secret(plaintext: str) -> str:
-    """加密单条敏感字符串。Windows 使用当前用户 DPAPI；非 Windows 拒绝降级为可逆明文编码。"""
+    """加密单条敏感字符串。Windows 使用当前用户 DPAPI；Linux/macOS 使用用户私有 0600 主密钥 + Encrypt-then-MAC。"""
     if not plaintext:
         return ""
     if sys.platform != "win32":
-        raise SecretProtectionError("当前非 Windows 环境且未启用系统级凭据加密（DPAPI），拒绝以可逆编码落盘敏感凭据")
+        return _protect_local_v1(plaintext)
     raw = plaintext.encode("utf-8")
     in_blob, _in_buf = _bytes_to_blob(raw)
     ent_blob, _ent_buf = _bytes_to_blob(_DPAPI_ENTROPY)
@@ -107,9 +211,11 @@ def protect_secret(plaintext: str) -> str:
 
 
 def unprotect_secret(ciphertext: str) -> str:
-    """解密由 protect_secret 生成的 DPAPI 密文；损坏、非 DPAPI 或跨用户解密失败时显式抛 SecretProtectionError。"""
+    """解密由 protect_secret 生成的密文（dpapi: 或 localv1:）；损坏、未知前缀或跨用户解密失败时显式抛 SecretProtectionError。"""
     if not ciphertext:
         return ""
+    if ciphertext.startswith(_LOCAL_V1_PREFIX):
+        return _unprotect_local_v1(ciphertext)
     if ciphertext.startswith(_DPAPI_PREFIX):
         if sys.platform != "win32":
             raise SecretProtectionError("当前非 Windows 环境，无法解密 DPAPI 密文")
