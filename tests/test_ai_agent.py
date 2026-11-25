@@ -75,7 +75,7 @@ def test_llm_config_atomic_save_masking_and_preserve(tmp_path, monkeypatch):
     pub1 = llm_client.save_llm_config({
         "base_url": "https://api.example.com/v1/",
         "model": "gpt-4.1-mini",
-        "api_key": "sk-proj-secret1234567890abcd",
+        "api_key": "sk-demo-secret1234567890abcd",
         "proxy_url": "http://127.0.0.1:7897",
         "max_tokens": 2048,
         "max_tokens_field": "max_completion_tokens",
@@ -83,12 +83,12 @@ def test_llm_config_atomic_save_masking_and_preserve(tmp_path, monkeypatch):
     })
     assert pub1["base_url"] == "https://api.example.com/v1"
     assert pub1["has_key"] is True
-    assert pub1["api_key_hint"] == "sk-pr...abcd"
+    assert pub1["api_key_hint"] == "sk-de...abcd"
     assert "api_key" not in pub1
     assert pub1["max_tokens_field"] == "max_completion_tokens"
     assert cfg_file.exists()
     raw_disk = json.loads(cfg_file.read_text(encoding="utf-8"))
-    assert raw_disk["api_key"] == "sk-proj-secret1234567890abcd"
+    assert raw_disk["api_key"] == "sk-demo-secret1234567890abcd"
 
     # 3. Blank API key on subsequent save preserves existing key
     pub2 = llm_client.save_llm_config({
@@ -98,9 +98,9 @@ def test_llm_config_atomic_save_masking_and_preserve(tmp_path, monkeypatch):
     })
     assert pub2["model"] == "o4-mini"
     assert pub2["has_key"] is True
-    assert pub2["api_key_hint"] == "sk-pr...abcd"
+    assert pub2["api_key_hint"] == "sk-de...abcd"
     raw_disk2 = json.loads(cfg_file.read_text(encoding="utf-8"))
-    assert raw_disk2["api_key"] == "sk-proj-secret1234567890abcd"
+    assert raw_disk2["api_key"] == "sk-demo-secret1234567890abcd"
 
 
 def test_llm_chat_completion_and_test_connection_mocked(tmp_path, monkeypatch):

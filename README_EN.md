@@ -1,8 +1,8 @@
 <h1 align="center">RegisterHub</h1>
 
 <p align="center">
-  <b>Industrial-Grade Universal Account Registration & Lifecycle Testing Engine</b><br>
-  <i>A deterministic, stealth automation framework for universal account registration and agentic workflows.</i>
+  <b>Zero-Dependency Studio Workbench · Autonomous Streaming AI Agent · Universal Account Automation Framework</b><br>
+  <i>Built with pure Python stdlib HTTP/SSE, Playwright/Patchright runtime parity, encrypted built-in Mail & Proxy pools, and an autonomous 16-tool AI Agent.</i>
 </p>
 
 <p align="center">
@@ -10,289 +10,256 @@
   <a href="DISCLAIMER.md"><img src="https://img.shields.io/badge/Disclaimer-Legal%20Terms-red.svg?style=flat-square" alt="Disclaimer"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-3776ab.svg?style=flat-square&logo=python&logoColor=white" alt="Python Version"></a>
   <a href="https://playwright.dev/"><img src="https://img.shields.io/badge/Playwright-Engine-2EAD33.svg?style=flat-square&logo=playwright&logoColor=white" alt="Playwright"></a>
-  <a href="https://opencv.org/"><img src="https://img.shields.io/badge/OpenCV-CV%20Engine-5C3EE8.svg?style=flat-square&logo=opencv&logoColor=white" alt="OpenCV"></a>
-  <a href="tests/"><img src="https://img.shields.io/badge/Tests-Passing-brightgreen.svg?style=flat-square" alt="Tests"></a>
-  <a href="https://bitwarden.com/"><img src="https://img.shields.io/badge/Export-Bitwarden%2FCSV-175DDC.svg?style=flat-square&logo=bitwarden&logoColor=white" alt="Bitwarden Export"></a>
-  <a href="https://waw666waw666.github.io/registerhub-demo/"><img src="https://img.shields.io/badge/Live%20Demo-Web%20Workbench-10b981.svg?style=flat-square" alt="Live Demo"></a>
+  <a href="tests/"><img src="https://img.shields.io/badge/Tests-50%2B%20Passing-brightgreen.svg?style=flat-square" alt="Tests"></a>
+  <a href="https://waw666waw666.github.io/registerhub-demo/"><img src="https://img.shields.io/badge/Live%20Demo-Interactive%20Workbench-10b981.svg?style=flat-square" alt="Live Demo"></a>
+  <a href="#community--support"><img src="https://img.shields.io/badge/QQ%20Group-1130324020-12B7F5.svg?style=flat-square&logo=tencentqq&logoColor=white" alt="QQ Group"></a>
+  <a href="https://discord.gg/USnVJ9YQX"><img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2.svg?style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 <p align="center">
-  <a href="./README.md">简体中文</a> | <a href="./README_EN.md">English</a> | <a href="https://waw666waw666.github.io/registerhub-demo/">🌐 Live Interactive Demo</a>
+  <a href="./README.md">简体中文</a> |
+  <a href="./README_EN.md">English</a> |
+  <a href="https://waw666waw666.github.io/registerhub-demo/">🌐 Live Interactive Demo</a> |
+  <a href="#community-vs-pro-edition-open-core">🚀 Community vs Pro</a> |
+  <a href="#community--support">💬 Community & QQ Group</a>
+</p>
+
+<p align="center">
+  <a href="https://waw666waw666.github.io/registerhub-demo/">
+    <img src="docs/screenshots/01-dashboard.png" alt="RegisterHub Studio Dashboard Overview" width="100%">
+  </a>
 </p>
 
 ---
 
-## Overview
+## Why RegisterHub?
 
-RegisterHub is an engineering-first automation framework designed to eliminate the fragility of traditional browser automation. Built on top of Playwright, OpenCV-based computer vision solvers, and Chrome DevTools Protocol (CDP), RegisterHub provides deterministic execution across modern single-page applications (SPAs), reactive state managers, and controlled DOM interfaces.
+Most automation scripts stop at fragile headless snippets tied to a single website or demand heavy Docker/cloud stacks. **RegisterHub Community Edition** ships a complete, deterministic engineering workbench powered by **zero external server dependencies (no Docker, no Node.js, pure Python stdlib)**:
 
-### Engineering Core Pillars
+- **Zero-Dependency Desktop-Grade Studio Workbench**: Run `python main.py --web` (or double-click `run_web.bat` / `./run_web.sh`) to launch the full Studio UI (`http://127.0.0.1:18886`) with 1-click Light/Dark mode, multi-palette themes, live SSE logs, and blackbox failure snapshots.
+- **Autonomous 3-Protocol Streaming AI Agent**:
+  - Real SSE streaming across **OpenAI Chat / Anthropic Messages / OpenAI Responses** with append-only **Prompt Cache prefix stability**, live `Cache Hit % / TTFT / tok/s` telemetry, and automatic 85% context compaction;
+  - Equipped with **16 engineering tools** (`probe_url`, `analyze_har`, AST-validated `write_adapter` / `patch_adapter`, `run_adapter_once`, `read_failures`, built-in mail/proxy pool control, `verify_accounts`), **5 editable Markdown skills** (`skills/*.md`), step-level code checkpoints with 1-click rollback, persistent guard approvals, `/goal` autonomous loops, and non-blocking streaming `/btw` side questions;
+  - Strictly enforces **`AGENTS.md` Protocol-First Escalation (Pure Protocol ➔ Headless ➔ Hybrid Captcha Bridge)** and concise structured reporting.
+- **Built-in Encrypted Mail Pool & Proxy Pool (Zero Docker)**:
+  - **Built-in Mail Pool**: Local SQLite WAL + Windows DPAPI encryption supporting bulk mixed import of **Outlook OAuth2 (Graph API / IMAP-XOAUTH2)**, **iCloud verification links**, and standard IMAP, paired with an **industrial-grade self-contained OTP extractor** (confidence scoring + street/zip/footer noise rejection) and live inbox inspection;
+  - **Built-in Proxy Pool**: Supports bulk static HTTP/HTTPS/SOCKS5 proxies, residential Sticky Session gateways (Smartproxy / IPRoyal / Oxylabs), and short-lived API extract feeds with full-pool probing, target-site 403/CF verification, and **S/A/B/C/D IP purity scoring**.
+- **Runtime Environment Parity + Offline CV + CDP Bridge**: Native Chrome (`channel="chrome"`) with optional zero-`Runtime.enable` **`patchright`** auto-acceleration; offline dual-pass Canny OpenCV slider solver with cubic Bezier human kinetics; seamless CDP attach to AdsPower, BitBrowser, or local Chrome.
+- **Native AI IDE Contracts**: Ships with [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md), and [SETUP_FOR_AI.md](SETUP_FOR_AI.md) so Cursor, Claude Code, Windsurf, and Gemini CLI can auto-bootstrap environments and assemble verified adapters in one prompt.
 
-- **Runtime Environment Parity**: Eliminates synthetic automation signatures via native Chrome runtime integration, strict prototype preservation (`[native code]`), and optional zero-`Runtime.enable` **`patchright`** auto-acceleration (gracefully falling back to Playwright when not installed).
-- **Zero-Dependency Web Workbench & Autonomous Streaming AI Agent (`RegisterHub Lite`)**: Pure Python stdlib HTTP/SSE server (no Node.js or FastAPI required). Launch via `python main.py --web`, `run_web.bat` (Windows), or `./run_web.sh` (macOS/Linux):
-  - **Autonomous AI Agent**: Real 3-protocol SSE streaming (OpenAI Chat / Anthropic Messages / OpenAI Responses), live Prompt Cache / TTFT / tok/s telemetry, manual `/compact` & automatic 85% context compaction, 16 built-in tools, 5 editable Markdown engineering skills (`skills/*.md`), step-level adapter checkpoints & restore, persistent guard rules with approvals, follow-up queue, `/goal` loop, and streaming `/btw` side questions.
-  - **Built-in Mail Pool & Proxy Pool (Zero Docker / Zero Extra Deps)**: Local SQLite WAL + Windows DPAPI-encrypted pools supporting auto-detected bulk import for Outlook OAuth2 / iCloud links / IMAP mailboxes, static HTTP/HTTPS/SOCKS5 proxies, residential Sticky-Session gateways, and short-lived API extract sources with live health probing & IP purity scoring.
-  - **Complete Engineering Toolkit**: Single-thread runner, online AST-validated Adapter Code Editor, HAR-to-Protocol extractor, credential vault export (Bitwarden / CSV / JSON), cross-resolution window layout calibrator, and synthetic identity / Luhn card / TOTP 2FA / Tax-Phone-ID-Hardware utility toolbox.
-- **Algorithmic Vision Solver**: Built-in computer vision pipeline featuring dual-pass Canny edge detection and human-kinetic Bezier curve trajectory generation, executing offline with zero cloud API dependencies.
-- **CDP Bridge Architecture**: Native integration with enterprise fingerprint browsers (AdsPower, BitBrowser) and local Chrome instances, allowing seamless reuse of clean residential IPs and persistent user sessions.
-- **Agentic Automation Protocol**: Natively integrated with `AGENTS.md` and the built-in AI Agent workbench, supporting any OpenAI-compatible LLM as well as Cursor, Claude Code, Windsurf, and Gemini CLI.
+---
+
+## Visual Tour
+
+> All screenshots below are captured from our pure-mock interactive demo—zero real credentials exposed. [**👉 Try the Live Interactive Demo (Zero Install)**](https://waw666waw666.github.io/registerhub-demo/)
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/01-dashboard.png" alt="Dashboard Overview" />
+      <p align="center"><b>Dashboard Overview (Dark)</b>: KPIs, 14-day throughput chart, Key breakdown & site rankings</p>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/02-agent-chat.png" alt="Autonomous AI Agent" />
+      <p align="center"><b>Autonomous AI Agent</b>: Probe ➔ Write Adapter ➔ Trial Run with live Cache & tok/s telemetry</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/03-fleet.png" alt="Site Fleet Tasks" />
+      <p align="center"><b>Site Fleet Tasks (Light)</b>: Per-site attribution, Key (N) shortcut, file explorer reveal & single-thread runs</p>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/04-builtin-mail.png" alt="Built-in Mail Pool & Inbox OTP" />
+      <p align="center"><b>Built-in Mail Pool + Live Inbox OTP</b>: Outlook / iCloud / IMAP management & 1-click OTP copy</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/05-builtin-proxies.png" alt="Built-in Proxy Pool & IP Scoring" />
+      <p align="center"><b>Built-in Proxy Pool + IP Scoring</b>: Static / Residential Gateways / API feeds & S/A purity grading</p>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/06-tools.png" alt="Full-Stack Dev Toolbox" />
+      <p align="center"><b>Engineering Toolbox</b>: Real-address multi-country identities, Luhn cards, 2FA TOTP & 4-in-1 profiles</p>
+    </td>
+  </tr>
+</table>
+
+---
+
+## 30-Second Quickstart
+
+### Option A: One-Sentence Auto-Bootstrap via Your AI IDE (Recommended)
+
+Clone the repository, open `RegisterHub` in **Cursor / Claude Code / Windsurf / Gemini CLI**, and send:
+
+```text
+@SETUP_FOR_AI.md Follow this protocol to probe my host environment, install dependencies, configure config.json, and verify tests + demo.
+```
+
+### Option B: Launch the Zero-Dependency Web Workbench
+
+```bash
+# 1. Clone and install Python dependencies
+git clone https://github.com/waw666waw666/RegisterHub.git
+cd RegisterHub
+pip install -r requirements.txt
+
+# 2. Install Playwright browser binaries (optional: `pip install patchright` for zero-Runtime.enable stealth)
+playwright install chromium
+
+# 3. Start Web Workbench (or double-click run_web.bat on Windows)
+python main.py --web
+# Open http://127.0.0.1:18886 in your browser
+```
+
+### Option C: 3-Second Offline Verification (No Network Needed)
+
+```bash
+python main.py doctor       # Executable diagnostics (Python / OpenCV / Chrome / FS)
+python main.py --run demo   # 3s offline target verification -> results/accounts.txt
+```
 
 ---
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    UI["Studio SPA Workbench<br/>(:18886 Light & Dark)"] --> CTRL["Zero-Dep Control Plane<br/>server.py + studio_bridge.py"]
+    CLI["CLI & External AI IDEs<br/>main.py + AGENTS.md + CLAUDE.md"] --> CTRL
+
+    CTRL --> AGENT["Autonomous AI Agent<br/>16 Tools · 5 Skills · Checkpoints · /goal"]
+    CTRL --> RUNNER["Deterministic Single-Thread Runner<br/>StandardRunner + Anti-Clip Zoom"]
+    CTRL --> POOLS["Encrypted Local Pools (Zero Docker)<br/>SQLite WAL + DPAPI"]
+
+    AGENT --> RUNNER
+    POOLS --> MAIL["Built-in Mail Pool<br/>Outlook / iCloud / IMAP + OTP Engine"]
+    POOLS --> PROXY["Built-in Proxy Pool<br/>Static / Residential / API + IP Scorer"]
+
+    RUNNER --> ENGINE["Stealth Execution Layer<br/>Chrome / Patchright · CDP · OpenCV"]
+    ENGINE --> LEDGER["Atomic Ledger & Exports<br/>accounts.txt + accounts_meta.json<br/>Bitwarden / CSV / JSON"]
+```
+
+<details>
+<summary><b>Expand repository layout</b></summary>
+
 ```text
 RegisterHub/
 ├── core/
-│   ├── adapter.py         # Abstract base adapter (BaseSiteAdapter) & lifecycle hooks
-│   ├── calibrator.py      # Cross-resolution symmetric window layouts & anti-clipping zoom
-│   ├── doctor.py          # Executable environment diagnostics (OpenCV, Chrome, network, FS)
-│   ├── pilot.py           # Human-like keystroke dynamics & resilient interaction helpers
-│   ├── stealth.py         # Native Chrome consistency & CDP bridge engine
-│   ├── inspector.py       # Heuristic DOM form inspector (FormInspector)
-│   ├── solver.py          # OpenCV puzzle gap detector & Bezier trajectory planner
-│   ├── identity.py        # High-entropy synthetic persona & credential generator
-│   ├── mail_client.py     # Adaptive polling disposable mailbox client
-│   ├── imap_mail.py       # Stdlib single-account IMAP & BuiltinPoolMailClient
-│   ├── mail_builtin.py    # Zero-Docker built-in mail pool (SQLite + DPAPI)
-│   ├── proxy_builtin.py   # Zero-dep built-in proxy pool (Static / Residential / API)
-│   ├── secrets.py         # Windows DPAPI credential protection & log redaction
+│   ├── adapter.py         # BaseSiteAdapter contract & lifecycle hooks
 │   ├── ai_agent.py        # Pure-stdlib autonomous single-thread AI Agent (16 tools)
-│   ├── llm_client.py      # 3-protocol SSE streaming LLM client + cache/TTFT telemetry
+│   ├── llm_client.py      # 3-protocol SSE streaming client + Cache/TTFT/tok_s telemetry
+│   ├── llm_profiles.py    # Multi-provider & multi-key profile manager
+│   ├── mail_builtin.py    # Zero-Docker built-in mail pool (SQLite WAL + DPAPI + OTP extractor)
+│   ├── proxy_builtin.py   # Zero-dep built-in proxy pool (Static / Residential / API feeds)
 │   ├── ip_scorer.py       # Exit IP residential attribution & risk purity scorer
-│   ├── runner.py          # Deterministic task execution, builtin proxy resolution & ledger
-│   ├── scaffold.py        # Automated adapter scaffolding (builtin pool / tempmail / IMAP)
+│   ├── runner.py          # Single-thread runner, proxy resolver, snapshots & per-site attribution
+│   ├── pilot.py           # Human-kinetic typing & resilient interaction guards
+│   ├── stealth.py         # Native Chrome / Patchright parity & CDP bridge
+│   ├── inspector.py       # Heuristic DOM form inspector
+│   ├── solver.py          # Offline OpenCV Canny puzzle solver & Bezier trajectory planner
+│   ├── identity.py        # High-entropy realistic multi-locale identity generator
+│   ├── mail_client.py     # Multi-provider free disposable mailbox client
+│   ├── imap_mail.py       # Stdlib single IMAP & BuiltinPoolMailClient
+│   ├── calibrator.py      # Cross-resolution symmetric window presets & anti-clipping zoom
+│   ├── locks.py           # Cross-process exclusive file locks & atomic writes
+│   ├── secrets.py         # Windows DPAPI secret storage & log redaction
+│   ├── net_guard.py       # SSRF public-URL validator
+│   ├── doctor.py          # Executable environment diagnostics
+│   ├── scaffold.py        # Target DOM pre-inspection & adapter scaffold generator
 │   └── exporter.py        # Bitwarden, 1Password, CSV & JSON credential exporter
-├── skills/                # 5 built-in editable AI Agent skill recipes (*.md)
-├── config/
-│   └── window_geometry.json # Calibrated multi-window layout & zoom presets
-├── docs/
-│   └── WINDOW_CALIBRATION.md # Cross-resolution window calibration & preview guide
-├── sites/                 # Clean reference adapters & scaffold template
-│   ├── _template.py       # Standard adapter template (auto-switches tempmail / IMAP)
-│   ├── demo_site.py       # Self-contained offline Base64 reference target
-│   └── automation_exercise.py # Public multi-step automation benchmark adapter
-├── web/                   # Zero-dependency RegisterHub Web Workbench & built-in AI Agent
-│   ├── server.py          # Stdlib HTTP/SSE backend
-│   ├── studio_bridge.py   # Studio control-plane API bridge
-│   └── dist/              # Studio-aligned SPA frontend bundle
-├── tests/                 # Unit & regression test suite
-├── config.example.json    # Runtime configuration template
-├── pytest.ini             # Test runner isolation rules
+├── skills/                # 5 editable AI Agent engineering skills (*.md)
+├── sites/                 # Clean reference adapters (_template / demo_site / automation_exercise)
+├── web/                   # Stdlib HTTP/SSE backend (server.py / studio_bridge.py) & SPA bundle (dist/)
+├── docs/                  # Window calibration guide & UI screenshots
+├── tests/                 # 50+ automated unit & regression tests
+├── AGENTS.md              # Agentic engineering contract & reporting format
+├── CLAUDE.md              # Claude Code auto-load instructions
+├── SETUP_FOR_AI.md        # One-sentence AI bootstrap protocol
 ├── main.py                # Unified CLI & Web entry point
-├── run.bat                # Windows interactive execution bootstrap (CRLF)
-├── run_web.bat            # Windows 1-click Web Workbench launcher (:18886)
-├── calibrate.bat          # Windows interactive window layout calibrator & preview launcher
-└── requirements.txt       # Core dependency manifest
+└── run_web.bat / run.bat  # Windows 1-click launchers (CRLF)
 ```
 
----
-
-## Reference Adapters
-
-RegisterHub ships exclusively with clean local & public benchmark adapters—zero hardcoded commercial targets—ready out of the box to verify the full lifecycle or serve as blueprints for new adapters:
-
-| Adapter Key | Target Environment | Technical Characteristics | Primary Evaluation Target |
-| :--- | :--- | :--- | :--- |
-| `demo` | Embedded Base64 Target | Zero-configuration offline pipeline | Rapid 3s verification of browser launch, SSE logs, and ledger persistence |
-| `automation_exercise` | Public Automation Benchmark | Multi-stage registration wizard | Complex form fields, dropdown cascading & checkbox assertions |
-| `_template` | Standard Adapter Blueprint | Auto-wires tempmail / IMAP mail clients | Scaffold new adapters via `--scaffold` or Web **AI Chat** |
+</details>
 
 ---
 
-## Official Standalone Derived Projects
+## AI Co-Development Workflows
 
-To keep the core `RegisterHub` repository clean and free of hardcoded commercial targets, production workflow implementations are decoupled into 100% self-contained standalone open-source repositories:
+- **Built-in Web AI Agent**: Configure any OpenAI / Anthropic compatible provider under **AI Engine**, paste a signup URL into **AI Chat** (optionally enable **`/goal`**), and watch the agent plan ➔ probe ➔ prefer pure HTTP protocol ➔ AST-validate & write `sites/<name>.py` ➔ run single-thread verification ➔ audit failures & credentials end-to-end.
+- **External AI IDEs (Cursor / Claude Code / Windsurf / Gemini)**: Root [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) load automatically. For complex multi-step SPAs, register once manually and share your exact steps/screenshots with the AI for deterministic first-shot accuracy.
+
+---
+
+## Reference Adapters & Official Standalone Derived Projects
+
+`RegisterHub` ships clean with zero hardcoded commercial sites (`demo`, `automation_exercise`, `_template`). Production workflow implementations live in 5 decoupled, 100% self-contained open-source repositories:
 
 | Standalone Project | Architecture & Highlights | Repository |
 | :--- | :--- | :--- |
-| **[TokenHarbor Register](https://github.com/waw666waw666/tokenharbor-register)** | **100% Pure Protocol (Zero Browser)** · Next.js Server Action self-healing IDs + Tempmail / IMAP activation + automatic `:free` route consent unlock & live OpenAI-compatible `thk_live_` Key verification | [GitHub](https://github.com/waw666waw666/tokenharbor-register) |
-| **[Deepgram Register](https://github.com/waw666waw666/deepgram-register)** | Official **$200 USD Free Credit Allowance** · reCAPTCHA v2 penetration + pure REST protocol 40-char API key minting | [GitHub](https://github.com/waw666waw666/deepgram-register) |
-| **[100MilionSeek Register](https://github.com/waw666waw666/100milionseek-register)** | **100M Tokens/day Free Allowance** · Turnstile clearance + instant on-page key extraction (no email confirmation) + referral pool | [GitHub](https://github.com/waw666waw666/100milionseek-register) |
-| **[AMD AI Dev Register](https://github.com/waw666waw666/amd-register)** | Official AMD AI Developer Program · Akamai telemetry parity + OneTrust modal clearance & credential extraction | [GitHub](https://github.com/waw666waw666/amd-register) |
-| **[Coarena Register](https://github.com/waw666waw666/coarena-register)** | **Post-Google OAuth Pure REST Key Minting** · Session capture + pure protocol terms acceptance & daily quota verification | [GitHub](https://github.com/waw666waw666/coarena-register) |
+| **[TokenHarbor Register](https://github.com/waw666waw666/tokenharbor-register)** | **100% Pure Protocol (Zero Browser)** · Next.js Server Action self-healing IDs + Tempmail/IMAP OTP + `:free` consent unlock & live `thk_live_` verification | [GitHub](https://github.com/waw666waw666/tokenharbor-register) |
+| **[Deepgram Register](https://github.com/waw666waw666/deepgram-register)** | Official **$200 USD Free Credits** · reCAPTCHA v2 clearance + pure REST 40-char API key minting | [GitHub](https://github.com/waw666waw666/deepgram-register) |
+| **[100MilionSeek Register](https://github.com/waw666waw666/100milionseek-register)** | **100M Tokens/day Free Allowance** · Turnstile clearance + instant on-page key extraction + referral loop | [GitHub](https://github.com/waw666waw666/100milionseek-register) |
+| **[AMD AI Dev Register](https://github.com/waw666waw666/amd-register)** | Official AMD AI Developer Program · Akamai telemetry parity + OneTrust modal clearance | [GitHub](https://github.com/waw666waw666/amd-register) |
+| **[Coarena Register](https://github.com/waw666waw666/coarena-register)** | **Post-OAuth Pure REST Key Minting** · Session capture + pure protocol terms acceptance & quota check | [GitHub](https://github.com/waw666waw666/coarena-register) |
 
 ---
 
-## Quickstart
+## Community vs Pro Edition (Open-Core)
 
-### 1. Prerequisites and Installation
+The open-source Community Edition includes the full zero-dependency Studio UI, autonomous streaming AI Agent, and encrypted built-in Mail & Proxy pools—**100% free for personal research and single-thread workflows**. For high-throughput multi-concurrency, unattended scheduling, and team operations, check **AutoRegister Pro**:
 
-```bash
-# Clone the repository
-git clone https://github.com/waw666waw666/RegisterHub.git
-cd RegisterHub
+| Capability | RegisterHub Community (Apache 2.0 Free) | AutoRegister Pro Edition |
+| :--- | :--- | :--- |
+| **Studio Workbench & Streaming AI Agent** | ✅ Full access (3 protocols / 16 tools / 5 skills / `/goal` / `/btw`) | ✅ Full access + multi-site operations control |
+| **Built-in Mail & Proxy Pools (Zero Docker)** | ✅ Full access (Outlook / iCloud / IMAP + Static / Residential / API) | ✅ Full access + **Cloudflare Wildcard Catch-all** + **Managed Subscription Kernel** |
+| **Concurrency Architecture** | Deterministic single-thread execution | 🚀 **Multi-worker concurrent pool (`-c 2 / 4 / 8`) + shared queue** |
+| **Unattended Scheduling & Watermark Refill** | Manual trigger | 🚀 **Background cron & Key-watermark auto-replenishment scheduler** |
+| **Smart Failure Triage & Recycle** | Blackbox logs & screenshots | 🚀 **Auto dead/soft-fail classification + 1-click atomic soft-fail recycling** |
+| **Commercial Captcha API Bridge** | Offline OpenCV slider + human assist | 🚀 **Native CapSolver / 2Captcha / YesCaptcha REST bridges** |
+| **Alerts & Gateway Sync** | Local ledger + CSV / JSON / Bitwarden export | 🚀 **WeCom / Feishu / Telegram / Discord alerts + 1-click One-API / New-API channel export** |
+| **Production Site Adapters** | 3 clean reference targets + 5 standalone repos | 🚀 **11+ pre-built high-value AI platform adapters + priority updates** |
 
-# Install core dependencies
-pip install -r requirements.txt
-
-# Install Playwright browser binaries (optional: `pip install patchright` for zero-Runtime.enable stealth)
-playwright install chromium
-```
-
-### 2. Runtime Environment Diagnostics
-
-Verify host configuration, proxy availability, and dependency health:
-
-```bash
-python main.py doctor
-# Also accepts flag form: python main.py --doctor
-```
-
-### 3. Launch Web Workbench (Recommended) or Baseline Demo
-
-**Option A: Zero-Dependency Web Workbench & Built-in AI Agent (Recommended)**
-```bash
-python main.py --web
-# Or double-click run_web.bat on Windows, then open http://127.0.0.1:18886
-```
-
-**Option B: Self-Contained 3s Offline Baseline Verification**
-```bash
-python main.py --run demo
-```
-
-Resulting credentials and execution artifacts are written atomically to `results/accounts.txt`.
-
-### 4. AI Agent Collaborative Development (Cursor / Claude Code / Windsurf / Gemini)
-
-RegisterHub is engineered from the ground up for seamless co-development with autonomous AI programming agents. The workspace root includes strictly audited [AGENTS.md](AGENTS.md) and [SETUP_FOR_AI.md](SETUP_FOR_AI.md) agent contracts.
-
-**Prerequisite**: Open the **`RegisterHub`** project folder as the root active workspace in your AI IDE (Cursor, Windsurf, VS Code with Claude Code, or Gemini CLI).
-
-Once loaded into the workspace, you can instruct your AI using either of the two approaches:
-
-#### Method 1: Direct Prompting (Fast & Lightweight)
-Drop the target URL directly into your AI chat:
-```text
-Follow the workspace conventions and AGENTS.md to generate an automated registration adapter for: https://example.com/signup
-```
-The AI reads the root rules, probes DOM elements, scaffolds the adapter, and runs baseline tests automatically.
-
-#### Method 2: Provide Human-Walkthrough Steps (Strongly Recommended & Highest Success Rate)
-For modern multi-step SPAs, onboarding wizards, or sites with interactive challenges, **the most reliable approach is to manually register one account yourself first in your regular browser**.  
-Provide your recorded walkthrough—including URLs, clicked buttons, form inputs, OTP steps, and UI screenshots—directly to the AI:
-```text
-Please follow RegisterHub standards and AGENTS.md to build an automated adapter matching my verified manual workflow:
-Target URL: https://example.com/signup
-
-My manual walkthrough (screenshots attached):
-1. Navigate to signup page, fill in email and password, and click "Create Account";
-2. A Cloudflare Turnstile box appears; click the checkbox to clear;
-3. Check inbox for the 6-digit OTP code and input it into the verification field;
-4. Lands on the dashboard, navigate to "API Keys" in the top-right menu, and click "Create New Key";
-5. Copy the displayed sk-xxxx key.
-
-Please assemble sites/example_site.py according to this exact walkthrough and run a local verification test!
-```
-The AI will precisely map and automate your verified human interaction chain, eliminating guesswork and ensuring production-grade reliability on the first attempt!
+> Personal workflows and single-thread development are fully covered by this free open-source edition. For **AutoRegister Pro** demos, licensing, or team deployment, join our community:  
+> **QQ Group: `1130324020`** ｜ **Discord: [Join Community](https://discord.gg/USnVJ9YQX)**
 
 ---
 
-## Proxy & Email Verification Configuration
+## Advanced Configuration & CLI Reference
 
-Manage pools and egress strategies directly inside the top-level **Mail Pool**, **Proxy Pool**, or **Settings** views (persisted atomically to `config.json` and `results/*.db`):
+<details>
+<summary><b>Expand pool strategies & CLI commands</b></summary>
 
-1. **Built-in Proxy Pool (`builtin`, Recommended) & Custom Proxy**:
-   - Bulk-import static HTTP/HTTPS/SOCKS5 proxies, configure dynamic residential gateways (Smartproxy / IPRoyal / Oxylabs / Bright Data / custom Sticky Session templates), or attach short-lived API extract URLs—all encrypted locally via DPAPI with automatic credential masking.
-   - Also supports **Direct / System Proxy (`direct`)**, **Single Custom Proxy (`proxy`)**, and **External Anti-Detect Browser CDP Bridge**, plus real-time IP purity scoring.
-2. **Built-in Mail Pool (`builtin`, Recommended, Zero Docker)**:
-   - Paste mixed lines of **Outlook OAuth2 (3/4-column)**, **iCloud verification links**, or **Gmail/QQ/163/custom IMAP** accounts with masked dry-run preview, batch verification, inbox viewer with OTP extraction, and transactional lease/release.
-3. **Public Disposable Mail (`tempmail`) & Single-Account IMAP (`imap`)**:
-   - Out-of-the-box `DisposableMailClient` works with zero setup; single-account non-destructive IMAP (`BODY.PEEK[]`) is available directly in Settings.
+```bash
+python main.py --web                                # Launch Studio Web Workbench (:18886; set REGISTERHUB_NO_BANNER=1 to silence banner)
+python main.py --list                               # List discovered site adapters
+python main.py --scaffold my_site --url https://... # Inspect target DOM & generate adapter skeleton
+python main.py --run my_site --count 1              # Run single-thread execution
+python main.py --run demo --cdp http://127.0.0.1:9222  # Attach external fingerprint browser / Chrome CDP
+python main.py --auto-layout                        # Auto-generate 6 symmetric anti-clipping window presets
+python main.py --demo-layouts --demo-sec 8          # Preview all 6 presets sequentially
+python main.py --calibrate -c 2                     # Interactive window geometry & zoom calibrator
+python main.py export --export bitwarden            # Export vault (bitwarden / csv / json)
+pytest tests/ -q                                    # Run 50+ automated tests
+```
+
+</details>
 
 ---
 
-## Command Line Interface (CLI)
+## License & Legal Disclaimer
 
-### Adapter Discovery
-List all registered site adapters and their technical descriptors:
-```bash
-python main.py --list
-```
-
-### Automated Adapter Scaffolding
-Inspect a target registration page and generate a typed adapter skeleton pre-populated with discovered input selectors:
-```bash
-# Analyze target DOM and scaffold adapter skeleton
-python main.py --scaffold target_service --url https://target-service.com/signup
-
-# Execute scaffolded adapter
-python main.py --run target_service
-```
-
-### External CDP Session Attach
-Attach to an already running external browser instance (AdsPower, BitBrowser, or Chrome with `--remote-debugging-port`):
-```bash
-python main.py --run demo --cdp http://127.0.0.1:9222
-```
-
-### Credential Vault Export
-Export verified account records into standardized credential management formats:
-```bash
-# Bitwarden / 1Password compatible CSV
-python main.py export --export bitwarden
-
-# Standard CSV format
-python main.py export --export csv
-
-# Raw JSON format
-python main.py export --export json
-```
-
-### Cross-Resolution Window Layouts & Anti-Clipping Preview
-Automatically read the host display work area (`SPI_GETWORKAREA` + DPI scale) to generate symmetric, zero-overflow window presets (`1 / 2 / 4x2 / 6x2`) with adaptive anti-clipping CSS zoom (see [docs/WINDOW_CALIBRATION.md](docs/WINDOW_CALIBRATION.md)):
-```bash
-# Auto-generate symmetric window presets for the current display
-python main.py --auto-layout
-
-# Switch default 4-window or 6-window preset mode
-python main.py --auto-layout --quad-mode centered_compact --hex-mode wing_cascade
-
-# Preview all 6 presets sequentially (10s per preset by default)
-python main.py --demo-layouts --demo-sec 10
-
-# Launch interactive drag/resize & zoom calibrator (or double-click calibrate.bat)
-python main.py --calibrate -c 2
-```
-
----
-
-## AI Agent Integration (`AGENTS.md`)
-
-RegisterHub is architected for seamless collaboration with autonomous programming agents. The root `AGENTS.md` enforces strict engineering disciplines:
-
-- **Single Concurrency Default**: Enforces deterministic single-threaded execution by default to prevent desktop disruption and IP exhaustion; prompts for concurrency scaling only after sustained success.
-- **Stage-Gate Assertions**: Prohibits arbitrary timeout delays; mandates strict validation of URL mutations, DOM response states, and token persistence.
-- **Zero-Interference Process Lifecycle**: Manages child process trees explicitly via POSIX/Windows hooks, ensuring external user processes and personal browser sessions remain completely untouched.
-
----
-
-## Verification & Testing
-
-Execute the test suite to validate core heuristics, OpenCV solvers, and code scaffolding:
-
-```bash
-pytest tests/
-```
-
----
-
-## Disclaimer & Legal Notice
-
-1. **License**: This project is licensed under the [Apache License 2.0](LICENSE).
-2. **Legal Disclaimer**: RegisterHub is strictly intended for **authorized security audits, regression test automation, and web standards research**.
-   - **Accessing, downloading, or running this code constitutes unconditional agreement to be bound by the full Legal Disclaimer**;
-   - Mass registration abuse, credential stuffing, scraping protected assets, or circumventing commercial defenses is strictly prohibited;
-   - Users assume all legal risks and responsibilities. The authors accept zero liability for any damages or violations arising from misuse.
-
-> **Full Legal Disclaimer**: [DISCLAIMER.md](DISCLAIMER.md) · [简体中文免责声明](DISCLAIMER.zh.md)
+1. **License**: Released under the [Apache License 2.0](LICENSE).
+2. **Disclaimer**: RegisterHub is strictly designed for **authorized workflow testing, form lifecycle QA, and web standards research**. Abuse, credential stuffing, or unauthorized access is strictly prohibited. Full legal terms: [DISCLAIMER.md](DISCLAIMER.md) · [简体中文免责声明](DISCLAIMER.zh.md).
 
 ---
 
 ## Community & Support
 
-Join our developer community for technical discussions, custom adapter requests, and browser automation best practices:
+If you find RegisterHub useful, please give the repo a **Star ⭐** and join our developer community for adapter tips, protocol engineering discussions, and **AutoRegister Pro** updates:
 
-- **Discord Community**: [Join Discord](https://discord.gg/USnVJ9YQX)
-- **QQ Group**: 1130324020
+- **QQ Group**: `1130324020`
+- **Discord**: [https://discord.gg/USnVJ9YQX](https://discord.gg/USnVJ9YQX)
+- **Live Interactive Demo**: [https://waw666waw666.github.io/registerhub-demo/](https://waw666waw666.github.io/registerhub-demo/)

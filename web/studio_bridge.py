@@ -286,7 +286,7 @@ def _infer_project_and_time(
     if explicit_site:
         return explicit_site, created_at
 
-    # 3. Retroactive JWT claim matching (e.g. URnetwork ES256 JWT iss="urnetwork:byjwt" -> ur_io)
+    # 3. Retroactive JWT claim matching (e.g. provider ES256 JWT iss="acmecloud:jwt" -> acme_cloud)
     if api_key.startswith("eyJ") and api_key.count(".") == 2:
         claims = _decode_jwt_claims_unverified(api_key)
         if not created_at:

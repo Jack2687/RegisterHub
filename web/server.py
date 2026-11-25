@@ -2029,10 +2029,13 @@ def create_server(host: str = "127.0.0.1", port: int = 18886) -> ThreadingHTTPSe
 def start_server(host: str = "127.0.0.1", port: int = 18886) -> None:
     """Start RegisterHub Lite Web Workbench on loopback."""
     srv = create_server(host=host, port=port)
-    print("=" * 64)
+    print("=" * 68)
     print(f"  RegisterHub Lite Workbench -> http://{host}:{port}")
     print("  Open-Source Single-Thread Edition (Press Ctrl+C to stop)")
-    print("=" * 64, flush=True)
+    if not os.environ.get("REGISTERHUB_NO_BANNER", "").strip():
+        print("  Community & Pro: QQ Group 1130324020 | Discord https://discord.gg/USnVJ9YQX")
+        print("  GitHub (Star!):  https://github.com/waw666waw666/RegisterHub")
+    print("=" * 68, flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

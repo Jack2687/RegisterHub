@@ -339,4 +339,9 @@ class StandardRunner:
             browser.close()
 
         self.log("info", f"Session completed. Success: {success_count}/{count}")
+        if success_count > 0 and not os.environ.get("REGISTERHUB_NO_BANNER", "").strip():
+            self.log(
+                "info",
+                "RegisterHub Community & Pro -> QQ Group: 1130324020 | Discord: https://discord.gg/USnVJ9YQX",
+            )
         return success_count

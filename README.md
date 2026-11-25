@@ -1,8 +1,8 @@
 <h1 align="center">RegisterHub</h1>
 
 <p align="center">
-  <b>工业级万能账号自动化注册框架与生命周期测试引擎</b><br>
-  <i>A deterministic, stealth automation framework for universal account registration and agentic workflows.</i>
+  <b>零依赖可视化 Web 工作台 · 全自主流式 AI Agent · 工业级账号自动化注册框架</b><br>
+  <i>A zero-dependency Studio workbench, autonomous streaming AI Agent, and deterministic automation framework for universal account lifecycle workflows.</i>
 </p>
 
 <p align="center">
@@ -10,278 +10,282 @@
   <a href="DISCLAIMER.zh.md"><img src="https://img.shields.io/badge/Disclaimer-Legal%20Terms-red.svg?style=flat-square" alt="Disclaimer"></a>
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-3776ab.svg?style=flat-square&logo=python&logoColor=white" alt="Python Version"></a>
   <a href="https://playwright.dev/"><img src="https://img.shields.io/badge/Playwright-Engine-2EAD33.svg?style=flat-square&logo=playwright&logoColor=white" alt="Playwright"></a>
-  <a href="https://opencv.org/"><img src="https://img.shields.io/badge/OpenCV-CV%20Engine-5C3EE8.svg?style=flat-square&logo=opencv&logoColor=white" alt="OpenCV"></a>
-  <a href="tests/"><img src="https://img.shields.io/badge/Tests-Passing-brightgreen.svg?style=flat-square" alt="Tests"></a>
-  <a href="https://bitwarden.com/"><img src="https://img.shields.io/badge/Export-Bitwarden%2FCSV-175DDC.svg?style=flat-square&logo=bitwarden&logoColor=white" alt="Bitwarden Export"></a>
-  <a href="https://waw666waw666.github.io/registerhub-demo/"><img src="https://img.shields.io/badge/Live%20Demo-Web%20Workbench-10b981.svg?style=flat-square" alt="Live Demo"></a>
+  <a href="tests/"><img src="https://img.shields.io/badge/Tests-50%2B%20Passing-brightgreen.svg?style=flat-square" alt="Tests"></a>
+  <a href="https://waw666waw666.github.io/registerhub-demo/"><img src="https://img.shields.io/badge/Live%20Demo-在线交互演示-10b981.svg?style=flat-square" alt="Live Demo"></a>
+  <a href="#开发者社区与交流"><img src="https://img.shields.io/badge/QQ%20交流群-1130324020-12B7F5.svg?style=flat-square&logo=tencentqq&logoColor=white" alt="QQ Group"></a>
+  <a href="https://discord.gg/USnVJ9YQX"><img src="https://img.shields.io/badge/Discord-加入社区-5865F2.svg?style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
 </p>
 
 <p align="center">
-  <a href="./README.md">简体中文</a> | <a href="./README_EN.md">English</a> | <a href="https://waw666waw666.github.io/registerhub-demo/">🌐 在线交互演示 (Live Demo)</a>
+  <a href="./README.md">简体中文</a> |
+  <a href="./README_EN.md">English</a> |
+  <a href="https://waw666waw666.github.io/registerhub-demo/">🌐 零安装在线体验 (Live Demo)</a> |
+  <a href="#社区开源版-vs-pro-商业旗舰版-open-core">🚀 Pro 多并发版对比</a> |
+  <a href="#开发者社区与交流">💬 QQ 群 1130324020</a>
+</p>
+
+<p align="center">
+  <a href="https://waw666waw666.github.io/registerhub-demo/">
+    <img src="docs/screenshots/01-dashboard.png" alt="RegisterHub Studio 仪表盘总览" width="100%">
+  </a>
 </p>
 
 ---
 
-## 项目概述
+## 为什么选择 RegisterHub？
 
-RegisterHub 是一个面向工程研发的现代化 Web 自动化框架，旨在彻底解决传统无头脚本在复杂前端交互中的脆弱性问题。框架基于 Playwright 运行时、OpenCV 离线计算机视觉算子及 Chrome DevTools Protocol (CDP) 架构构建，为现代单页应用 (SPA)、响应式受控表单以及自动化测试提供确定性的交互与状态编排能力。
+传统自动化脚本往往只有命令行黑框、硬绑死单个网站、或者强依赖一整套 Docker / 第三方收费打码接码平台。**RegisterHub 开源社区版** 把整套生产级工作台做成**零 Docker、零 Node.js、纯 Python 标准库驱动**，开箱即用：
 
-### 核心工程支柱
-
-- **运行环境自洽性 (Runtime Environment Parity)**：通过原生 Chrome 二进制接入与底层自动化特征消除，支持可选安装 **`patchright`** 实现零 `Runtime.enable` CDP 隐匿（自动检测并优先启用，未安装平滑回退 Playwright），保持 JavaScript 原型链纯净（`[native code]`）。
-- **零依赖 Web 可视化工作台 + 全自主流式 AI Agent (`RegisterHub Lite`)**：纯 Python 标准库 HTTP/SSE 驱动（免装 Node/FastAPI），双击 `run_web.bat`（macOS/Linux 运行 `./run_web.sh`）或执行 `python main.py --web` 即可打开全套 Studio 工作台：
-  - **全自主 AI 对话**：三协议真 SSE 流式输出（OpenAI Chat / Anthropic Messages / OpenAI Responses）、Prompt Cache 命中率 / TTFT / 吞吐速度遥测、手动 `/compact` 与 85% 自动上下文压缩、16 项内置工具、5 套可编辑工程技能（`skills/*.md`）、步级代码检查点一键回滚、持久化安全护栏审批、追问队列、`/goal` 长跑闭环与流式 `/btw` 旁白提问；
-  - **内置邮箱池 & 内置代理池（零 Docker / 零外部依赖）**：本地 SQLite + Windows DPAPI 加密存储，支持混合批量粘贴导入 Outlook OAuth2 / iCloud 接码链接 / 通用 IMAP 邮箱与静态 HTTP/SOCKS5 代理 / 动态住宅网关（Sticky Session）/ 短效 API 提取源，支持在线验活、收件箱读信提码与 IP 纯净度打分；
-  - **全栈开发工具集**：单线程任务台、站点工坊（在线 AST 语法/安全校验编辑器 + HAR 抓包提炼）、账号与 Key 验活/导出（Bitwarden / CSV / JSON）、跨分辨率视窗标定、多国身份/虚拟卡/TOTP 2FA/税号手机证件硬件指纹四合一工具箱。
-- **离线视觉算法求解器 (Algorithmic Vision Solver)**：内置双通 Canny 边缘轮廓计算与三次贝塞尔拟人手部动力学模型，纯本地离线执行，零第三方付费 API 依赖。
-- **CDP 会话桥接架构 (CDP Bridge Architecture)**：深度支持外部指纹浏览器（AdsPower、比特浏览器等）与本地已登录 Chrome 会话无缝接入，复用既有干净住宅网络与登录状态。
-- **AI 代理原生集成规范 (Agentic Co-Pilot Protocol)**：仓库根目录内置工业级 `AGENTS.md` 交互契约，既可在内置 Web「AI 直跑」接入任意 OpenAI 兼容大模型自主写适配器并实测，也深度适配 Cursor、Claude Code、Windsurf 与 Gemini CLI。
+- **零外部依赖的桌面级 Studio 工作台**：双击 `run_web.bat`（macOS/Linux 运行 `./run_web.sh`）或执行 `python main.py --web`，即刻打开支持**暗色 / 浅色一键切换**与多套经典配色的全功能控制面板（`http://127.0.0.1:18886`）。
+- **真能自主跑通新站的内置流式 AI Agent**：
+  - 支持 **OpenAI Chat / Anthropic Messages / OpenAI Responses** 三协议真 SSE 流式输出，内置 **Prompt Cache 前缀锁**、实时 `缓存命中率 / 首字延迟 TTFT / 吞吐 tok/s` 遥测与 85% 自动上下文压缩；
+  - 内置 **16 项实战工具**（URL 协议探测、HAR 抓包提炼、AST 校验写/改适配器、单线程试跑、黑匣子读错、内置双池管理、台账验活等）、**5 套可在线编辑工程技能**（`skills/*.md`）、步级代码检查点一键回滚、安全审批护栏、`/goal` 目标直通长跑闭环与不打断主任务的流式 `/btw` 旁路提问；
+  - 默认严格遵循 **`AGENTS.md` 三级选型铁律（协议优先 ➔ 无头优先 ➔ 混合取票）** 与五段式高信号交付。
+- **开箱内置加密邮箱池 & 代理池（零 Docker）**：
+  - **内置邮箱池**：本地 SQLite WAL + Windows DPAPI 加密保护，支持混合粘贴导入 **Outlook OAuth2（Graph API / IMAP-XOAUTH2 自动切换）**、**iCloud 接码链接** 与通用 IMAP，内置**工业级自包含验证码提取引擎**（多候选置信度打分 + 过滤邮编/地址/页脚误报），支持收件箱全文实时预览与事务租约；
+  - **内置代理池**：支持批量静态 HTTP/HTTPS/SOCKS5、动态住宅 Sticky Session 网关（Smartproxy / IPRoyal / Oxylabs 等）与短效 API 提取源，支持全量并发测活、目标站专项 403/CF 放行探测与 **出口 IP 纯净度 S/A/B/C/D 打分**。
+- **原生环境自洽 + 离线视觉 + CDP 桥接**：原生 Chrome（`channel="chrome"`）+ 可选 **`patchright`** 零 `Runtime.enable` 自动加速；内置 OpenCV 双通 Canny 滑块求解与三次贝塞尔拟人动力学；无缝桥接 AdsPower / BitBrowser / 本地 Chrome CDP。
+- **全套外部 AI 助手原生规范**：根目录自带 [AGENTS.md](AGENTS.md)、[CLAUDE.md](CLAUDE.md) 与 [SETUP_FOR_AI.md](SETUP_FOR_AI.md)，用 Cursor / Claude Code / Windsurf / Gemini CLI 克隆后发一句话即可全自动配环境、写新站并验收。
 
 ---
 
-## 架构拓扑
+## 界面实景画廊
+
+> 以下截图均采自纯前端模拟演示站，零真实凭据泄露。[**👉 点此免安装在线实操试玩 (Live Demo)**](https://waw666waw666.github.io/registerhub-demo/)
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/01-dashboard.png" alt="仪表盘总览" />
+      <p align="center"><b>仪表盘总览（暗色主题）</b>：全站 KPI、14 日趋势图、Key 资产构成与站点排行</p>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/02-agent-chat.png" alt="全自主 AI 对话" />
+      <p align="center"><b>全自主 AI 对话</b>：协议探测 ➔ 写适配器 ➔ 试跑闭环，实时缓存与吞吐遥测</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/03-fleet.png" alt="站点任务舰队" />
+      <p align="center"><b>站点任务舰队（亮色主题）</b>：按站精准归属、Key (N) 直达、文件定位与单线程试跑</p>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/04-builtin-mail.png" alt="内置邮箱池与实时提码" />
+      <p align="center"><b>内置邮箱池 + 实时收件箱提码</b>：Outlook / iCloud / IMAP 混合纳管与验证码高亮复制</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="docs/screenshots/05-builtin-proxies.png" alt="内置代理池与 IP 打分" />
+      <p align="center"><b>内置代理池 + IP 纯净度打分</b>：静态 / 动态住宅网关 / API 提取源与 S/A 级测活</p>
+    </td>
+    <td width="50%">
+      <img src="docs/screenshots/06-tools.png" alt="全栈开发工具箱" />
+      <p align="center"><b>全栈开发工具箱</b>：多国实测门牌身份、Luhn 虚拟卡、2FA TOTP 与四合一扩展指纹</p>
+    </td>
+  </tr>
+</table>
+
+---
+
+## 30 秒极速上手
+
+### 方式 A：交给 AI 一句话全自动部署（最推荐）
+
+克隆仓库后，在 **Cursor / Claude Code / Windsurf / Gemini CLI** 中打开 `RegisterHub` 目录，直接发送：
+
+```text
+@SETUP_FOR_AI.md 请阅读此文档，全自动为我完成当前机器的环境探测、配置装配与健康验收。
+```
+
+AI 将自动安装依赖、嗅探本地代理端口、生成 `config.json`、跑通单测和离线靶场并汇报状态。
+
+### 方式 B：3 条命令打开 Web 可视化工作台
+
+```bash
+# 1. 克隆仓库并安装 Python 依赖
+git clone https://github.com/waw666waw666/RegisterHub.git
+cd RegisterHub
+pip install -r requirements.txt
+
+# 2. 安装浏览器内核（可选再执行 `pip install patchright` 自动开启零 Runtime.enable 隐匿）
+playwright install chromium
+
+# 3. 启动零依赖 Web 工作台（Windows 也可直接双击 run_web.bat）
+python main.py --web
+# 浏览器打开 http://127.0.0.1:18886
+```
+
+### 方式 C：3 秒纯离线基线自测（无需网络与代理）
+
+```bash
+python main.py doctor       # 运行真机可执行体检（Python / OpenCV / Chrome / 读写权限）
+python main.py --run demo   # 3 秒跑通离线靶场，产物原子落盘至 results/accounts.txt
+```
+
+---
+
+## 系统架构与目录拓扑
+
+```mermaid
+flowchart LR
+    UI["Studio SPA 工作台<br/>(:18886 暗/亮双主题)"] --> CTRL["零依赖控制平面<br/>server.py + studio_bridge.py"]
+    CLI["CLI / 外部 AI IDE<br/>main.py + AGENTS.md + CLAUDE.md"] --> CTRL
+
+    CTRL --> AGENT["全自主 AI Agent<br/>16 工具 · 5 Skills · 检查点 · /goal"]
+    CTRL --> RUNNER["确定性单线程调度器<br/>StandardRunner + 视窗防切割"]
+    CTRL --> POOLS["本地加密双池 (零 Docker)<br/>SQLite WAL + DPAPI"]
+
+    AGENT --> RUNNER
+    POOLS --> MAIL["内置邮箱池<br/>Outlook / iCloud / IMAP + 提码引擎"]
+    POOLS --> PROXY["内置代理池<br/>静态 / 住宅网关 / API + IP 打分"]
+
+    RUNNER --> ENGINE["执行与隐匿层<br/>Chrome / Patchright · CDP · OpenCV"]
+    ENGINE --> LEDGER["原子台账与导出<br/>accounts.txt + accounts_meta.json<br/>Bitwarden / CSV / JSON"]
+```
+
+<details>
+<summary><b>展开查看完整仓库目录结构</b></summary>
 
 ```text
 RegisterHub/
 ├── core/
 │   ├── adapter.py         # 抽象适配器基类 (BaseSiteAdapter) 与生命周期契约
-│   ├── pilot.py           # 拟人按键动力学 (human_type) 与智能交互守门员
-│   ├── stealth.py         # 原生环境自洽引擎与 CDP 会话桥接器
-│   ├── inspector.py       # 启发式 DOM 表单探测器 (FormInspector)
-│   ├── solver.py          # OpenCV 缺口匹配计算与贝塞尔轨迹规划器
-│   ├── identity.py        # 高熵多国身份与合规密码发生器
-│   ├── mail_client.py     # 毫秒级自适应退避临时邮箱轮询客户端
-│   ├── imap_mail.py       # 零依赖标准库单账号 IMAP 与内置邮箱池接码客户端
-│   ├── mail_builtin.py    # 零 Docker 内置邮箱池（SQLite WAL + DPAPI + Outlook/iCloud/IMAP）
-│   ├── proxy_builtin.py   # 零依赖内置代理池（静态代理 / 动态住宅网关 / API 提取源）
-│   ├── secrets.py         # Windows DPAPI 本地凭据加密与全链路日志脱敏
-│   ├── ai_agent.py        # 纯标准库单线程自主 AI Agent（16 工具 / 压缩 / 检查点 / 护栏）
-│   ├── llm_client.py      # 三协议真 SSE 流式模型客户端与 Cache/TTFT/tok_s 遥测
+│   ├── ai_agent.py        # 纯标准库单线程自主 AI Agent（16 工具 / 缓存前缀锁 / 检查点 / 护栏）
+│   ├── llm_client.py      # 三协议真 SSE 流式模型客户端与 Cache / TTFT / tok/s 遥测
+│   ├── llm_profiles.py    # 多模型供应商与 API Key 轮询配置管理
+│   ├── mail_builtin.py    # 零 Docker 内置邮箱池（SQLite WAL + DPAPI + 工业级验证码提取）
+│   ├── proxy_builtin.py   # 零依赖内置代理池（静态 / 动态住宅网关 / API 提取源）
 │   ├── ip_scorer.py       # 出口 IP 住宅属性与风控纯净度评分器
-│   ├── runner.py          # 调度引擎、内置代理自动解析、黑匣子快照与原子台账持久化
-│   ├── scaffold.py        # 适配器自动派生与预装配代码生成引擎（自动联动内置池 / 临时邮 / IMAP）
-│   └── exporter.py        # Bitwarden、1Password、CSV 及 JSON 资产导出器
-├── skills/                # 5 套内置可编辑 AI Agent 工程技能规范 (*.md)
-├── sites/                 # 业务与示范适配器池
-│   ├── _template.py       # 工业级标准适配器实现模板（支持 tempmail / IMAP 自动切换）
-│   ├── demo_site.py       # 自包含离线 Base64 靶场适配器
-│   └── automation_exercise.py # 国际两步式向导交互基准靶场适配器
-├── web/                   # 零依赖 RegisterHub Web 可视化工作台与内置 AI 直跑
-│   ├── server.py          # 纯标准库 HTTP/SSE 后端（免额外依赖）
-│   ├── studio_bridge.py   # Studio 控制平面协议桥接层
-│   └── dist/              # Studio 风格单页工作台构建产物
-├── tests/                 # 单元与回归自动化测试套件
-├── config.example.json    # 运行配置模板（首次运行可按需复制为 config.json）
-├── pytest.ini             # Pytest 测试隔离规范
+│   ├── runner.py          # 调度引擎、内置代理自动解析、黑匣子快照与按站归属持久化
+│   ├── pilot.py           # 拟人按键动力学 (human_type) 与智能交互守门员
+│   ├── stealth.py         # 原生 Chrome / Patchright 环境自洽引擎与 CDP 桥接器
+│   ├── inspector.py       # 启发式 DOM 表单探测器 (FormInspector)
+│   ├── solver.py          # OpenCV 双通 Canny 缺口匹配与三次贝塞尔轨迹规划器
+│   ├── identity.py        # 高离散多国真实人设与合规密码发生器
+│   ├── mail_client.py     # 三通道自适应退避免费临时邮箱客户端
+│   ├── imap_mail.py       # 零依赖单账号 IMAP 与 BuiltinPoolMailClient
+│   ├── calibrator.py      # 跨分辨率 6 套对称视窗布局与防切割缩放标定器
+│   ├── locks.py           # 跨进程文件排他锁与原子写原语
+│   ├── secrets.py         # Windows DPAPI 凭据加密与全链路日志脱敏
+│   ├── net_guard.py       # 公网防 SSRF 安全校验守卫
+│   ├── doctor.py          # 真执行环境健康诊断套件
+│   ├── scaffold.py        # 适配器自动探测与脚手架生成引擎
+│   └── exporter.py        # Bitwarden / 1Password / CSV / JSON 标准资产导出器
+├── skills/                # 5 套内置可在线编辑 AI Agent 工程技能 (*.md)
+├── sites/                 # 纯净示范适配器（_template / demo_site / automation_exercise）
+├── web/                   # 纯标准库 HTTP/SSE 后端 (server.py / studio_bridge.py) 与前端产物 (dist/)
+├── docs/                  # 视窗标定文档与界面实景截图
+├── tests/                 # 50+ 单元与回归自动化测试套件
+├── AGENTS.md              # AI 协同工程军规与五段式汇报契约
+├── CLAUDE.md              # Claude Code 自动加载入口
+├── SETUP_FOR_AI.md        # AI 一句话全自动装环境验收协议
 ├── main.py                # 统一命令行与 Web 调度入口
-├── run.bat                # Windows 交互引导脚本 (CRLF 规范)
-├── run_web.bat            # Windows 一键启动 Web 可视化工作台 (:18886)
-└── requirements.txt       # 核心生产依赖清单
+└── run_web.bat / run.bat  # Windows 一键启动脚本 (CRLF)
 ```
+
+</details>
 
 ---
 
-## 内置示范适配器矩阵
+## AI 协同开发新站（双玩法）
 
-RegisterHub 开箱内置纯本地与公开测试靶场示范适配器，零第三方商业站点硬编码，开箱即可验证完整生命周期或作为新站派生基准：
+### 玩法一：直接在 Web 工作台「AI 对话」直跑
+在「AI 引擎」填入任意 OpenAI / Anthropic 兼容 API Key，打开「AI 对话」粘贴目标注册 URL（可开启 **`目标直通 /goal`**），内置 Agent 会按以下工程链路自动闭环：
 
-| 适配器标识 | 目标环境 | 技术实现特性 | 核心评测与验证重点 |
-| :--- | :--- | :--- | :--- |
-| `demo` | 内置离线 Base64 靶场 | 零配置全离线管道 | 3 秒快速验证环境自洽、浏览器启动、SSE 日志与账号落盘 |
-| `automation_exercise` | 国际公开自动化测试靶场 | 多阶段向导式注册流 | 复杂表单字段、下拉联动与多选框状态硬断言 |
-| `_template` | 工业级标准适配器模板 | 自动联动临时邮 / IMAP 接码 | 通过 `--scaffold` 或 Web「AI 对话」一键派生自定义站点适配器 |
+1. **计划拆解**（`update_plan`）➔ **深度探测**（`probe_url` / `analyze_har` / `run_scratch_python`）；
+2. **协议优先选型**：能纯 HTTP 协议直打就不开重型浏览器；需填表再用无头/真机 Chrome；
+3. **写码与安全校验**：通过 `write_adapter` / `patch_adapter` 写入 `sites/<name>.py`，自动过 AST 语法检查、反假 `Active` 拦截并落盘步级检查点（随时一键回滚）；
+4. **单线程实跑与自愈**：调用 `run_adapter_once` 实跑 1 号 ➔ 若失败读 `read_failures` 精准归因修复 ➔ 用 `verify_accounts` 核验落盘凭据 ➔ 输出五段式高信号战报。
 
----
+### 玩法二：配合外部 AI IDE（Cursor / Claude Code / Windsurf / Gemini）
+仓库已内置 [AGENTS.md](AGENTS.md) 与 [CLAUDE.md](CLAUDE.md)。**面对复杂多步向导站，最稳的方法是先自己手跑通一次，把关键步骤与截图发给 AI**：
 
-## 官方独立实战派生工程 (Official Standalone Derived Projects)
-
-为保持主框架仓库纯粹（零商业站点硬编码），高频平台的完整实战案例已解耦为 100% 自包含的独立 GitHub 开源工程，开箱即用并与主框架保持双向联动：
-
-| 独立开源项目 | 核心架构与技术特性 | 仓库直达 |
-| :--- | :--- | :--- |
-| **[TokenHarbor Register](https://github.com/waw666waw666/tokenharbor-register)** | **100% 纯协议（零浏览器依赖）** · Next.js Server Action 动态哈希自愈 + 三通道临时邮 / IMAP 接码 + 自动解锁 `:free` 免费模型路由并在线验活 OpenAI 兼容 `thk_live_` Key | [GitHub 仓库](https://github.com/waw666waw666/tokenharbor-register) |
-| **[Deepgram Register](https://github.com/waw666waw666/deepgram-register)** | 官方 **$200 免费额度** · 谷歌 reCAPTCHA v2 主动穿透 + 纯 REST 协议秒级签发 40 位 API Key | [GitHub 仓库](https://github.com/waw666waw666/deepgram-register) |
-| **[100MilionSeek Register](https://github.com/waw666waw666/100milionseek-register)** | **每日 1 亿 Tokens 免费额度** · Turnstile 穿透 + 免收信页面卡片秒出 Key + 母号裂变接力 | [GitHub 仓库](https://github.com/waw666waw666/100milionseek-register) |
-| **[AMD AI Dev Register](https://github.com/waw666waw666/amd-register)** | AMD 官方 AI 开发者计划注册 · Akamai 遥测自洽 + OneTrust 模态弹窗穿透与凭据获取 | [GitHub 仓库](https://github.com/waw666waw666/amd-register) |
-| **[Coarena Register](https://github.com/waw666waw666/coarena-register)** | **谷歌登录后 100% 协议提 Key** · OAuth 会话捕获 + 纯 REST 条款签署与每日额度秒验 | [GitHub 仓库](https://github.com/waw666waw666/coarena-register) |
-
----
-
-## 快速上手
-
-### 1. 环境准备与依赖安装
-
-```bash
-# 克隆仓库
-git clone https://github.com/waw666waw666/RegisterHub.git
-cd RegisterHub
-
-# 安装 Python 生产依赖
-pip install -r requirements.txt
-
-# 安装 Playwright 浏览器内核（可选再装 `pip install patchright` 自动开启零 Runtime.enable 隐匿内核）
-playwright install chromium
-```
-
-### 2. 环境健康自检
-
-检测宿主机运行环境、代理可用性以及依赖完整性：
-
-```bash
-python main.py doctor
-# 也支持带横杠写法：python main.py --doctor
-```
-
-### 3. 启动可视化 Web 工作台（推荐）或基线自测
-
-**方式 A：一键打开零依赖 Web 工作台 + 内置 AI 直跑（推荐）**
-```bash
-python main.py --web
-# 或在 Windows 直接双击 run_web.bat，浏览器访问 http://127.0.0.1:18886
-```
-
-**方式 B：命令行 3 秒跑通内置离线靶场（无需外部网络或代理）**
-```bash
-python main.py --run demo
-```
-
-生成的凭据记录将自动以原子写入模式持久化至 `results/accounts.txt`。
-
-### 4. AI 助手协同使用指南 (Cursor / Claude Code / Windsurf / Gemini)
-
-本项目为 AI 编程助手深度优化，仓库根目录自带专属 [AGENTS.md](AGENTS.md) 行为约束与 [SETUP_FOR_AI.md](SETUP_FOR_AI.md) 环境协议。
-
-**前置操作**：使用你的 AI 编程客户端（如 Cursor、Windsurf、VS Code 搭配 Claude Code / Gemini CLI），将 **`RegisterHub` 项目文件夹作为工作区根目录打开**。
-
-工作区载入后，支持通过以下两种方式让 AI 协助开发新站点的注册适配器：
-
-#### 方法一：极简直接丢（快捷交互模式）
-直接在 AI 对话框中把目标网站注册地址发给 AI：
 ```text
-请参考本项目规范与 AGENTS.md，为我编写该网站的自动化注册适配器：https://example.com/signup
-```
-AI 会自动读取根目录规则与模板，自主嗅探表单字段、生成代码骨架并尝试本地实测。
-
-#### 方法二：人工自跑流程给步骤（强烈推荐，成号最稳健）
-面对复杂的现代 Web 应用、多步向导或带交互验证的站点，**最稳健的做法是：你自己先在浏览器中手动注册成功一次**。  
-把你在真实操作中经历的**核心网址、点击按钮、表单字段、验证码类型及关键截图**直接发给 AI，例如：
-```text
-请参考本项目规范与 AGENTS.md，帮我把刚才手动跑通的注册流程写成自动化适配器：
+请参考 AGENTS.md，帮我把刚才手动跑通的注册流程写成 sites/example_site.py 并本地试跑验收：
 目标网址：https://example.com/signup
-
-我的手动操作步骤如下（附关键界面截图）：
-1. 打开注册页，填入邮箱和密码，点击“Create Account”；
-2. 页面弹出了 Cloudflare 人机验证框，手动点一下绿勾；
-3. 去邮箱查收 6 位数字验证码，回填到页面的 OTP 输入框中；
-4. 进入控制台仪表盘，点击右上角“API Keys”菜单，点击“Create New Key”；
-5. 复制弹出的 sk-xxxx 密钥，完成流程。
-
-请根据我的真实操作路径编写 sites/example_site.py，并进行本地试跑验收！
-```
-AI 将直接对照你跑通的真实人类行为路径进行精确代码装配与接口逆向，避免无头盲测走弯路，一击必中！
-
----
-
-## 关于代理与邮箱接码配置 (Proxy & Email Strategies)
-
-在 Web 工作台左侧独立导航 **「邮箱池」**、**「代理池」** 或 **「系统设置」**（同步持久化至 `config.json` 与 `results/*.db`）中，开源版支持零搭建开箱即用的双池与单通道模式：
-
-1. **内置代理池（`builtin`，推荐，零外部依赖）与单代理接入**：
-   - 在 **「代理池」** 批量粘贴静态 HTTP/HTTPS/SOCKS5 代理、配置动态住宅代理网关（Smartproxy / IPRoyal / Oxylabs / Bright Data / 自定义 Sticky Session 模板）或粘贴短效 API 提取链接，所有账密均经本地 DPAPI 加密落盘并自动脱敏展示；
-   - 亦支持 **直连 / 系统代理（`direct`）**、**单条自定义代理（`proxy`）** 及 **外部指纹浏览器 CDP 桥接**，支持一键全量测活与住宅纯净度评分。
-2. **内置邮箱池（`builtin`，推荐，零 Docker）**：
-   - 在 **「邮箱池」** 智能混合粘贴导入 **Outlook OAuth2（三/四段正反序）**、**iCloud 接码链接** 或 **QQ/163/Gmail/自定义 IMAP**，支持导入前脱敏预览、一键全量验活、收件箱原文查看/验证码提取与事务租约（任务结束自动释放）；
-   - 一键切换为 `mail.provider = "builtin"` 后，脚手架 `--scaffold` 生成的适配器与 AI Agent 会自动通过 `BuiltinPoolMailClient` 租借接码。
-3. **默认免费临时邮箱（`tempmail`）与单账号 IMAP（`imap`）**：
-   - 首次零配置即可用 `DisposableMailClient` 三通道公网临时邮快速验证；也可在「系统设置」填入单个自有 IMAP 账号一键测试连通并无损收码（`BODY.PEEK[]`）。
-
----
-
-## 命令行接口 (CLI)
-
-### 查看已装载适配器
-列出所有已注册的适配器及其技术规格：
-```bash
-python main.py --list
-```
-
-### 自动化脚手架生成
-输入目标网页 URL，自动嗅探 DOM 输入字段并生成类型完整的适配器骨架代码：
-```bash
-# 智能探测目标网页并生成适配器代码
-python main.py --scaffold target_service --url https://target-service.com/signup
-
-# 执行生成的新适配器
-python main.py --run target_service
-```
-
-### 外部指纹浏览器 CDP 桥接
-直接附加至已在运行的外部指纹浏览器（AdsPower、比特浏览器）或开启调试端口的 Chrome 实例：
-```bash
-python main.py --run demo --cdp http://127.0.0.1:9222
-```
-
-### 跨分辨率视窗适配与巡演验收
-针对不同分辨率/DPI 屏幕一键生成 `1全屏 / 2左右 / 4双形态 / 6双形态` 对称无溢出预设，并在有头运行期自动应用防切割等比缩放（详见 `docs/WINDOW_CALIBRATION.md`）：
-```bash
-# 读取本机屏幕工作区，一键生成 6 套对称无溢出预设（也可直接双击 calibrate.bat）
-python main.py --auto-layout
-python main.py --auto-layout --quad-mode edge_2x2 --hex-mode wing_cascade
-
-# 桌面轮播巡演验收全部 6 套布局
-python main.py --demo-layouts --demo-sec 8
-
-# 交互式手工微调标定
-python main.py --calibrate -c 2
-```
-
-### 密码库资产标准导出
-将测试产出的账号资产一键转换为标准格式：
-```bash
-# 导出为 Bitwarden / 1Password 兼容 JSON
-python main.py export --export bitwarden
-
-# 导出为通用 CSV
-python main.py export --export csv
-
-# 导出为原始 JSON
-python main.py export --export json
+1. 填邮箱和密码，点 Create Account；
+2. 弹出 Cloudflare Turnstile 勾选通过；
+3. 邮箱收到 6 位验证码回填提交；
+4. 进控制台 API Keys 点 Create New Key，提取 sk-xxxx 落盘。
 ```
 
 ---
 
-## AI 代理协作规范 (`AGENTS.md`)
+## 内置示范适配器 & 官方独立实战派生矩阵
 
-RegisterHub 针对自主编程智能体进行了全流程规范定义。根目录的 `AGENTS.md` 约束以下核心纪律：
+主仓库保持 **100% 纯净（零商业站点硬编码）**，开箱自带 `demo`（离线 Base64 靶场）、`automation_exercise`（公开多步测试靶场）和 `_template` 标准模板。  
+高频平台的完整实战方案已解耦为 5 个独立开源仓库，开箱即用：
 
-- **默认单并发纪律**：默认按单线程串行执行，避免无节制多开撕裂用户桌面；仅在单路稳定且等信占比超 50% 时主动提醒提速。
-- **阶段守门员断言**：严禁无目的的时间等待 (`time.sleep`)，必须通过 URL 状态、DOM 属性或凭据落盘事实进行强校验。
-- **宿主进程零干扰**：退出钩子严格基于明确的子进程树清理，严禁全局通杀系统进程，严禁全局抢占用户桌面焦点。
+| 独立开源实战项目 | 核心架构与技术特性 | 仓库直达 |
+| :--- | :--- | :--- |
+| **[TokenHarbor Register](https://github.com/waw666waw666/tokenharbor-register)** | **100% 纯协议（零浏览器）** · Next.js Server Action 动态哈希自愈 + 临时邮/IMAP 接码 + 自动解锁 `:free` 路由并在线验活 `thk_live_` Key | [GitHub 仓库](https://github.com/waw666waw666/tokenharbor-register) |
+| **[Deepgram Register](https://github.com/waw666waw666/deepgram-register)** | 官方 **$200 免费额度** · reCAPTCHA v2 穿透 + 纯 REST 协议秒级签发 40 位 API Key | [GitHub 仓库](https://github.com/waw666waw666/deepgram-register) |
+| **[100MilionSeek Register](https://github.com/waw666waw666/100milionseek-register)** | **每日 1 亿 Tokens 免费额度** · Turnstile 穿透 + 免收信秒出 Key + 裂变接力 | [GitHub 仓库](https://github.com/waw666waw666/100milionseek-register) |
+| **[AMD AI Dev Register](https://github.com/waw666waw666/amd-register)** | AMD 官方 AI 开发者计划 · Akamai 遥测自洽 + OneTrust 弹窗穿透 | [GitHub 仓库](https://github.com/waw666waw666/amd-register) |
+| **[Coarena Register](https://github.com/waw666waw666/coarena-register)** | **OAuth 后 100% 协议提 Key** · 会话捕获 + 纯 REST 条款签署与每日额度秒验 | [GitHub 仓库](https://github.com/waw666waw666/coarena-register) |
 
 ---
 
-## 测试套件执行
+## 社区开源版 vs Pro 商业旗舰版 (Open-Core)
 
-运行完整单元测试集以验证核心启发式探针、OpenCV 计算引擎与代码生成逻辑：
+开源社区版已完整开放零依赖 Web 工作台、全自主流式 AI Agent、内置加密双池与全部核心引擎，**个人学习研究与单路开发 100% 免费够用**。若你需要多并发批跑、无人值守补货与团队级网关纳管，可选择 **AutoRegister Pro**：
 
+| 能力维度 | RegisterHub 开源社区版（永久免费） | AutoRegister Pro 商业旗舰版 |
+| :--- | :--- | :--- |
+| **Web 工作台 & 全自主 AI Agent** | ✅ 完整开放（三协议流式 / 16 工具 / 5 Skills / `/goal` / `/btw`） | ✅ 完整开放 + 多站工程级调度面板 |
+| **内置加密邮箱池 & 代理池** | ✅ 零 Docker 完整开放（Outlook / iCloud / IMAP + 静态 / 住宅 / API 提取） | ✅ 完整开放 + **Cloudflare 通配企业域 Catch-all** + **受控机场订阅内核托管** |
+| **并发调度架构** | 确定性单线程串行执行（主打稳定零干扰） | 🚀 **多通道并发调度池 (`-c 2 / 4 / 8`) + 共享待跑队列** |
+| **无人值守定时 & 水位补货** | 手动单次触发 | 🚀 **后台定时轮询 & Key 水位线自动补货调度器** |
+| **失败分诊与软失败回炉** | 黑匣子日志与截图查看 | 🚀 **自动区分死号 / 限流软失败，软失败一键原子回炉重跑** |
+| **商业打码 API 协议桥接** | 离线 OpenCV 滑块 + 人工协同 | 🚀 **原生集成 CapSolver / 2Captcha / YesCaptcha 自动取票** |
+| **实时告警与下游网关纳管** | 本地台账 + CSV / JSON / Bitwarden 导出 | 🚀 **企微 / 飞书 / Telegram / Discord 告警 + One-API / New-API 渠道一键批量导出** |
+| **预置高价值实战适配器** | 3 个纯净示范基准 + 5 个独立开源派生仓 | 🚀 **预置 11+ 高价值 AI 平台实战适配器 + 社群专属同步更新** |
+
+> 个人体验与单路开发，直接用本开源社区版即可；如需 **AutoRegister Pro** 演示、授权或站点定制交流，欢迎直接进群：  
+> **QQ 交流群：`1130324020`** ｜ **Discord：[点击加入社区](https://discord.gg/USnVJ9YQX)**
+
+---
+
+## 进阶配置与 CLI 命令速查
+
+<details>
+<summary><b>展开查看代理/邮箱双池策略与完整 CLI 命令</b></summary>
+
+### 代理与邮箱配置策略
+- **内置代理池 (`builtin`，推荐)**：在 Web 工作台「代理池」粘贴静态代理、动态住宅 Sticky Session 网关或短效 API 提取源，自动 DPAPI 加密与全量测活。亦支持直连 (`direct`)、单代理 (`proxy`) 与外部指纹浏览器 CDP 桥接。
+- **内置邮箱池 (`builtin`，推荐)**：在「邮箱池」混合粘贴 Outlook OAuth2（三/四段）、iCloud 链接或通用 IMAP，导入前脱敏预览、一键验活与实时收件箱查码。
+- **免费临时邮 (`tempmail`) & 单账号 IMAP (`imap`)**：零配置默认走 `DisposableMailClient` 三通道公网临时邮；也可在「系统设置」配置单账号无损收码（`BODY.PEEK[]`）。
+
+### 常用命令行 (CLI)
 ```bash
-pytest tests/
+python main.py --web                                # 启动 Web 工作台 (:18886；设 REGISTERHUB_NO_BANNER=1 可静默横幅)
+python main.py --list                               # 查看全部已装载适配器
+python main.py --scaffold my_site --url https://... # 嗅探目标表单并生成适配器骨架
+python main.py --run my_site --count 1              # 单线程执行指定适配器
+python main.py --run demo --cdp http://127.0.0.1:9222  # 桥接外部指纹浏览器 / 本地 Chrome
+python main.py --auto-layout                        # 自动生成 6 套跨分辨率防切割视窗预设
+python main.py --demo-layouts --demo-sec 8          # 真机轮播巡演 6 套视窗布局
+python main.py --calibrate -c 2                     # 交互式手工微调视窗几何与缩放
+python main.py export --export bitwarden            # 导出资产 (bitwarden / csv / json)
+pytest tests/ -q                                    # 运行全量 50+ 单元与回归测试
 ```
+
+</details>
 
 ---
 
 ## 免责声明与开源协议
 
-1. **开源许可证**：本项目基于标准的 [Apache License 2.0](LICENSE) 许可协议发布。
-2. **免责与合规说明**：本项目定位为**授权环境下的自动化流程走查与 Web 工程研究工具**。所有代码仅供技术交流与学术验证参考，完整法律声明与技术中立性说明请参阅：
-   - [DISCLAIMER.zh.md](DISCLAIMER.zh.md) (中文版)
-   - [DISCLAIMER.md](DISCLAIMER.md) (English)
+1. **开源协议**：本项目基于 [Apache License 2.0](LICENSE) 发布。
+2. **合规与免责说明**：本项目定位为**授权环境下的自动化流程测试、表单生命周期验证与 Web 工程研究工具**。严禁用于任何未授权批量注册、撞库或商业风控破坏，完整法律声明请参阅 [DISCLAIMER.zh.md](DISCLAIMER.zh.md) / [DISCLAIMER.md](DISCLAIMER.md)。
 
 ---
 
 ## 开发者社区与交流
 
-如果你在账号工程自动化、协议逆向、云端风控自洽或 API Key 提取落地中有任何技术疑问、适配需求或交流想法，欢迎加入我们的开发者社群：
+如果你在账号工程自动化、协议逆向、AI Agent 写站适配、或 **AutoRegister Pro** 多并发部署中有交流与合作需求，欢迎加入我们的开发者社群（点一颗 **Star ⭐** 是对项目持续更新最大的支持）：
 
-- **QQ 交流群**：1130324020
-- **Discord 社区**：[点击加入 Discord](https://discord.gg/USnVJ9YQX)
+- **QQ 交流群**：`1130324020`
+- **Discord 社区**：[https://discord.gg/USnVJ9YQX](https://discord.gg/USnVJ9YQX)
+- **在线交互演示**：[https://waw666waw666.github.io/registerhub-demo/](https://waw666waw666.github.io/registerhub-demo/)
