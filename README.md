@@ -19,9 +19,9 @@
 <p align="center">
   <a href="./README.md">简体中文</a> |
   <a href="./README_EN.md">English</a> |
-  <a href="https://waw666waw666.github.io/registerhub-demo/">🌐 零安装在线体验 (Live Demo)</a> |
-  <a href="#社区开源版-vs-pro-商业旗舰版-open-core">🚀 Pro 多并发版对比</a> |
-  <a href="#开发者社区与交流">💬 QQ 群 1130324020</a>
+  <a href="https://waw666waw666.github.io/registerhub-demo/">在线交互演示 (Live Demo)</a> |
+  <a href="#社区开源版-vs-pro-商业旗舰版-open-core">社区版 vs Pro</a> |
+  <a href="#开发者社区与交流">开发者社群</a>
 </p>
 
 <p align="center">
@@ -51,7 +51,7 @@
 
 ## 界面实景画廊
 
-> 以下截图均采自纯前端模拟演示站，零真实凭据泄露。[**👉 点此免安装在线实操试玩 (Live Demo)**](https://waw666waw666.github.io/registerhub-demo/)
+> 以下截图均采自纯前端模拟演示站，零真实凭据泄露。[**免安装在线实操试玩 (Live Demo)**](https://waw666waw666.github.io/registerhub-demo/)
 
 <table>
   <tr>
@@ -235,12 +235,12 @@ RegisterHub/
 | :--- | :--- | :--- |
 | **Web 工作台 & 全自主 AI Agent** | ✅ 完整开放（三协议流式 / 16 工具 / 5 Skills / `/goal` / `/btw`） | ✅ 完整开放 + 多站工程级调度面板 |
 | **内置加密邮箱池 & 代理池** | ✅ 零 Docker 完整开放（Outlook / iCloud / IMAP + 静态 / 住宅 / API 提取） | ✅ 完整开放 + **Cloudflare 通配企业域 Catch-all** + **受控机场订阅内核托管** |
-| **并发调度架构** | 确定性单线程串行执行（主打稳定零干扰） | 🚀 **多通道并发调度池 (`-c 2 / 4 / 8`) + 共享待跑队列** |
-| **无人值守定时 & 水位补货** | 手动单次触发 | 🚀 **后台定时轮询 & Key 水位线自动补货调度器** |
-| **失败分诊与软失败回炉** | 黑匣子日志与截图查看 | 🚀 **自动区分死号 / 限流软失败，软失败一键原子回炉重跑** |
-| **商业打码 API 协议桥接** | 离线 OpenCV 滑块 + 人工协同 | 🚀 **原生集成 CapSolver / 2Captcha / YesCaptcha 自动取票** |
-| **实时告警与下游网关纳管** | 本地台账 + CSV / JSON / Bitwarden 导出 | 🚀 **企微 / 飞书 / Telegram / Discord 告警 + One-API / New-API 渠道一键批量导出** |
-| **预置高价值实战适配器** | 3 个纯净示范基准 + 5 个独立开源派生仓 | 🚀 **预置 11+ 高价值 AI 平台实战适配器 + 社群专属同步更新** |
+| **多通道并发调度池 (`-c 2 / 4 / 8`)** | ❌ 仅确定性单线程串行执行 | ✅ **多通道并发调度池 + 共享待跑队列** |
+| **无人值守定时 & 水位补货** | ❌ 仅手动单次触发 | ✅ **后台定时轮询 & Key 水位线自动补货调度器** |
+| **失败分诊与软失败回炉** | ❌ 仅黑匣子日志与截图查看 | ✅ **自动区分死号 / 限流软失败，软失败一键原子回炉重跑** |
+| **商业打码 API 协议桥接** | ❌ 仅离线 OpenCV 滑块 + 人工协同 | ✅ **原生集成 CapSolver / 2Captcha / YesCaptcha 自动取票** |
+| **实时告警与下游网关纳管** | ❌ 仅本地台账 + CSV / JSON / Bitwarden 导出 | ✅ **企微 / 飞书 / Telegram / Discord 告警 + One-API / New-API 渠道一键批量导出** |
+| **预置高价值商业平台适配器** | ❌ 仅 3 个纯净示范基准（另附 5 个独立开源派生仓） | ✅ **预置 11+ 高价值 AI 平台实战适配器 + 社群专属同步更新** |
 
 > 个人体验与单路开发，直接用本开源社区版即可；如需 **AutoRegister Pro** 演示、授权或站点定制交流，欢迎直接进群：  
 > **QQ 交流群：`1130324020`** ｜ **Discord：[点击加入社区](https://discord.gg/USnVJ9YQX)**
@@ -284,7 +284,7 @@ pytest tests/ -q                                    # 运行全量 50+ 单元与
 
 ## 开发者社区与交流
 
-如果你在账号工程自动化、协议逆向、AI Agent 写站适配、或 **AutoRegister Pro** 多并发部署中有交流与合作需求，欢迎加入我们的开发者社群（点一颗 **Star ⭐** 是对项目持续更新最大的支持）：
+如果你在账号工程自动化、协议逆向、AI Agent 写站适配、或 **AutoRegister Pro** 多并发部署中有交流与合作需求，欢迎加入我们的开发者社群（点一颗 **Star** 是对项目持续更新最大的支持）：
 
 - **QQ 交流群**：`1130324020`
 - **Discord 社区**：[https://discord.gg/USnVJ9YQX](https://discord.gg/USnVJ9YQX)

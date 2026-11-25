@@ -19,9 +19,9 @@
 <p align="center">
   <a href="./README.md">简体中文</a> |
   <a href="./README_EN.md">English</a> |
-  <a href="https://waw666waw666.github.io/registerhub-demo/">🌐 Live Interactive Demo</a> |
-  <a href="#community-vs-pro-edition-open-core">🚀 Community vs Pro</a> |
-  <a href="#community--support">💬 Community & QQ Group</a>
+  <a href="https://waw666waw666.github.io/registerhub-demo/">Live Interactive Demo</a> |
+  <a href="#community-vs-pro-edition-open-core">Community vs Pro</a> |
+  <a href="#community--support">Community</a>
 </p>
 
 <p align="center">
@@ -51,7 +51,7 @@ Most automation scripts stop at fragile headless snippets tied to a single websi
 
 ## Visual Tour
 
-> All screenshots below are captured from our pure-mock interactive demo—zero real credentials exposed. [**👉 Try the Live Interactive Demo (Zero Install)**](https://waw666waw666.github.io/registerhub-demo/)
+> All screenshots below are captured from our pure-mock interactive demo—zero real credentials exposed. [**Try the Live Interactive Demo (Zero Install)**](https://waw666waw666.github.io/registerhub-demo/)
 
 <table>
   <tr>
@@ -215,12 +215,12 @@ The open-source Community Edition includes the full zero-dependency Studio UI, a
 | :--- | :--- | :--- |
 | **Studio Workbench & Streaming AI Agent** | ✅ Full access (3 protocols / 16 tools / 5 skills / `/goal` / `/btw`) | ✅ Full access + multi-site operations control |
 | **Built-in Mail & Proxy Pools (Zero Docker)** | ✅ Full access (Outlook / iCloud / IMAP + Static / Residential / API) | ✅ Full access + **Cloudflare Wildcard Catch-all** + **Managed Subscription Kernel** |
-| **Concurrency Architecture** | Deterministic single-thread execution | 🚀 **Multi-worker concurrent pool (`-c 2 / 4 / 8`) + shared queue** |
-| **Unattended Scheduling & Watermark Refill** | Manual trigger | 🚀 **Background cron & Key-watermark auto-replenishment scheduler** |
-| **Smart Failure Triage & Recycle** | Blackbox logs & screenshots | 🚀 **Auto dead/soft-fail classification + 1-click atomic soft-fail recycling** |
-| **Commercial Captcha API Bridge** | Offline OpenCV slider + human assist | 🚀 **Native CapSolver / 2Captcha / YesCaptcha REST bridges** |
-| **Alerts & Gateway Sync** | Local ledger + CSV / JSON / Bitwarden export | 🚀 **WeCom / Feishu / Telegram / Discord alerts + 1-click One-API / New-API channel export** |
-| **Production Site Adapters** | 3 clean reference targets + 5 standalone repos | 🚀 **11+ pre-built high-value AI platform adapters + priority updates** |
+| **Multi-Worker Concurrency (`-c 2 / 4 / 8`)** | ❌ Deterministic single-thread execution only | ✅ **Multi-worker concurrent pool + shared queue** |
+| **Unattended Scheduling & Watermark Refill** | ❌ Manual trigger only | ✅ **Background cron & Key-watermark auto-replenishment scheduler** |
+| **Smart Failure Triage & Soft-Fail Recycle** | ❌ Blackbox logs & screenshots only | ✅ **Auto dead/soft-fail classification + 1-click atomic soft-fail recycling** |
+| **Commercial Captcha API Bridge** | ❌ Offline OpenCV slider + human assist only | ✅ **Native CapSolver / 2Captcha / YesCaptcha REST bridges** |
+| **Alerts & Downstream Gateway Sync** | ❌ Local ledger + CSV / JSON / Bitwarden export only | ✅ **WeCom / Feishu / Telegram / Discord alerts + 1-click One-API / New-API channel export** |
+| **Pre-built Commercial Platform Adapters** | ❌ 3 clean reference targets only (+ 5 standalone OSS repos) | ✅ **11+ pre-built high-value AI platform adapters + priority updates** |
 
 > Personal workflows and single-thread development are fully covered by this free open-source edition. For **AutoRegister Pro** demos, licensing, or team deployment, join our community:  
 > **QQ Group: `1130324020`** ｜ **Discord: [Join Community](https://discord.gg/USnVJ9YQX)**
@@ -258,7 +258,7 @@ pytest tests/ -q                                    # Run 50+ automated tests
 
 ## Community & Support
 
-If you find RegisterHub useful, please give the repo a **Star ⭐** and join our developer community for adapter tips, protocol engineering discussions, and **AutoRegister Pro** updates:
+If you find RegisterHub useful, please give the repo a **Star** and join our developer community for adapter tips, protocol engineering discussions, and **AutoRegister Pro** updates:
 
 - **QQ Group**: `1130324020`
 - **Discord**: [https://discord.gg/USnVJ9YQX](https://discord.gg/USnVJ9YQX)
