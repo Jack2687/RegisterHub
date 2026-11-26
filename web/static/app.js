@@ -2424,17 +2424,24 @@
   }
 
   function handleAgentEvent(ev, isLive) {
+    const evType = String(ev?.type || '');
+    if (evType === 'connected' || evType === 'ping') {
+      return;
+    }
+    if (evType === 'text_delta' || evType === 'thinking_delta' || evType === 'tool_call_delta') {
+      return;
+    }
     if (typeof ev.seq === 'number' && ev.seq + 1 > agentStreamSeq) {
       agentStreamSeq = ev.seq + 1;
     }
     if (!ev.eof) {
       agentEvents.push(ev);
     }
-    if (ev.type === 'plan') {
+    if (evType === 'plan') {
       renderAgentPlan(ev.steps || []);
-    } else if (ev.type === 'usage') {
+    } else if (evType === 'usage') {
       renderAgentUsage(ev.session_usage || ev);
-    } else if (ev.type === 'status') {
+    } else if (evType === 'status') {
       const st = ev.status || 'idle';
       setAgentRunningState(st === 'running', st);
       if (isLive && !ev.replay && (st === 'done' || st === 'error' || st === 'stopped')) {
@@ -2468,6 +2475,10 @@
     es.onmessage = (raw) => {
       try {
         const ev = JSON.parse(raw.data);
+        const evType = String(ev?.type || '');
+        if (evType === 'connected' || evType === 'ping' || evType === 'text_delta' || evType === 'thinking_delta' || evType === 'tool_call_delta') {
+          return;
+        }
         if (typeof ev.seq === 'number' && ev.seq < agentStreamSeq) {
           return;
         }

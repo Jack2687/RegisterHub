@@ -385,6 +385,8 @@ def upsert_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
             "retry_policy",
         ):
             if field in payload:
+                if field == "proxy_url" and "***@" in str(payload[field] or "") and merged.get("proxy_url"):
+                    continue
                 merged[field] = payload[field]
 
         # Key handling: preserve existing keys unless explicitly adding/replacing
@@ -673,7 +675,11 @@ def resolve_runtime_override(
         if "streaming" in extra_overrides and isinstance(extra_overrides.get("streaming"), bool):
             out["streaming"] = extra_overrides["streaming"]
         if "proxy_url" in extra_overrides and extra_overrides.get("proxy_url") is not None:
-            out["proxy_url"] = str(extra_overrides.get("proxy_url") or "").strip()
+            inc_px = str(extra_overrides.get("proxy_url") or "").strip()
+            if "***@" in inc_px and out.get("proxy_url"):
+                pass
+            else:
+                out["proxy_url"] = inc_px
         raw_k = str(extra_overrides.get("api_key") or "").strip()
         if raw_k and raw_k != "***":
             out["api_key"] = raw_k

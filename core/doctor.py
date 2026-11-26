@@ -313,6 +313,48 @@ def _check_network(timeout: float = 6.0) -> CheckResult:
         )
 
 
+def collect_doctor_report(include_network: bool = True, output_dir: str = "./results") -> dict:
+    """Run executable environment diagnostics and return a structured JSON-serializable report."""
+    import time as _time
+
+    checks: List[CheckResult] = [
+        _check_python_version(),
+        _check_module("playwright", "playwright", "browser engine"),
+        _check_module("requests", "requests", "HTTP client"),
+        _check_module("PIL", "pillow", "image handling"),
+        _check_module("numpy", "numpy", "vision math"),
+        _check_opencv_functional(),
+        *_check_browser_binaries(),
+        _check_config(),
+        _check_write_permission(output_dir),
+    ]
+    if include_network:
+        checks.append(_check_network(timeout=2.5))
+
+    rows = []
+    blockers = 0
+    warnings = 0
+    for c in checks:
+        state = "pass" if c.ok else ("warn" if c.warn_only else "fail")
+        if state == "fail":
+            blockers += 1
+        elif state == "warn":
+            warnings += 1
+        rows.append({
+            "name": c.name,
+            "state": state,
+            "detail": c.detail,
+            "hint": c.hint or "",
+        })
+    return {
+        "checked_at": _time.strftime("%Y-%m-%d %H:%M:%S"),
+        "ready": blockers == 0,
+        "blockers": blockers,
+        "warnings": warnings,
+        "checks": rows,
+    }
+
+
 def run_doctor(output_dir: str = "./results") -> bool:
     """
     Execute the full diagnostic suite.

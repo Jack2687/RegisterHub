@@ -23,7 +23,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 _HEALTH_CACHE_LOCK = threading.Lock()
 _HEALTH_CACHE: Dict[str, Any] = {"ts": 0.0, "payload": None}
@@ -571,7 +571,9 @@ def enrich_agent_detail(detail: Dict[str, Any]) -> Dict[str, Any]:
     last_ttft_ms = float(out.get("last_ttft_ms") or 0.0)
     out["messages"] = messages
     out["plan_steps"] = plan_steps
-    out["last_seq"] = max(max_seq, int(out.get("next_seq") or len(events)))
+    raw_next_seq = out.get("next_seq")
+    next_based = (int(raw_next_seq) - 1) if (raw_next_seq is not None and int(raw_next_seq) > 0) else -1
+    out["last_seq"] = max(max_seq, next_based)
     out.setdefault("side_questions", [])
     out.setdefault("uploads", [])
     out.setdefault("queued_messages", [])
@@ -1011,9 +1013,9 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
         handler._send_json({"total": len(mapped), "adapters": mapped})
         return True
 
-    m_st_code = re.fullmatch(r"/api/studio/adapters/([A-Za-z0-9_-]+)/code", path)
+    m_st_code = re.fullmatch(r"/api/studio/adapters/([A-Za-z0-9_%-]+)/code", path)
     if m_st_code:
-        name = m_st_code.group(1).lower()
+        name = unquote(m_st_code.group(1)).lower()
         adapters = srv.list_community_adapters()
         ad = next((a for a in adapters if a["name"] == name or a["name"] == f"{name}_site"), None)
         if not ad:
@@ -1063,7 +1065,8 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
             "mail_imap_user": str(m.get("imap_user") or ""),
             "mail_imap_password": str(m.get("imap_password") or ""),
             "run_headless": bool(b.get("headless", False)),
-            "run_delay_between_s": round(float(b.get("slow_mo") or 0) / 1000.0, 2),
+            "run_delay_between_s": round(float(d.get("delay_between_s") or 0.0), 2),
+            "captcha_enable_cv_slider": bool(d.get("captcha_enable_cv_slider", True)),
         })
         return True
 
@@ -1254,7 +1257,7 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
 
         adapter = str(body.get("project") or body.get("site") or body.get("adapter") or "").strip().lower()
         try:
-            count = max(1, min(20, int(body.get("count") or 1)))
+            count = max(1, min(500, int(body.get("count") or 1)))
         except Exception:
             count = 1
         raw_hf = body.get("headful")
@@ -1348,9 +1351,11 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
             updates["headless"] = bool(body["run_headless"])
         if "run_delay_between_s" in body:
             try:
-                updates["slow_mo"] = int(max(0.0, min(2.0, float(body["run_delay_between_s"]))) * 1000)
+                updates["delay_between_s"] = round(max(0.0, min(120.0, float(body["run_delay_between_s"]))), 2)
             except Exception:
                 pass
+        if "captcha_enable_cv_slider" in body:
+            updates["captcha_enable_cv_slider"] = bool(body["captcha_enable_cv_slider"])
         srv.save_config_dict(updates)
         handle_studio_get(handler, srv, "/api/settings/config", {})
         return True
@@ -1361,6 +1366,11 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
 
         ip_val = str(body.get("ip") or "").strip()
         px = str(body.get("proxy_url") or "").strip()
+        if "***@" in px:
+            raw_cfg = srv._load_raw_config_dict()
+            saved_px = str((raw_cfg.get("browser") or {}).get("proxy") or "").strip()
+            if saved_px:
+                px = saved_px
         target_url = str(body.get("target_url") or "").strip()
         try:
             if target_url:
@@ -1377,10 +1387,11 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
         return True
 
     if path == "/api/services/ip-score/batch":
-        from core.ip_scorer import score_ip
+        from core.ip_scorer import score_batch
         from core.net_guard import PrivateAddressBlockedError, validate_proxy_url, validate_public_http_url
 
-        raw_items = body.get("items") if isinstance(body.get("items"), list) else []
+        source = str(body.get("source") or "custom").strip().lower()
+        lim = _parse_int_param(body.get("limit"), 10, 1, 20)
         target_url = str(body.get("target_url") or "").strip()
         if target_url:
             try:
@@ -1388,27 +1399,73 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
             except (PrivateAddressBlockedError, ValueError) as e:
                 handler._send_json({"ok": False, "error": str(e)}, status=400)
                 return True
-        results = []
-        for raw in raw_items[:10]:
-            s = str(raw or "").strip()
-            if not s:
-                continue
-            is_px = "://" in s
-            if is_px:
-                try:
-                    s = validate_proxy_url(s)
-                except ValueError as e:
-                    results.append({"ok": False, "ip": "", "proxy": s, "score": 0, "grade": "D", "error": str(e)})
+
+        entries: List[Dict[str, str]] = []
+        invalid_items: List[Dict[str, Any]] = []
+        if source == "pool":
+            store = _get_builtin_proxy_store(srv)
+            pool_entries = store.list_runtime_entries(browser_only=False)
+            for pe in pool_entries[:lim]:
+                val = str(pe.get("proxy_url") or "").strip()
+                if val:
+                    entries.append({"label": str(pe.get("label") or pe.get("display_url") or val), "value": val})
+            if not entries:
+                cfg = srv._load_raw_config_dict()
+                saved_px = str((cfg.get("browser") or {}).get("proxy") or "").strip()
+                if saved_px:
+                    entries.append({"label": "默认代理", "value": saved_px})
+        else:
+            raw_items = body.get("items") if isinstance(body.get("items"), list) else []
+            for raw in raw_items[:lim]:
+                s = str(raw or "").strip()
+                if not s:
                     continue
-            results.append(score_ip(ip="" if is_px else s, proxy_url=s if is_px else "", target_url=target_url))
-        handler._send_json({"ok": True, "total": len(results), "results": results})
+                if "://" in s:
+                    try:
+                        s = validate_proxy_url(s)
+                    except ValueError as e:
+                        invalid_items.append({
+                            "ok": False, "ip": "", "proxy": s, "label": s,
+                            "score": 0, "grade": "D", "error": str(e), "latency_ms": 0.0,
+                        })
+                        continue
+                entries.append({"label": s, "value": s})
+
+        scored = score_batch(entries, target_url=target_url)
+        all_items = list(scored.get("items") or []) + invalid_items
+        all_items.sort(key=lambda r: (r.get("score", 0), 1 if r.get("ok") else 0), reverse=True)
+        grades = {"S": 0, "A": 0, "B": 0, "C": 0, "D": 0}
+        for r in all_items:
+            g = str(r.get("grade") or "D")
+            if g in grades:
+                grades[g] += 1
+        avg_score = round(sum(float(r.get("score") or 0) for r in all_items) / len(all_items), 1) if all_items else 0.0
+        out_payload: Dict[str, Any] = {
+            "ok": True,
+            "total": len(all_items),
+            "avg_score": avg_score,
+            "grades": grades,
+            "items": all_items,
+            "results": all_items,
+        }
+        if scored.get("target_warning"):
+            out_payload["target_warning"] = scored["target_warning"]
+        handler._send_json(out_payload)
         return True
 
     if path == "/api/services/test-proxy":
-        cfg = srv._load_raw_config_dict()
-        px = str(body.get("proxy_url") or (cfg.get("browser") or {}).get("proxy") or "").strip()
-        target = str(body.get("target_url") or "https://api.ipify.org?format=json").strip()
         from core.net_guard import PrivateAddressBlockedError, build_safe_urllib_opener, validate_proxy_url, validate_public_http_url
+        from core.secrets import mask_proxy_url
+
+        cfg = srv._load_raw_config_dict()
+        saved_px = str((cfg.get("browser") or {}).get("proxy") or "").strip()
+        if "proxy_url" in body and body.get("proxy_url") is not None:
+            px = str(body.get("proxy_url") or "").strip()
+            if "***@" in px and saved_px:
+                px = saved_px
+        else:
+            px = saved_px
+        target = str(body.get("target_url") or "https://api.ipify.org?format=json").strip()
 
         t0 = time.perf_counter()
         try:
@@ -1420,6 +1477,7 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
                 txt = r.read(512).decode("utf-8", errors="ignore").strip()
                 handler._send_json({
                     "ok": True,
+                    "proxy": mask_proxy_url(clean_px) if clean_px else "(direct)",
                     "status_code": r.status,
                     "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
                     "body": txt[:200],
@@ -1429,23 +1487,89 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
         return True
 
     if path == "/api/services/test-mail":
-        from core.imap_mail import SingleImapMailClient
-
         cfg = srv._load_raw_config_dict()
         mc = cfg.get("mail") or {}
-        raw_pw = str(body.get("imap_password") or "")
-        eff_pw = str(mc.get("imap_password") or "") if (not raw_pw or raw_pw == "***") else raw_pw
+        d = cfg.get("defaults") or {}
+        req_email = str(body.get("email") or "").strip()
+        has_explicit_imap = bool(str(body.get("imap_server") or "").strip())
+        provider = str(mc.get("provider") or ("tempmail" if d.get("use_disposable_mail", True) else "imap")).strip().lower()
+        t0 = time.perf_counter()
+
+        # 1. Explicit IMAP params or configured IMAP provider without a builtin email target
+        if has_explicit_imap or (provider == "imap" and not req_email):
+            from core.imap_mail import SingleImapMailClient
+
+            raw_pw = str(body.get("imap_password") or "")
+            eff_pw = str(mc.get("imap_password") or "") if (not raw_pw or raw_pw == "***") else raw_pw
+            try:
+                eff_port = int(body.get("imap_port") or mc.get("imap_port") or 993)
+            except Exception:
+                eff_port = 993
+            client = SingleImapMailClient(
+                server=str(body.get("imap_server") or mc.get("imap_server") or "").strip(),
+                port=max(1, min(65535, eff_port)),
+                user=str(body.get("imap_user") or mc.get("imap_user") or "").strip(),
+                password=eff_pw,
+            )
+            handler._send_json(client.test_connection())
+            return True
+
+        # 2. Built-in Mail Pool (either configured provider == builtin or specified email exists in builtin store)
+        if provider == "builtin" or req_email:
+            store = _get_builtin_mail_store(srv)
+            if req_email:
+                try:
+                    res = store.verify_batch(emails=[req_email], limit=1)
+                    items = res.get("items") or []
+                    if items:
+                        first = items[0]
+                        ok = str(first.get("status") or "") == "valid"
+                        handler._send_json({
+                            "ok": ok,
+                            "provider": "builtin",
+                            "email": req_email,
+                            "detail": first.get("detail") or first.get("error") or ("内置邮箱验活通过" if ok else "内置邮箱验活失败"),
+                            "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+                        })
+                        return True
+                except Exception as e:
+                    if provider == "builtin":
+                        handler._send_json({"ok": False, "provider": "builtin", "error": str(e), "latency_ms": round((time.perf_counter() - t0) * 1000, 1)})
+                        return True
+            if provider == "builtin":
+                stats = store.get_stats()
+                ok = int(stats.get("total") or 0) > 0
+                handler._send_json({
+                    "ok": ok,
+                    "provider": "builtin",
+                    "stats": stats,
+                    "detail": f"内置邮箱池共 {stats.get('total', 0)} 个账号（有效 {stats.get('valid', 0)} / 可用 {stats.get('available', 0)}）"
+                    if ok else "内置邮箱池为空，请先在「邮箱池」导入账号",
+                    "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+                })
+                return True
+
+        # 3. Default Disposable / TempMail provider
         try:
-            eff_port = int(body.get("imap_port") or mc.get("imap_port") or 993)
-        except Exception:
-            eff_port = 993
-        client = SingleImapMailClient(
-            server=str(body.get("imap_server") or mc.get("imap_server") or "").strip(),
-            port=max(1, min(65535, eff_port)),
-            user=str(body.get("imap_user") or mc.get("imap_user") or "").strip(),
-            password=eff_pw,
-        )
-        handler._send_json(client.test_connection())
+            from core.mail_client import DisposableMailClient
+
+            cli = DisposableMailClient()
+            addr = cli.create_mailbox()
+            prov_name = getattr(cli, "provider_name", None) or type(getattr(cli, "_backend", None)).__name__
+            handler._send_json({
+                "ok": True,
+                "provider": f"tempmail ({prov_name})",
+                "email": addr,
+                "detail": f"临时邮箱通道连通正常，已申请测试信箱 {addr}",
+                "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+            })
+        except Exception as e:
+            handler._send_json({
+                "ok": False,
+                "provider": "tempmail",
+                "error": f"临时邮箱通道探测失败: {e}",
+                "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+            })
         return True
 
     if path == "/api/tools/profile":
@@ -1759,6 +1883,7 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
         items = body.get("keys") if isinstance(body.get("keys"), list) else []
         base_url = str(body.get("base_url") or "").strip().rstrip("/")
         ping_chat = bool(body.get("ping_chat", False))
+        explicit_model = str(body.get("model") or "").strip()
         cfg = srv._load_raw_config_dict()
         raw_px = str((cfg.get("browser") or {}).get("proxy") or "").strip()
 
@@ -1781,12 +1906,15 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
 
         live_cnt = 0
         dead_cnt = 0
-        batch = items[:50]
+        unverifiable_cnt = 0
+        batch = items[:200]
+        _NON_CHAT_TOKENS = ("embedding", "embed", "whisper", "tts", "dall-e", "moderation", "rerank", "bge-", "audio", "realtime")
         try:
             for idx, it in enumerate(batch, 1):
                 k = str((it.get("key") if isinstance(it, dict) else it) or "").strip()
                 proj = str((it.get("project") if isinstance(it, dict) else "") or "demo")
                 if not base_url:
+                    unverifiable_cnt += 1
                     ev = {
                         "type": "item",
                         "index": idx,
@@ -1819,24 +1947,31 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
                             raw = r.read(65536).decode("utf-8", errors="ignore")
                             cnt = 0
                             first_model = ""
+                            first_chat_model = ""
                             try:
                                 j = json.loads(raw)
                                 if isinstance(j, dict) and isinstance(j.get("data"), list):
                                     cnt = len(j["data"])
                                     for m_item in j["data"]:
-                                        if isinstance(m_item, dict) and str(m_item.get("id") or "").strip():
-                                            first_model = str(m_item["id"]).strip()
-                                            break
-                                        if isinstance(m_item, str) and m_item.strip():
-                                            first_model = m_item.strip()
-                                            break
+                                        mid = ""
+                                        if isinstance(m_item, dict):
+                                            mid = str(m_item.get("id") or "").strip()
+                                        elif isinstance(m_item, str):
+                                            mid = m_item.strip()
+                                        if not mid:
+                                            continue
+                                        if not first_model:
+                                            first_model = mid
+                                        if not first_chat_model and not any(t in mid.lower() for t in _NON_CHAT_TOKENS):
+                                            first_chat_model = mid
                             except Exception:
                                 pass
                             ms = round((time.perf_counter() - t0) * 1000, 1)
                             if ping_chat:
                                 chat_url = f"{clean_base}/chat/completions" if clean_base.endswith("/v1") else f"{clean_base}/v1/chat/completions"
+                                chosen_model = explicit_model or first_chat_model or first_model or "gpt-4o-mini"
                                 chat_payload = json.dumps({
-                                    "model": first_model or "gpt-4o-mini",
+                                    "model": chosen_model,
                                     "messages": [{"role": "user", "content": "hi"}],
                                     "max_tokens": 1,
                                 }).encode("utf-8")
@@ -1922,7 +2057,13 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
                         }
                 handler.wfile.write(f"data: {json.dumps(ev, ensure_ascii=False)}\n\n".encode("utf-8"))
                 handler.wfile.flush()
-            done_ev = {"type": "done", "total": len(batch), "live": live_cnt, "dead": dead_cnt}
+            done_ev = {
+                "type": "done",
+                "total": len(batch),
+                "live": live_cnt,
+                "dead": dead_cnt,
+                "unverifiable": unverifiable_cnt,
+            }
             handler.wfile.write(f"data: {json.dumps(done_ev, ensure_ascii=False)}\n\n".encode("utf-8"))
             handler.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
@@ -1930,15 +2071,30 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
         return True
 
     if path == "/api/keys/oneapi":
-        keys = body.get("keys") if isinstance(body.get("keys"), list) else []
-        prefix = str(body.get("name_prefix") or "RegisterHub").strip()
+        raw_keys = body.get("keys") if isinstance(body.get("keys"), list) else []
+        clean_keys = [str(k).strip() for k in raw_keys if str(k or "").strip()]
+        prefix = str(body.get("name_prefix") or "RegisterHub").strip() or "RegisterHub"
         base = str(body.get("base_url") or "https://api.openai.com").strip()
-        channels = [
-            {"name": f"{prefix}-{i + 1}", "type": 1, "key": str(k), "base_url": base, "models": "gpt-4o-mini"}
-            for i, k in enumerate(keys)
-            if str(k).strip()
-        ]
-        handler._send_json({"ok": True, "count": len(channels), "channels": channels})
+        raw_models = body.get("models")
+        if isinstance(raw_models, list):
+            models_str = ",".join(str(m).strip() for m in raw_models if str(m or "").strip()) or "gpt-4o-mini"
+        else:
+            models_str = str(raw_models or "").strip() or "gpt-4o-mini"
+        aggregate = bool(body.get("aggregate", False))
+        if aggregate and clean_keys:
+            channels = [{
+                "name": prefix,
+                "type": 1,
+                "key": "\n".join(clean_keys),
+                "base_url": base,
+                "models": models_str,
+            }]
+        else:
+            channels = [
+                {"name": f"{prefix}-{i + 1}", "type": 1, "key": k, "base_url": base, "models": models_str}
+                for i, k in enumerate(clean_keys)
+            ]
+        handler._send_json({"ok": True, "count": len(channels), "key_count": len(clean_keys), "channels": channels})
         return True
 
     if path == "/api/keys/prune":
@@ -1988,21 +2144,83 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
         return True
 
     if path == "/api/accounts/export":
-        fmt = str(body.get("format") or "csv").strip().lower()
-        if fmt == "txt":
-            raw = srv.ACCOUNTS_FILE.read_text(encoding="utf-8", errors="replace") if srv.ACCOUNTS_FILE.exists() else ""
-            handler._send_json({"ok": True, "filename": "registerhub_accounts.txt", "content": raw})
-            return True
-        if fmt in ("csv", "json", "bitwarden"):
-            from core.exporter import run_export
+        import csv as _csv
+        import io as _io
+        from core.exporter import _safe_csv_cell, parse_accounts_file
 
-            try:
-                out_path = run_export(fmt=fmt, input_file=str(srv.ACCOUNTS_FILE), out_dir=str(srv.RESULTS_DIR))
-                handler._send_json({"ok": True, "filename": out_path.name, "content": out_path.read_text(encoding="utf-8", errors="replace")})
-            except Exception as e:
-                handler._send_json({"ok": False, "error": str(e)}, status=400)
+        fmt = str(body.get("format") or "csv").strip().lower()
+        if fmt not in ("txt", "csv", "json", "bitwarden"):
+            handler._send_json({"ok": False, "error": f"Unsupported format: {fmt}"}, status=400)
             return True
-        handler._send_json({"ok": False, "error": f"Unsupported format: {fmt}"}, status=400)
+        proj_filter = str(body.get("project") or "").strip().lower()
+        only_with_key = bool(body.get("only_with_key", False))
+        key_filter = str(body.get("key_filter") or "").strip().lower()
+        if only_with_key and not key_filter:
+            key_filter = "with_key"
+        search_q = str(body.get("search") or "").strip().lower()
+
+        accounts = parse_accounts_file(srv.ACCOUNTS_FILE) if srv.ACCOUNTS_FILE.exists() else []
+        filtered: List[Dict[str, Any]] = []
+        for acc in accounts:
+            em = str(acc.get("email") or "").strip()
+            pw = str(acc.get("password") or "").strip()
+            un = str(acc.get("username") or "").strip()
+            ak = str(acc.get("api_key") or "").strip()
+            site = str(acc.get("site") or "").strip().lower()
+            if proj_filter and proj_filter != "all":
+                if site and site != proj_filter and site.replace("-", "_") != proj_filter.replace("-", "_"):
+                    continue
+            if key_filter == "with_key" and not ak:
+                continue
+            if key_filter == "without_key" and ak:
+                continue
+            if search_q and search_q not in f"{em} {un} {ak} {site}".lower():
+                continue
+            filtered.append(acc)
+
+        if fmt == "txt":
+            content = "\n".join(
+                f"{a.get('email', '')}----{a.get('password', '')}----{a.get('username', '')}----{a.get('api_key', '')}"
+                for a in filtered
+            ) + ("\n" if filtered else "")
+            filename = "registerhub_accounts.txt"
+        elif fmt == "json":
+            content = json.dumps(filtered, ensure_ascii=False, indent=2)
+            filename = "accounts.json"
+        elif fmt == "bitwarden":
+            buf = _io.StringIO()
+            w = _csv.writer(buf)
+            w.writerow([
+                "folder", "favorite", "type", "name", "notes", "fields",
+                "reprompt", "login_uri", "login_username", "login_password", "login_totp",
+            ])
+            for a in filtered:
+                w.writerow([
+                    "RegisterHub", "", "login",
+                    _safe_csv_cell(a.get("site") or a.get("email") or ""),
+                    _safe_csv_cell(f"API Key: {a.get('api_key', '')}" if a.get("api_key") else ""),
+                    "", "0", "",
+                    _safe_csv_cell(a.get("email") or ""),
+                    _safe_csv_cell(a.get("password") or ""),
+                    "",
+                ])
+            content = buf.getvalue()
+            filename = "accounts_bitwarden.csv"
+        else:
+            buf = _io.StringIO()
+            w = _csv.writer(buf)
+            w.writerow(["email", "password", "username", "api_key"])
+            for a in filtered:
+                w.writerow([
+                    _safe_csv_cell(a.get("email") or ""),
+                    _safe_csv_cell(a.get("password") or ""),
+                    _safe_csv_cell(a.get("username") or ""),
+                    _safe_csv_cell(a.get("api_key") or ""),
+                ])
+            content = buf.getvalue()
+            filename = "accounts.csv"
+
+        handler._send_json({"ok": True, "count": len(filtered), "filename": filename, "content": content})
         return True
 
     if path == "/api/llm/profiles":
@@ -2036,8 +2254,22 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
         from core import llm_profiles
         from core.exporter import parse_accounts_file
 
+        proj_filter = str(body.get("project") or "").strip().lower()
+        exclude_invalid = bool(body.get("exclude_invalid", True))
+        _BAD_PLACEHOLDERS = frozenset({"ok", "active", "none", "null", "n/a", "demo", "test", "pending", "registered"})
         accounts = parse_accounts_file(srv.ACCOUNTS_FILE)
-        keys = [str(a.get("api_key") or "").strip() for a in accounts if str(a.get("api_key") or "").strip()]
+        keys: List[str] = []
+        for a in accounts:
+            site = str(a.get("site") or "").strip().lower()
+            if proj_filter and proj_filter != "all":
+                if site and site != proj_filter and site.replace("-", "_") != proj_filter.replace("-", "_"):
+                    continue
+            ak = str(a.get("api_key") or "").strip()
+            if not ak:
+                continue
+            if exclude_invalid and (len(ak) < 8 or ak.lower() in _BAD_PLACEHOLDERS):
+                continue
+            keys.append(ak)
         keys = list(dict.fromkeys(keys))
         if not keys:
             handler._send_json({"ok": False, "error": "本地账号台账中暂无可导入的 API Key"}, status=400)
@@ -2081,7 +2313,7 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
     if m_prof_keys:
         from core import llm_profiles
 
-        pid = m_prof_keys.group(1)
+        pid = unquote(m_prof_keys.group(1))
         action = str(body.get("action") or "add").strip().lower()
         raw_keys = body.get("keys") if isinstance(body.get("keys"), list) else ([body["key"]] if body.get("key") else [])
         try:
@@ -2103,7 +2335,7 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
     if m_prof_act:
         from core import llm_profiles
 
-        pid = m_prof_act.group(1)
+        pid = unquote(m_prof_act.group(1))
         action = m_prof_act.group(2)
         if action == "activate":
             prof = llm_profiles.activate_profile(pid)
@@ -2272,6 +2504,8 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
     if m_ag_q_steer:
         try:
             res = srv.agent_manager.promote_queued_message(m_ag_q_steer.group(1), m_ag_q_steer.group(2))
+            if isinstance(res.get("session"), dict):
+                res["session"] = enrich_agent_detail(res["session"])
             handler._send_json(res)
         except KeyError as e:
             handler._send_json({"ok": False, "error": str(e)}, status=404)
@@ -2681,7 +2915,7 @@ def handle_studio_put(handler: Any, srv: Any, path: str, body: Dict[str, Any]) -
     if m_prof:
         from core import llm_profiles
 
-        pid = m_prof.group(1)
+        pid = unquote(m_prof.group(1))
         try:
             prof = llm_profiles.upsert_profile({**body, "id": pid})
             handler._send_json({"ok": True, "id": prof["id"], "profile": prof})
@@ -2697,7 +2931,7 @@ def handle_studio_patch(handler: Any, srv: Any, path: str, body: Dict[str, Any])
     if m_prof:
         from core import llm_profiles
 
-        pid = m_prof.group(1)
+        pid = unquote(m_prof.group(1))
         try:
             prof = llm_profiles.upsert_profile({**body, "id": pid})
             handler._send_json({"ok": True, "id": prof["id"], "profile": prof})
@@ -2707,13 +2941,18 @@ def handle_studio_patch(handler: Any, srv: Any, path: str, body: Dict[str, Any])
     return False
 
 
-def handle_studio_delete(handler: Any, srv: Any, path: str) -> bool:
+def handle_studio_delete(
+    handler: Any,
+    srv: Any,
+    path: str,
+    qs: Optional[Dict[str, List[str]]] = None,
+) -> bool:
     """Handle Studio DELETE routes."""
     m_prof = re.fullmatch(r"/api/llm/profiles/([^/]+)", path)
     if m_prof:
         from core import llm_profiles
 
-        pid = m_prof.group(1)
+        pid = unquote(m_prof.group(1))
         ok = llm_profiles.delete_profile(pid)
         if not ok:
             handler._send_json({"ok": False, "error": f"供应商不存在: {pid}"}, status=404)
@@ -2755,8 +2994,12 @@ def handle_studio_delete(handler: Any, srv: Any, path: str) -> bool:
 
         adapters = srv.list_community_adapters()
         adapter_names = {ad["name"] for ad in adapters}
-        req_proj = _canonicalize_site_name(m_fl_err.group(1), adapter_names) or m_fl_err.group(1).strip().lower()
+        raw_proj = unquote(m_fl_err.group(1))
+        req_proj = _canonicalize_site_name(raw_proj, adapter_names) or raw_proj.strip().lower()
         legacy_snap_owner = "demo_site" if "demo_site" in adapter_names else (adapters[0]["name"] if adapters else "")
+        keep_latest = 0
+        if qs and "keep_latest" in qs:
+            keep_latest = _parse_int_param((qs.get("keep_latest") or ["0"])[0], 0, 0, 5000)
 
         def _line_site_and_snap(raw_line: str) -> Tuple[str, str]:
             parts = [p.strip() for p in raw_line.split("|")]
@@ -2770,43 +3013,83 @@ def handle_studio_delete(handler: Any, srv: Any, path: str) -> bool:
                     l_snap = p.split(":", 1)[1].strip()
             return l_site, l_snap
 
-        removed = 0
+        removed_lines = 0
+        kept_proj_lines = 0
         removed_snaps: set[str] = set()
         kept_snaps: set[str] = set()
         if srv.FAILED_FILE.exists():
             with interprocess_file_lock(srv.FAILED_FILE):
                 if srv.FAILED_FILE.exists():
                     lines = srv.FAILED_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
-                    kept: List[str] = []
-                    for ln in lines:
+                    proj_indices: List[int] = []
+                    parsed_meta: Dict[int, Tuple[str, str]] = {}
+                    for idx_ln, ln in enumerate(lines):
                         s = ln.strip()
                         if not s or s.startswith("#"):
-                            kept.append(ln)
                             continue
                         l_site, l_snap = _line_site_and_snap(s)
+                        parsed_meta[idx_ln] = (l_site, l_snap)
+                        if (l_site == req_proj) or (not l_site and req_proj == legacy_snap_owner):
+                            proj_indices.append(idx_ln)
+                    # File is appended chronologically -> latest lines are at the tail
+                    keep_idx_set = set(proj_indices[-keep_latest:]) if keep_latest > 0 else set()
+                    kept: List[str] = []
+                    for idx_ln, ln in enumerate(lines):
+                        if idx_ln not in parsed_meta:
+                            kept.append(ln)
+                            continue
+                        l_site, l_snap = parsed_meta[idx_ln]
                         belongs_to_proj = (l_site == req_proj) or (not l_site and req_proj == legacy_snap_owner)
-                        if belongs_to_proj:
-                            removed += 1
+                        if belongs_to_proj and idx_ln not in keep_idx_set:
+                            removed_lines += 1
                             if l_snap:
                                 removed_snaps.add(l_snap)
                         else:
+                            if belongs_to_proj:
+                                kept_proj_lines += 1
                             kept.append(ln)
                             if l_snap:
                                 kept_snaps.add(l_snap)
-                    if removed > 0:
+                    if removed_lines > 0:
                         atomic_write_text_safe(srv.FAILED_FILE, "\n".join(kept) + ("\n" if kept else ""))
+
+        snaps_removed = 0
+        orphan_removed = 0
         snaps_to_unlink = removed_snaps - kept_snaps
-        if snaps_to_unlink and srv.SNAPSHOTS_DIR.exists():
+        if srv.SNAPSHOTS_DIR.exists():
             snap_root = srv.SNAPSHOTS_DIR.resolve()
             for sname in snaps_to_unlink:
                 fp = (snap_root / Path(sname).name).resolve()
                 if fp.parent == snap_root and fp.is_file():
                     try:
                         fp.unlink()
-                        removed += 1
+                        snaps_removed += 1
                     except OSError:
                         pass
-        handler._send_json({"ok": True, "project": req_proj, "removed": removed})
+            # Also prune orphan PNGs displayed under legacy_snap_owner
+            if req_proj == legacy_snap_owner:
+                orphan_pngs = sorted(
+                    [p for p in snap_root.glob("*.png") if p.is_file() and p.name not in kept_snaps],
+                    key=lambda p: p.stat().st_mtime,
+                    reverse=True,
+                )
+                orphan_keep = max(0, keep_latest - kept_proj_lines) if keep_latest > 0 else 0
+                for fp in orphan_pngs[orphan_keep:]:
+                    try:
+                        fp.unlink()
+                        orphan_removed += 1
+                        snaps_removed += 1
+                    except OSError:
+                        pass
+                kept_proj_lines += min(len(orphan_pngs), orphan_keep)
+
+        handler._send_json({
+            "ok": True,
+            "project": req_proj,
+            "removed": removed_lines + orphan_removed,
+            "kept": kept_proj_lines,
+            "snapshots_removed": snaps_removed,
+        })
         return True
 
     return False

@@ -8,13 +8,17 @@ optional target-site passability probes.
 from __future__ import annotations
 
 import concurrent.futures
+import http.client
 import json
 import re
+import socket
+import ssl
+import struct
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Optional
-from urllib.parse import quote, urlsplit
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote, unquote, urlsplit
 
 _IP_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$|^[0-9a-fA-F:]{3,45}$")
 _CLOUD_KEYWORDS = (
@@ -43,13 +47,149 @@ _CLOUD_KEYWORDS = (
 )
 
 
+def _is_socks5_proxy(proxy_url: str) -> bool:
+    low = (proxy_url or "").strip().lower()
+    return low.startswith(("socks5://", "socks5h://"))
+
+
+def _recv_exact(sock: socket.socket, n: int) -> bytes:
+    buf = bytearray()
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            raise OSError("SOCKS5 代理提前关闭连接")
+        buf.extend(chunk)
+    return bytes(buf)
+
+
+def _socks5_connect_socket(
+    proxy_url: str,
+    dest_host: str,
+    dest_port: int,
+    timeout: float,
+) -> socket.socket:
+    """Pure-stdlib RFC 1928 / RFC 1929 SOCKS5(h) TCP tunnel."""
+    parsed = urlsplit(proxy_url.strip())
+    scheme = (parsed.scheme or "").lower()
+    p_host = parsed.hostname or ""
+    p_port = parsed.port or 1080
+    if not p_host:
+        raise ValueError("SOCKS5 代理缺少主机地址")
+    user = unquote(parsed.username) if parsed.username is not None else ""
+    pwd = unquote(parsed.password) if parsed.password is not None else ""
+
+    sock = socket.create_connection((p_host, p_port), timeout=timeout)
+    try:
+        sock.settimeout(timeout)
+        methods = b"\x00\x02" if (user or pwd) else b"\x00"
+        sock.sendall(bytes([0x05, len(methods)]) + methods)
+        ver, method = _recv_exact(sock, 2)
+        if ver != 0x05 or method == 0xFF:
+            raise OSError(f"SOCKS5 握手被拒绝 (ver={ver}, method={method})")
+        if method == 0x02:
+            ub = user.encode("utf-8")[:255]
+            pb = pwd.encode("utf-8")[:255]
+            sock.sendall(bytes([0x01, len(ub)]) + ub + bytes([len(pb)]) + pb)
+            aver, astatus = _recv_exact(sock, 2)
+            if aver != 0x01 or astatus != 0x00:
+                raise OSError("SOCKS5 用户名/密码认证失败")
+        elif method != 0x00:
+            raise OSError(f"不支持的 SOCKS5 认证方式: {method}")
+
+        # Build target address (rdns for socks5h or non-literal host)
+        atyp_payload = b""
+        if scheme == "socks5":
+            try:
+                atyp_payload = b"\x01" + socket.inet_aton(dest_host)
+            except OSError:
+                try:
+                    atyp_payload = b"\x04" + socket.inet_pton(socket.AF_INET6, dest_host)
+                except OSError:
+                    atyp_payload = b""
+        if not atyp_payload:
+            hb = dest_host.encode("idna")
+            if len(hb) > 255:
+                raise ValueError("目标主机名过长")
+            atyp_payload = b"\x03" + bytes([len(hb)]) + hb
+
+        sock.sendall(b"\x05\x01\x00" + atyp_payload + struct.pack("!H", int(dest_port)))
+        rver, rep, _rsv, ratyp = _recv_exact(sock, 4)
+        if rver != 0x05 or rep != 0x00:
+            raise OSError(f"SOCKS5 CONNECT 失败 (code={rep})")
+        if ratyp == 0x01:
+            _recv_exact(sock, 4 + 2)
+        elif ratyp == 0x04:
+            _recv_exact(sock, 16 + 2)
+        elif ratyp == 0x03:
+            alen = _recv_exact(sock, 1)[0]
+            _recv_exact(sock, alen + 2)
+        else:
+            raise OSError(f"SOCKS5 未知响应地址类型: {ratyp}")
+        return sock
+    except Exception:
+        try:
+            sock.close()
+        except Exception:
+            pass
+        raise
+
+
+def _socks5_http_get(
+    url: str,
+    proxy_url: str,
+    headers: Dict[str, str],
+    timeout: float,
+    max_bytes: int = 131072,
+) -> Tuple[int, Dict[str, str], bytes]:
+    """Perform an HTTP/HTTPS GET over a SOCKS5(h) proxy using pure stdlib."""
+    u = urlsplit(url)
+    scheme = (u.scheme or "http").lower()
+    host = u.hostname or ""
+    port = u.port or (443 if scheme == "https" else 80)
+    path = (u.path or "/") + (f"?{u.query}" if u.query else "")
+    raw_sock = _socks5_connect_socket(proxy_url, host, port, timeout=timeout)
+    conn: Optional[http.client.HTTPConnection] = None
+    try:
+        if scheme == "https":
+            ctx = ssl.create_default_context()
+            tls_sock = ctx.wrap_socket(raw_sock, server_hostname=host)
+            conn = http.client.HTTPSConnection(host, port, timeout=timeout, context=ctx)
+            conn.sock = tls_sock
+        else:
+            conn = http.client.HTTPConnection(host, port, timeout=timeout)
+            conn.sock = raw_sock
+        conn.request("GET", path, headers=headers)
+        resp = conn.getresponse()
+        body = resp.read(max_bytes)
+        resp_hdrs = {k.lower(): v for k, v in resp.getheaders()}
+        return int(resp.status), resp_hdrs, body
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        else:
+            try:
+                raw_sock.close()
+            except Exception:
+                pass
+
+
 def _fetch_json(url: str, proxy_url: str = "", timeout: float = 7.0) -> Optional[Dict[str, Any]]:
+    req_headers = {"User-Agent": "AutoRegister-IPScorer/1.0", "Accept": "application/json"}
+    if proxy_url and _is_socks5_proxy(proxy_url):
+        try:
+            status, _hdrs, raw_bytes = _socks5_http_get(url, proxy_url, req_headers, timeout=timeout, max_bytes=131072)
+            if not (200 <= status < 300):
+                return None
+            data = json.loads(raw_bytes.decode("utf-8", errors="ignore"))
+            return data if isinstance(data, dict) else None
+        except Exception:
+            return None
     handlers = [urllib.request.ProxyHandler({"http": proxy_url, "https": proxy_url})] if proxy_url else []
     opener = urllib.request.build_opener(*handlers)
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "AutoRegister-IPScorer/1.0", "Accept": "application/json"},
-    )
+    req = urllib.request.Request(url, headers=req_headers)
     try:
         with opener.open(req, timeout=timeout) as resp:
             raw = resp.read(131072).decode("utf-8", errors="ignore")
@@ -66,12 +206,45 @@ def _validate_http_url(url: str, *, resolve_dns: bool = False) -> str:
 
 
 def _probe_target(target_url: str, proxy_url: str = "", timeout: float = 8.0) -> Dict[str, Any]:
-    from .net_guard import build_safe_urllib_opener
+    from .net_guard import build_safe_urllib_opener, validate_proxy_url
 
     t0 = time.perf_counter()
+    req_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/json,*/*;q=0.8",
+    }
     try:
         target_url = _validate_http_url(target_url, resolve_dns=True)
-        opener = build_safe_urllib_opener(proxy_url)
+        clean_px = validate_proxy_url(proxy_url) if proxy_url else ""
+        if clean_px and _is_socks5_proxy(clean_px):
+            try:
+                status, hdrs, _body = _socks5_http_get(target_url, clean_px, req_headers, timeout=timeout, max_bytes=4096)
+                ms = round((time.perf_counter() - t0) * 1000.0, 1)
+                cf_mit = (hdrs.get("cf-mitigated") or "").lower()
+                blocked = bool(cf_mit) or status == 403
+                return {
+                    "url": target_url,
+                    "status_code": status,
+                    "passed": not blocked and status < 400,
+                    "challenge": blocked,
+                    "latency_ms": ms,
+                    "detail": (
+                        "CF Challenge 拦截"
+                        if cf_mit
+                        else (f"HTTP {status} ({'人机盾/风控拦截' if status == 403 else '限流' if status == 429 else '拒绝'})" if status >= 400 else f"HTTP {status} 放行")
+                    ),
+                }
+            except Exception as e:
+                ms = round((time.perf_counter() - t0) * 1000.0, 1)
+                return {
+                    "url": target_url,
+                    "status_code": 0,
+                    "passed": False,
+                    "challenge": False,
+                    "latency_ms": ms,
+                    "detail": f"连接失败: {str(e)[:90]}",
+                }
+        opener = build_safe_urllib_opener(clean_px)
     except Exception as e:
         ms = round((time.perf_counter() - t0) * 1000.0, 1)
         return {
@@ -82,13 +255,7 @@ def _probe_target(target_url: str, proxy_url: str = "", timeout: float = 8.0) ->
             "latency_ms": ms,
             "detail": f"目标地址或代理非法，已跳过: {str(e)[:90]}",
         }
-    req = urllib.request.Request(
-        target_url,
-        headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/json,*/*;q=0.8",
-        },
-    )
+    req = urllib.request.Request(target_url, headers=req_headers)
     try:
         with opener.open(req, timeout=timeout) as resp:
             ms = round((time.perf_counter() - t0) * 1000.0, 1)

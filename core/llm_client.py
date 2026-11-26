@@ -247,7 +247,11 @@ def save_llm_config(updates: Dict[str, Any], config_path: Optional[Path] = None)
             cfg["model"] = val or DEFAULT_MODEL
 
         if "proxy_url" in updates:
-            cfg["proxy_url"] = _validate_proxy_url(updates.get("proxy_url"))
+            inc_px = str(updates.get("proxy_url") or "").strip()
+            if "***@" in inc_px and existing.get("proxy_url"):
+                pass
+            else:
+                cfg["proxy_url"] = _validate_proxy_url(inc_px)
 
         if "max_tokens" in updates:
             raw_mt = updates.get("max_tokens")
@@ -321,7 +325,11 @@ def _merge_runtime_config(
         if overrides.get("model"):
             merged["model"] = str(overrides["model"]).strip()
         if "proxy_url" in overrides:
-            merged["proxy_url"] = str(overrides.get("proxy_url") or "").strip()
+            inc_px = str(overrides.get("proxy_url") or "").strip()
+            if "***@" in inc_px and merged.get("proxy_url"):
+                pass
+            else:
+                merged["proxy_url"] = inc_px
         if "max_tokens" in overrides and overrides.get("max_tokens") not in (None, ""):
             merged["max_tokens"] = _clamp_int(overrides.get("max_tokens"), merged["max_tokens"], 64, 65536)
         if overrides.get("max_tokens_field") in VALID_MAX_TOKENS_FIELDS:

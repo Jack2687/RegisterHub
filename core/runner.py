@@ -390,6 +390,14 @@ class StandardRunner:
                         except Exception:
                             pass
                     page.close()
+                if idx < count:
+                    try:
+                        delay_s = max(0.0, min(120.0, float((self.config.get("defaults") or {}).get("delay_between_s") or 0.0)))
+                    except (TypeError, ValueError):
+                        delay_s = 0.0
+                    if delay_s > 0:
+                        self.log("info", f"Waiting {delay_s:.1f}s cooldown before next account...")
+                        time.sleep(delay_s)
 
             if not self.cdp_endpoint:
                 context.close()

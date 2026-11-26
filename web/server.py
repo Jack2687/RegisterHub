@@ -463,6 +463,8 @@ def _load_raw_config_dict() -> Dict[str, Any]:
             "country": "US",
             "password_length": 14,
             "use_disposable_mail": True,
+            "delay_between_s": 0.0,
+            "captcha_enable_cv_slider": True,
         },
         "mail": {
             "provider": "tempmail",
@@ -554,6 +556,13 @@ def save_config_dict(updates: Dict[str, Any]) -> Dict[str, Any]:
         d["country"] = str(updates["country"]).upper()
     if "password_length" in updates:
         d["password_length"] = _safe_int_param(updates["password_length"], 14, 10, 32)
+    if "delay_between_s" in updates:
+        try:
+            d["delay_between_s"] = round(max(0.0, min(120.0, float(updates["delay_between_s"]))), 2)
+        except (TypeError, ValueError):
+            pass
+    if "captcha_enable_cv_slider" in updates:
+        d["captcha_enable_cv_slider"] = bool(updates["captcha_enable_cv_slider"])
     if "mail_provider" in updates:
         mp = str(updates["mail_provider"] or "tempmail").strip().lower()
         if mp in ("tempmail", "imap", "builtin"):
@@ -667,44 +676,9 @@ def list_failures(limit: Optional[int] = 100) -> List[Dict[str, Any]]:
 
 def collect_doctor_report(include_network: bool = True) -> Dict[str, Any]:
     """Run real executable checks from core.doctor and serialize for Lite UI."""
-    from core import doctor
+    from core.doctor import collect_doctor_report as _core_collect_doctor
 
-    checks = [
-        doctor._check_python_version(),
-        doctor._check_module("playwright", "playwright", "browser engine"),
-        doctor._check_module("requests", "requests", "HTTP client"),
-        doctor._check_module("PIL", "pillow", "image handling"),
-        doctor._check_module("numpy", "numpy", "vision math"),
-        doctor._check_opencv_functional(),
-        *doctor._check_browser_binaries(),
-        doctor._check_config(),
-        doctor._check_write_permission(str(RESULTS_DIR)),
-    ]
-    if include_network:
-        checks.append(doctor._check_network(timeout=2.5))
-
-    rows = []
-    blockers = 0
-    warnings = 0
-    for c in checks:
-        state = "pass" if c.ok else ("warn" if c.warn_only else "fail")
-        if state == "fail":
-            blockers += 1
-        elif state == "warn":
-            warnings += 1
-        rows.append({
-            "name": c.name,
-            "state": state,
-            "detail": c.detail,
-            "hint": c.hint or "",
-        })
-    return {
-        "checked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "ready": blockers == 0,
-        "blockers": blockers,
-        "warnings": warnings,
-        "checks": rows,
-    }
+    return _core_collect_doctor(include_network=include_network, output_dir=str(RESULTS_DIR))
 
 
 def list_community_adapters() -> List[Dict[str, Any]]:
@@ -922,6 +896,37 @@ def _probe_target_page(target_url: str) -> Dict[str, Any]:
 
 
 _ALLOWED_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "testserver"})
+_STREAM_TICKET_LOCK = threading.Lock()
+_STREAM_TICKETS: Dict[str, float] = {}
+
+
+def _mint_stream_ticket(ttl_s: float = 60.0) -> str:
+    now = time.monotonic()
+    tok = secrets.token_urlsafe(24)
+    with _STREAM_TICKET_LOCK:
+        expired = [k for k, exp in _STREAM_TICKETS.items() if exp <= now]
+        for k in expired:
+            _STREAM_TICKETS.pop(k, None)
+        while len(_STREAM_TICKETS) >= 128:
+            oldest = next(iter(_STREAM_TICKETS))
+            _STREAM_TICKETS.pop(oldest, None)
+        _STREAM_TICKETS[tok] = now + ttl_s
+    return tok
+
+
+def _verify_stream_ticket(tok: str) -> bool:
+    clean = (tok or "").strip()
+    if not clean:
+        return False
+    now = time.monotonic()
+    with _STREAM_TICKET_LOCK:
+        exp = _STREAM_TICKETS.get(clean)
+        if exp is None:
+            return False
+        if exp <= now:
+            _STREAM_TICKETS.pop(clean, None)
+            return False
+        return True
 
 
 def _extract_host_header_hostname(raw_host: str) -> str:
@@ -1050,7 +1055,11 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             bearer = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else ""
             x_tok = (self.headers.get("X-RegisterHub-Token") or "").strip()
             provided = bearer or x_tok
-            if not provided or not hmac.compare_digest(provided, env_tok):
+            authed = bool(provided) and hmac.compare_digest(provided, env_tok)
+            if not authed and (not is_write) and path.endswith("/stream"):
+                qs_tok = (parse_qs(urlparse(self.path).query).get("ticket") or [""])[0]
+                authed = _verify_stream_ticket(qs_tok)
+            if not authed:
                 self._reject_early({"ok": False, "error": "Unauthorized: invalid REGISTERHUB_API_TOKEN"}, status=401)
                 return False
 
@@ -1510,6 +1519,10 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         if studio_bridge.handle_studio_post(self, sys.modules[__name__], path, body):
             return
 
+        if path == "/api/auth/stream-ticket":
+            self._send_json({"ok": True, "ticket": _mint_stream_ticket(60.0), "expires_in": 60})
+            return
+
         if path == "/api/config":
             try:
                 saved = save_config_dict(body)
@@ -1525,25 +1538,34 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                 validate_proxy_url,
                 validate_public_http_url,
             )
+            from core.secrets import mask_proxy_url
 
             cfg = _load_raw_config_dict()
-            px = str(body.get("proxy") if "proxy" in body else (cfg.get("browser") or {}).get("proxy") or "").strip()
+            saved_px = str((cfg.get("browser") or {}).get("proxy") or "").strip()
+            if "proxy" in body:
+                px = str(body.get("proxy") or "").strip()
+                if "***@" in px and saved_px:
+                    px = saved_px
+            else:
+                px = saved_px
             target = str(body.get("target_url") or "https://api.ipify.org?format=json").strip()
             t0 = time.perf_counter()
+            masked_px = mask_proxy_url(px) if px else "(direct)"
             try:
                 clean_target = validate_public_http_url(target, resolve_dns=True)
                 clean_px = validate_proxy_url(px) if px else ""
+                masked_px = mask_proxy_url(clean_px) if clean_px else "(direct)"
+                opener = build_safe_urllib_opener(proxy=clean_px or "")
             except (PrivateAddressBlockedError, ValueError) as e:
-                self._send_json({"ok": False, "proxy": px or "(direct)", "latency_ms": 0.0, "error": str(e)}, status=400)
+                self._send_json({"ok": False, "proxy": masked_px, "latency_ms": 0.0, "error": str(e)}, status=400)
                 return
             try:
-                opener = build_safe_urllib_opener(proxy=clean_px or "")
                 req = urllib.request.Request(clean_target, headers={"User-Agent": "RegisterHub-Lite/2.0"})
                 with opener.open(req, timeout=8) as r:
                     txt = r.read(512).decode("utf-8", errors="ignore").strip()
                     self._send_json({
                         "ok": True,
-                        "proxy": clean_px or "(direct)",
+                        "proxy": masked_px,
                         "status_code": r.status,
                         "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
                         "body": txt[:200],
@@ -1551,7 +1573,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json({
                     "ok": False,
-                    "proxy": clean_px or "(direct)",
+                    "proxy": masked_px,
                     "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
                     "error": str(e),
                 })
@@ -1575,7 +1597,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/run":
             adapter = str(body.get("adapter") or "").strip().lower()
             try:
-                count = max(1, min(20, int(body.get("count") or 1)))
+                count = max(1, min(500, int(body.get("count") or 1)))
             except Exception:
                 count = 1
             raw_hl = body.get("headless")
@@ -1671,6 +1693,11 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
 
             ip_val = str(body.get("ip") or "").strip()
             px = str(body.get("proxy_url") or "").strip()
+            if "***@" in px:
+                cfg = _load_raw_config_dict()
+                saved_px = str((cfg.get("browser") or {}).get("proxy") or "").strip()
+                if saved_px:
+                    px = saved_px
             target_url = str(body.get("target_url") or "").strip()
             try:
                 if target_url:
@@ -1696,7 +1723,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             }
             bname, d_bin, clen, cvv_len = brands.get(str(body.get("brand") or "visa").lower(), brands["visa"])
             prefix = re.sub(r"\D", "", str(body.get("bin_prefix") or ""))[:8] or d_bin
-            cnt = _safe_int_param(body.get("count"), 6, 1, 12)
+            cnt = _safe_int_param(body.get("count"), 6, 1, 20)
             cards = []
             for _ in range(cnt):
                 num = _luhn_complete(prefix, clen)
@@ -1854,11 +1881,11 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             try:
                 clean_base = validate_public_http_url(base_url, resolve_dns=True).rstrip("/")
                 px = validate_proxy_url(raw_px) if raw_px else ""
+                opener = build_safe_urllib_opener(proxy=px or "")
             except (PrivateAddressBlockedError, ValueError) as e:
                 self._send_json({"ok": False, "detail": str(e)}, status=400)
                 return
             models_url = f"{clean_base}/models" if clean_base.endswith("/v1") else f"{clean_base}/v1/models"
-            opener = build_safe_urllib_opener(proxy=px or "")
             req = urllib.request.Request(
                 models_url,
                 headers={"Authorization": f"Bearer {key_val}", "Accept": "application/json", "User-Agent": "RegisterHub-Lite/2.0"},
@@ -2061,6 +2088,31 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         if path == "/api/llm/config":
             try:
                 saved = llm_client.save_llm_config(body)
+                try:
+                    from core import llm_profiles
+
+                    if llm_profiles._profiles_file().exists():
+                        raw_cfg = llm_client.load_raw_llm_config()
+                        listing = llm_profiles.list_profiles_response()
+                        active_id = str(listing.get("active_id") or "").strip() or "default"
+                        sync_payload: Dict[str, Any] = {
+                            "id": active_id,
+                            "base_url": raw_cfg.get("base_url") or "",
+                            "model": raw_cfg.get("model") or "",
+                            "proxy_url": raw_cfg.get("proxy_url") or "",
+                            "max_tokens": raw_cfg.get("max_tokens"),
+                            "max_tokens_field": raw_cfg.get("max_tokens_field"),
+                            "temperature": raw_cfg.get("temperature"),
+                        }
+                        if bool(body.get("clear_api_key")):
+                            sync_payload["clear_api_key"] = True
+                        elif raw_cfg.get("api_key"):
+                            sync_payload["api_key"] = raw_cfg["api_key"]
+                            sync_payload["replace_keys"] = True
+                        llm_profiles.upsert_profile(sync_payload)
+                        llm_profiles.activate_profile(active_id)
+                except Exception:
+                    pass
                 self._send_json({"ok": True, "config": saved})
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)}, status=400)
@@ -2117,6 +2169,8 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                     mode=mode,
                     goal_mode=goal_mode,
                 )
+                if isinstance(res.get("session"), dict):
+                    res["session"] = studio_bridge.enrich_agent_detail(res["session"])
                 self._send_json(res)
             except KeyError as ke:
                 self._send_json({"ok": False, "error": str(ke)}, status=404)
@@ -2211,11 +2265,13 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         self._send_json({"error": "Not Found"}, status=404)
 
     def do_DELETE(self) -> None:
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        qs = parse_qs(parsed.query)
         if not self._check_local_origin_guard(path, is_write=True):
             return
 
-        if studio_bridge.handle_studio_delete(self, sys.modules[__name__], path):
+        if studio_bridge.handle_studio_delete(self, sys.modules[__name__], path, qs=qs):
             return
 
         m_ag_del = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)", path)

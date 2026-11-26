@@ -598,10 +598,9 @@ def tool_probe_url(url: str) -> Dict[str, Any]:
         clean_target = validate_public_http_url(target, resolve_dns=True)
         raw_px = _read_proxy_from_config()
         proxy = validate_proxy_url(raw_px) if raw_px else ""
+        opener = build_safe_urllib_opener(proxy=proxy or "")
     except (PrivateAddressBlockedError, ValueError) as exc:
         return {"ok": False, "url": target, "error": str(exc)}
-
-    opener = build_safe_urllib_opener(proxy=proxy or "")
     req = urllib.request.Request(
         clean_target,
         headers={
@@ -876,7 +875,14 @@ def _detect_fake_placeholder_violation(tree: ast.AST) -> Optional[str]:
         elif isinstance(node, ast.IfExp):
             return _is_fake_str(node.body) or _is_fake_str(node.orelse)
         elif isinstance(node, ast.Dict):
-            for v_node in node.values:
+            _NON_CRED_META_KEYS = frozenset({
+                "status", "state", "result", "stage", "mode", "type", "ok",
+                "message", "msg", "code", "detail", "error", "reason", "label", "action",
+            })
+            for k_node, v_node in zip(node.keys, node.values):
+                k_str = _fold_const_str(k_node)
+                if k_str is not None and k_str.strip().lower() in _NON_CRED_META_KEYS:
+                    continue
                 hit = _is_fake_str(v_node)
                 if hit:
                     return hit
@@ -1628,7 +1634,7 @@ def tool_check_infra(*, check_ip_score: bool = False) -> Dict[str, Any]:
     try:
         from core.doctor import collect_doctor_report
 
-        report = collect_doctor_report(include_network=False)
+        report = collect_doctor_report(include_network=False, output_dir=str(RESULTS_DIR))
     except Exception as exc:
         report = {"ready": False, "checks": [], "error": str(exc)}
 
@@ -1688,6 +1694,8 @@ def tool_check_infra(*, check_ip_score: bool = False) -> Dict[str, Any]:
         "builtin_mail": mail_stats,
         "builtin_proxies": proxy_stats,
     }
+    if report.get("error"):
+        out["doctor_error"] = str(report["error"])
     if check_ip_score:
         try:
             from core.ip_scorer import score_ip
@@ -4481,12 +4489,12 @@ class SingleAgentManager:
         if queued:
             sess.emit("queue_updated", queued_messages=queue_snap)
             sess.persist()
-            return {"ok": True, "steered": False, "queued": True, "queued_messages": queue_snap, "session": sess.to_summary()}
+            return {"ok": True, "steered": False, "queued": True, "queued_messages": queue_snap, "session": sess.to_detail()}
 
         if steered:
             sess.emit("user_msg", id=f"m_u_{secrets.token_hex(4)}", content=user_text, target_url=clean_url, steered=True)
             sess.persist()
-            return {"ok": True, "steered": True, "queued": False, "session": sess.to_summary()}
+            return {"ok": True, "steered": True, "queued": False, "session": sess.to_detail()}
 
         with sess._lock:
             sess.messages = _repair_dangling_tool_calls(sess.messages)
@@ -4500,7 +4508,7 @@ class SingleAgentManager:
 
         assert turn_stop_ev is not None
         threading.Thread(target=self._run_turn, args=(sess, turn_stop_ev), daemon=True).start()
-        return {"ok": True, "steered": False, "queued": False, "session": sess.to_summary()}
+        return {"ok": True, "steered": False, "queued": False, "session": sess.to_detail()}
 
     def _accumulate_usage(self, sess: AgentSession, resp: Dict[str, Any]) -> Dict[str, Any]:
         u = resp.get("usage") or {}
@@ -5128,7 +5136,7 @@ class SingleAgentManager:
             self._finish_turn_status(sess, stop_ev, "error", error=str(exc))
 
 
-_AGENT_CFG_LOCK = threading.Lock()
+_AGENT_CFG_LOCK = threading.RLock()
 
 
 def _parse_skill_meta(fp: Path) -> Tuple[str, str]:

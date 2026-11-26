@@ -409,3 +409,203 @@ def test_agent_guard_unescaped_and_ast_constant_folding_and_checkpoint_delete(tm
     rst = mgr.restore_checkpoint(sess.id, res_w["checkpoint_id"])
     assert rst["ok"] is True and rst["deleted"] is True
     assert not target.exists()
+
+
+def test_wave2_p0_deadlock_ip_batch_and_all_contract_fixes(tmp_path, monkeypatch):
+    """Regression suite locking all 22 bugs discovered in the wave-2 adversarial audit."""
+    import ast
+    import threading
+    import urllib.parse
+    import core.ai_agent as ai_agent
+    import core.ip_scorer as ip_scorer
+    import core.llm_client as llm_client
+    import core.llm_profiles as llm_profiles
+
+    monkeypatch.setattr(web_server, "RESULTS_DIR", tmp_path)
+    monkeypatch.setattr(web_server, "ACCOUNTS_FILE", tmp_path / "accounts.txt")
+    monkeypatch.setattr(web_server, "FAILED_FILE", tmp_path / "failed.txt")
+    monkeypatch.setattr(web_server, "SNAPSHOTS_DIR", tmp_path / "snapshots")
+    monkeypatch.setattr(web_server, "CONFIG_FILE", tmp_path / "config.json")
+    monkeypatch.setattr(ai_agent, "RESULTS_DIR", tmp_path)
+    monkeypatch.setattr(ai_agent, "AGENT_SESSIONS_DIR", tmp_path / "agent_sessions")
+    monkeypatch.setattr(llm_client, "LLM_CONFIG_FILE", tmp_path / "llm_config.json")
+    monkeypatch.delenv("REGISTERHUB_API_TOKEN", raising=False)
+
+    # 1. P0: save_agent_config() called twice must NOT self-deadlock on _AGENT_CFG_LOCK
+    done_ev = threading.Event()
+    errs = []
+
+    def _double_save():
+        try:
+            ai_agent.save_agent_config({"max_steps": 12})
+            r2 = ai_agent.save_agent_config({"max_steps": 18})
+            assert r2["max_steps"] == 18
+        except Exception as exc:
+            errs.append(exc)
+        finally:
+            done_ev.set()
+
+    th = threading.Thread(target=_double_save, daemon=True)
+    th.start()
+    assert done_ev.wait(timeout=3.0), "save_agent_config deadlocked on 2nd save!"
+    assert not errs, f"save_agent_config failed: {errs}"
+
+    # 2. P1: tool_check_infra works cleanly with core.doctor.collect_doctor_report
+    infra = ai_agent.tool_check_infra(check_ip_score=False)
+    assert infra["ok"] is True and isinstance(infra["checks"], list) and len(infra["checks"]) >= 5
+    assert "doctor_error" not in infra
+
+    # 3. P2: _detect_fake_placeholder_violation allows legitimate status dict in token helper
+    good_code = (
+        "def fetch_token(resp):\n"
+        "    return {'status': 'ok', 'token': resp.json()['access_token']}\n"
+    )
+    assert ai_agent._detect_fake_placeholder_violation(ast.parse(good_code)) is None
+    bad_code = (
+        "def fetch_token(resp):\n"
+        "    return {'status': 'ok', 'token': 'ok'}\n"
+    )
+    assert ai_agent._detect_fake_placeholder_violation(ast.parse(bad_code)) is not None
+
+    # 4. P1: tool_probe_url handles socks5 proxy without uncaught ValueError
+    (tmp_path / "config.json").write_text(
+        json.dumps({"browser": {"proxy": "socks5://127.0.0.1:1080"}}), encoding="utf-8"
+    )
+    monkeypatch.setattr(ai_agent, "CONFIG_FILE", tmp_path / "config.json")
+    probe_r = ai_agent.tool_probe_url("https://example.com")
+    assert probe_r["ok"] is False and "socks5" in probe_r.get("error", "").lower()
+
+    # 5. P1: Masked proxy_url echo must preserve stored credentials in llm_client & llm_profiles
+    llm_client.save_llm_config({"proxy_url": "http://u1:p1@proxy.example.com:8080"})
+    pub_llm = llm_client.to_public_llm_config(llm_client.load_raw_llm_config())
+    assert "***@" in pub_llm["proxy_url"]
+    llm_client.save_llm_config({"proxy_url": pub_llm["proxy_url"], "model": "gpt-4o-mini"})
+    assert llm_client.load_raw_llm_config()["proxy_url"] == "http://u1:p1@proxy.example.com:8080"
+
+    p_saved = llm_profiles.upsert_profile({
+        "id": "中文 节点",
+        "name": "CN Node",
+        "base_url": "https://api.example.com/v1",
+        "model": "gpt-4o-mini",
+        "proxy_url": "http://u2:p2@proxy.example.com:8080",
+    })
+    assert "***@" in p_saved["proxy_url"]
+    llm_profiles.upsert_profile({"id": "中文 节点", "proxy_url": p_saved["proxy_url"], "enabled": True})
+    ov = llm_profiles.resolve_runtime_override(profile_id="中文 节点", extra_overrides={"proxy_url": p_saved["proxy_url"]})
+    assert ov["proxy_url"] == "http://u2:p2@proxy.example.com:8080"
+
+    # 6. P1: enrich_agent_detail last_seq must equal next_seq - 1 (not next_seq)
+    import web.studio_bridge as bridge
+
+    det = bridge.enrich_agent_detail({
+        "id": "s_test",
+        "events": [{"seq": 0, "type": "user_msg", "content": "hi"}, {"seq": 1, "type": "assistant_msg", "content": "yo"}],
+        "next_seq": 2,
+    })
+    assert det["last_seq"] == 1
+
+    # 7. Live HTTP contract tests via real local server
+    (tmp_path / "accounts.txt").write_text(
+        "a@ex.com----pw1----u1----sk-live-aaaaaaaa\n"
+        "b@ex.com----pw2----u2----\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "failed.txt").write_text(
+        "\n".join(f"2026-11-26 10:00:{i:02d} | err | u{i}@x.com | site: demo_site" for i in range(5)) + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "snapshots").mkdir(exist_ok=True)
+    (tmp_path / "snapshots" / "orphan_old.png").write_bytes(b"\x89PNG")
+
+    monkeypatch.setattr(
+        ip_scorer,
+        "_fetch_json",
+        lambda url, proxy_url="", timeout=7.0: {"ip": "1.1.1.1", "asn": {"asn": "AS13335"}, "company": {"type": "hosting"}},
+    )
+
+    srv, base, _ = _start_server()
+    try:
+        def _post(path, body, hdrs=None):
+            h = {"Content-Type": "application/json", "Origin": base, "Sec-Fetch-Site": "same-origin"}
+            if hdrs:
+                h.update(hdrs)
+            req = urllib.request.Request(f"{base}{path}", data=json.dumps(body).encode("utf-8"), headers=h, method="POST")
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, json.loads(r.read().decode("utf-8"))
+
+        # P0: /api/services/ip-score/batch returns grades, avg_score, items (no React crash)
+        st, batch = _post("/api/services/ip-score/batch", {"source": "custom", "items": ["1.1.1.1"]})
+        assert st == 200 and "grades" in batch and "S" in batch["grades"] and "avg_score" in batch and len(batch["items"]) == 1
+
+        # P1: /api/accounts/export returns count & respects key_filter
+        st, exp_all = _post("/api/accounts/export", {"format": "csv"})
+        assert st == 200 and exp_all["count"] == 2
+        st, exp_key = _post("/api/accounts/export", {"format": "csv", "key_filter": "with_key"})
+        assert st == 200 and exp_key["count"] == 1
+
+        # P2: /api/keys/oneapi honors aggregate & models
+        st, oneapi = _post("/api/keys/oneapi", {"keys": ["sk-1", "sk-2"], "aggregate": True, "models": "gpt-4o,claude-3-5"})
+        assert st == 200 and oneapi["count"] == 1 and oneapi["channels"][0]["key"] == "sk-1\nsk-2"
+        assert oneapi["channels"][0]["models"] == "gpt-4o,claude-3-5"
+
+        # P2: /api/settings/config persists delay_between_s (>2s) & captcha_enable_cv_slider
+        st, cfg_s = _post("/api/settings/config", {"run_delay_between_s": 15, "captcha_enable_cv_slider": False})
+        assert st == 200 and cfg_s["run_delay_between_s"] == 15.0 and cfg_s["captcha_enable_cv_slider"] is False
+
+        # P2: /api/tools/card supports 20 cards
+        st, cards = _post("/api/tools/card", {"brand": "visa", "count": 20})
+        assert st == 200 and cards["count"] == 20
+
+        # P1: /api/accounts/test-key returns HTTP 400 (not dropped socket) on socks5 proxy
+        req_tk = urllib.request.Request(
+            f"{base}/api/accounts/test-key",
+            data=json.dumps({"key": "sk-test-12345678", "base_url": "https://example.com"}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Origin": base, "Sec-Fetch-Site": "same-origin"},
+            method="POST",
+        )
+        with pytest.raises(urllib.error.HTTPError) as exc_tk:
+            urllib.request.urlopen(req_tk, timeout=5)
+        assert exc_tk.value.code == 400
+
+        # P1: DELETE /api/fleet/demo_site/errors?keep_latest=2 keeps 2 lines and reports kept=2
+        req_del = urllib.request.Request(
+            f"{base}/api/fleet/demo_site/errors?keep_latest=2",
+            headers={"Origin": base, "Sec-Fetch-Site": "same-origin"},
+            method="DELETE",
+        )
+        with urllib.request.urlopen(req_del, timeout=5) as r:
+            del_res = json.loads(r.read().decode("utf-8"))
+        assert del_res["ok"] is True and del_res["kept"] == 2 and del_res["removed"] >= 3
+        assert not (tmp_path / "snapshots" / "orphan_old.png").exists()
+
+        # P1: POST /api/llm/config syncs into llm_profiles.json when it exists (Lite UI not ignored)
+        st, _ = _post("/api/llm/config", {"model": "lite-synced-model"})
+        assert st == 200
+        synced_ov = llm_profiles.resolve_runtime_override()
+        assert synced_ov["model"] == "lite-synced-model"
+
+        # P2: URL-encoded non-ASCII profile ID works on activate & delete
+        enc_id = urllib.parse.quote("中文 节点", safe="")
+        st, act = _post(f"/api/llm/profiles/{enc_id}/activate", {})
+        assert st == 200 and act["active_id"] == "中文 节点"
+
+        # P1: REGISTERHUB_API_TOKEN + /api/auth/stream-ticket allows EventSource ?ticket=
+        monkeypatch.setenv("REGISTERHUB_API_TOKEN", "secret-tok-xyz")
+        st, tick = _post("/api/auth/stream-ticket", {}, hdrs={"Authorization": "Bearer secret-tok-xyz"})
+        assert st == 200 and tick.get("ticket")
+        # Create a session and confirm stream with ?ticket= succeeds (or 404 for unknown session, NOT 401)
+        req_stream = urllib.request.Request(f"{base}/api/agent/sessions/nonexistent/stream?ticket={tick['ticket']}")
+        with pytest.raises(urllib.error.HTTPError) as exc_st:
+            urllib.request.urlopen(req_stream, timeout=5)
+        assert exc_st.value.code == 404  # Passed 401 auth gate!
+
+        # P1: /api/config/test-proxy never leaks stored credentials in response JSON
+        monkeypatch.delenv("REGISTERHUB_API_TOKEN", raising=False)
+        (tmp_path / "config.json").write_text(
+            json.dumps({"browser": {"proxy": "http://topuser:topsecret@127.0.0.1:19999"}}), encoding="utf-8"
+        )
+        st, tp_res = _post("/api/config/test-proxy", {})
+        assert "topsecret" not in json.dumps(tp_res)
+    finally:
+        srv.shutdown()
+        srv.server_close()
