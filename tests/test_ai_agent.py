@@ -427,6 +427,7 @@ def test_server_llm_and_agent_endpoints_with_sse_and_lifecycle(tmp_path, monkeyp
 def test_agent_stop_cancels_active_turn(tmp_path, monkeypatch):
     sessions_dir = tmp_path / "agent_sessions"
     monkeypatch.setattr(ai_agent, "AGENT_SESSIONS_DIR", sessions_dir)
+    monkeypatch.setattr(ai_agent, "RESULTS_DIR", tmp_path)
     monkeypatch.setattr(ai_agent.agent_manager, "_sessions", {})
 
     entered = threading.Event()
@@ -667,6 +668,7 @@ def test_run_adapter_once_hyphen_normalization_and_unknown_detection(tmp_path, m
 def test_dangling_multi_tool_repair_safe_slicing_and_stop_resend_race(tmp_path, monkeypatch):
     sessions_dir = tmp_path / "agent_sessions"
     monkeypatch.setattr(ai_agent, "AGENT_SESSIONS_DIR", sessions_dir)
+    monkeypatch.setattr(ai_agent, "RESULTS_DIR", tmp_path)
     monkeypatch.setattr(ai_agent.agent_manager, "_sessions", {})
 
     # 1. Dangling multi-tool repair (tool 1 of 2 answered before Stop)
@@ -765,6 +767,7 @@ def test_dangling_multi_tool_repair_safe_slicing_and_stop_resend_race(tmp_path, 
 def test_agent_empty_nudge_budget_wrapup_steering_and_markdown_export(tmp_path, monkeypatch):
     sessions_dir = tmp_path / "agent_sessions"
     monkeypatch.setattr(ai_agent, "AGENT_SESSIONS_DIR", sessions_dir)
+    monkeypatch.setattr(ai_agent, "RESULTS_DIR", tmp_path)
     monkeypatch.setattr(ai_agent.agent_manager, "_sessions", {})
 
     # --- A. Thinking-only empty-turn nudge (recovers after 2 empty thinking-only turns) ---
@@ -930,6 +933,7 @@ def test_agent_empty_nudge_budget_wrapup_steering_and_markdown_export(tmp_path, 
 def test_agent_session_rename_patch_and_validation(tmp_path, monkeypatch):
     sessions_dir = tmp_path / "agent_sessions"
     monkeypatch.setattr(ai_agent, "AGENT_SESSIONS_DIR", sessions_dir)
+    monkeypatch.setattr(ai_agent, "RESULTS_DIR", tmp_path)
     monkeypatch.setattr(ai_agent.agent_manager, "_sessions", {})
 
     srv, base = _start_ephemeral()
@@ -1001,6 +1005,7 @@ def test_agent_stop_mid_tool_records_diagnostic_note(tmp_path, monkeypatch):
 
     sessions_dir = tmp_path / "agent_sessions"
     monkeypatch.setattr(ai_agent, "AGENT_SESSIONS_DIR", sessions_dir)
+    monkeypatch.setattr(ai_agent, "RESULTS_DIR", tmp_path)
     monkeypatch.setattr(ai_agent.agent_manager, "_sessions", {})
 
     tool_entered = threading.Event()
@@ -1094,6 +1099,7 @@ def test_prompt_cache_prefix_stability_past_80_messages_and_anthropic_breakpoint
     """Regression: never shift a fixed 80-message sliding window on every step (destroys KV prompt cache!)."""
     sessions_dir = tmp_path / "agent_sessions"
     monkeypatch.setattr(ai_agent, "AGENT_SESSIONS_DIR", sessions_dir)
+    monkeypatch.setattr(ai_agent, "RESULTS_DIR", tmp_path)
     monkeypatch.setattr(ai_agent.agent_manager, "_sessions", {})
     monkeypatch.setattr(ai_agent, "MAX_STEPS_PER_TURN", 60)
     monkeypatch.setattr(ai_agent, "tool_list_adapters", lambda: {"ok": True, "count": 0, "adapters": []})

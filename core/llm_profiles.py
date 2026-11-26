@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from core import llm_client
+from core.llm_context import (
+    infer_model_context_window_k,
+    resolve_context_window_tokens,
+    sanitize_model_context_windows,
+)
 from core.locks import atomic_write_text_safe, interprocess_file_lock
 from core.secrets import mask_proxy_url
 
@@ -42,20 +47,7 @@ def _clean_str_list(raw: Any, limit: int = 500) -> List[str]:
 
 
 def _clean_ctx_map(raw: Any) -> Dict[str, int]:
-    if not isinstance(raw, dict):
-        return {}
-    out: Dict[str, int] = {}
-    for k, v in raw.items():
-        ks = str(k or "").strip()
-        if not ks:
-            continue
-        try:
-            iv = int(v)
-        except (TypeError, ValueError):
-            continue
-        if 4 <= iv <= 4000:
-            out[ks] = iv
-    return out
+    return sanitize_model_context_windows(raw, limit=1000)
 
 
 def _normalize_key_entry(raw: Any) -> Optional[Dict[str, Any]]:
@@ -124,7 +116,13 @@ def _normalize_profile(raw: Dict[str, Any], default_id: str = "") -> Dict[str, A
         mtf = llm_client.DEFAULT_MAX_TOKENS_FIELD
 
     temp = llm_client._clamp_float(raw.get("temperature"), llm_client.DEFAULT_TEMPERATURE, 0.0, 2.0)
-    ctx_k = llm_client._clamp_int(raw.get("context_window_k"), 128, 16, 2000)
+    cleaned_mcw = _clean_ctx_map(raw.get("model_context_windows"))
+    raw_ctx_k = raw.get("context_window_k")
+    if raw_ctx_k is None:
+        inferred_k = infer_model_context_window_k(model, cleaned_mcw)
+        ctx_k = inferred_k if inferred_k is not None else 128
+    else:
+        ctx_k = llm_client._clamp_int(raw_ctx_k, 128, 16, 1000)
     prio = llm_client._clamp_int(raw.get("priority"), 10, 0, 1000)
 
     tm = str(raw.get("thinking_mode") or "none").strip()
@@ -147,7 +145,7 @@ def _normalize_profile(raw: Dict[str, Any], default_id: str = "") -> Dict[str, A
         "max_tokens_field": mtf,
         "temperature": temp,
         "context_window_k": ctx_k,
-        "model_context_windows": _clean_ctx_map(raw.get("model_context_windows")),
+        "model_context_windows": cleaned_mcw,
         "priority": prio,
         "enabled": raw.get("enabled") is not False,
         "excluded": bool(raw.get("excluded", False)),
@@ -421,6 +419,16 @@ def upsert_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
         else:
             merged["keys"] = existing_keys
 
+        # 未显式指定 context_window_k 时，按模型元数据/家族自动识别真实窗口（与母港/PRO 完全一致）
+        if "context_window_k" not in payload or payload.get("context_window_k") is None:
+            eff_model = str(merged.get("model") or "").strip()
+            eff_mcw = _clean_ctx_map(merged.get("model_context_windows"))
+            inferred_ctx = infer_model_context_window_k(eff_model, eff_mcw)
+            if inferred_ctx is not None:
+                merged["context_window_k"] = inferred_ctx
+            elif existing_idx < 0:
+                merged.pop("context_window_k", None)
+
         # Ensure default model stays in pinned_models if user hasn't explicitly emptied it on first create
         normalized = _normalize_profile(merged, default_id=merged["id"])
         if existing_idx >= 0:
@@ -552,6 +560,9 @@ def save_catalog_models(
             merged_ctx = dict(prof.get("model_context_windows") or {})
             merged_ctx.update(_clean_ctx_map(ctx_map))
             prof["model_context_windows"] = merged_ctx
+        inferred_k = infer_model_context_window_k(str(prof.get("model") or ""), prof.get("model_context_windows"))
+        if inferred_k is not None:
+            prof["context_window_k"] = inferred_k
         store["profiles"][idx] = prof
         _save_store_unlocked(store)
         return to_public_profile(prof, store["active_id"])
@@ -583,7 +594,7 @@ def record_profile_test_result(profile_id: str, ok: bool, latency_ms: float = 0.
 
 
 def resolve_context_window(profile_id: str = "", model_name: str = "") -> int:
-    """Resolve effective context window tokens for a profile/model (defaults to heuristic or 128K)."""
+    """Resolve effective context window tokens for a profile/model (delegated to shared core/llm_context.py)."""
     with _STORE_LOCK:
         try:
             store = _load_store_unlocked()
@@ -594,25 +605,7 @@ def resolve_context_window(profile_id: str = "", model_name: str = "") -> int:
         prof = next((p for p in profs if p["id"] == pid), None)
         if prof is None:
             prof = next((p for p in profs if p["id"] == store["active_id"]), profs[0] if profs else None)
-
-    if prof:
-        mcw = prof.get("model_context_windows")
-        if isinstance(mcw, dict) and model_name:
-            if model_name in mcw and int(mcw[model_name]) > 0:
-                return int(mcw[model_name]) * 1000
-            short_m = model_name.rsplit("/", 1)[-1]
-            if short_m in mcw and int(mcw[short_m]) > 0:
-                return int(mcw[short_m]) * 1000
-        ctx_k = int(prof.get("context_window_k") or 0)
-        if ctx_k > 0:
-            return ctx_k * 1000
-
-    low = str(model_name or "").lower()
-    if any(k in low for k in ("gemini-2", "gemini-1.5", "gemini-2.5", "claude-sonnet-4", "claude-opus-4", "gpt-4.1")):
-        return 1_000_000
-    if "claude-3" in low or "claude-4" in low:
-        return 200_000
-    return 128_000
+    return resolve_context_window_tokens(prof, model_name)
 
 
 def resolve_runtime_override(

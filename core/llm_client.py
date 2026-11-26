@@ -418,6 +418,8 @@ def _extract_content_text(raw_content: Any) -> str:
 
 
 def _extract_model_ids_and_ctx(data: Any) -> Tuple[List[str], Dict[str, int]]:
+    from core.llm_context import extract_model_context_windows
+
     items: Any = None
     if isinstance(data, dict):
         if isinstance(data.get("data"), list):
@@ -429,27 +431,20 @@ def _extract_model_ids_and_ctx(data: Any) -> Tuple[List[str], Dict[str, int]]:
     if not isinstance(items, list):
         return [], {}
     found = set()
-    ctx_map: Dict[str, int] = {}
     for item in items:
         if isinstance(item, str) and item.strip():
-            found.add(item.strip())
-        elif isinstance(item, dict):
-            mid = str(item.get("id") or item.get("name") or item.get("model") or "").strip()
+            mid = item.strip()
+            if mid.startswith("models/"):
+                mid = mid[len("models/"):]
             if mid:
                 found.add(mid)
-                raw_ctx = (
-                    item.get("context_length")
-                    or item.get("context_window")
-                    or item.get("max_context_length")
-                    or item.get("input_token_limit")
-                )
-                try:
-                    cval = int(raw_ctx) if raw_ctx is not None else 0
-                except (TypeError, ValueError):
-                    cval = 0
-                if cval >= 4096:
-                    ck = max(4, min(4000, round(cval / 1024)))
-                    ctx_map[mid] = ck
+        elif isinstance(item, dict):
+            mid = str(item.get("id") or item.get("name") or item.get("model") or "").strip()
+            if mid.startswith("models/"):
+                mid = mid[len("models/"):]
+            if mid:
+                found.add(mid)
+    ctx_map = extract_model_context_windows(data)
     return sorted(found), ctx_map
 
 
@@ -1842,10 +1837,15 @@ def discover_models(
 
         models, ctx_map = _extract_model_ids_and_ctx(parsed)
         if models:
+            from core.llm_context import infer_model_context_window_k
+
+            active_model = str((overrides or {}).get("model") or cfg.get("model") or "").strip()
+            detected_ctx = infer_model_context_window_k(active_model, ctx_map) if active_model else None
             return {
                 "ok": True,
                 "models": models,
                 "model_context_windows": ctx_map,
+                "detected_context_window_k": detected_ctx,
                 "source_url": url,
                 "count": len(models),
                 "error": "",

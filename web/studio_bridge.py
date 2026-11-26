@@ -2245,8 +2245,11 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
         res = srv.llm_client.discover_models(overrides=ov)
         saved_flag = False
         if res.get("ok") and bool(body.get("save_catalog")) and pid and res.get("models"):
-            if llm_profiles.save_catalog_models(pid, res["models"], ctx_map=res.get("model_context_windows")):
+            updated_prof = llm_profiles.save_catalog_models(pid, res["models"], ctx_map=res.get("model_context_windows"))
+            if updated_prof:
                 saved_flag = True
+                if res.get("detected_context_window_k") is None and updated_prof.get("context_window_k"):
+                    res["detected_context_window_k"] = updated_prof["context_window_k"]
         handler._send_json({**res, "saved": saved_flag})
         return True
 

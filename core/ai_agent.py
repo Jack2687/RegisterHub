@@ -51,7 +51,7 @@ AGENT_SESSIONS_DIR = RESULTS_DIR / "agent_sessions"
 AGENT_SKILLS_DIR = ROOT_DIR / "skills"
 _SAFE_SKILL_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
 
-MAX_STEPS_PER_TURN = 16
+MAX_STEPS_PER_TURN = 0
 RUN_ADAPTER_TIMEOUT_S = 120
 _AUTO_COMPACT_CONTEXT_RATIO = 0.85
 _AUTO_COMPACT_COOLDOWN_STEPS = 4
@@ -4672,12 +4672,14 @@ class SingleAgentManager:
         max_tokens_escalated = False
         max_tokens_recovery_count = 0
         last_compact_step = -999
+        failed_call_streaks: Dict[str, int] = {}
 
         try:
             eff_cfg = load_agent_config()
             saved_cfg = _load_saved_agent_config_if_exists()
+            raw_ms = eff_cfg.get("max_steps")
             try:
-                base_max_steps = max(1, min(200, int(eff_cfg.get("max_steps") or MAX_STEPS_PER_TURN)))
+                base_max_steps = MAX_STEPS_PER_TURN if raw_ms is None else max(0, min(1000, int(raw_ms)))
             except (TypeError, ValueError):
                 base_max_steps = MAX_STEPS_PER_TURN
             with sess._lock:
@@ -4686,7 +4688,10 @@ class SingleAgentManager:
                 goal_steps = int((goal_init or {}).get("max_steps") or _GOAL_DEFAULT_MAX_STEPS)
             except (TypeError, ValueError):
                 goal_steps = _GOAL_DEFAULT_MAX_STEPS
-            max_steps = max(base_max_steps, goal_steps) if goal_init else base_max_steps
+            if goal_init:
+                max_steps = 0 if base_max_steps <= 0 else max(base_max_steps, goal_steps)
+            else:
+                max_steps = base_max_steps
             eff_system_prompt = str(eff_cfg.get("system_prompt") or AGENT_SYSTEM_PROMPT)
             skills_block = _render_enabled_skills_prompt(eff_cfg.get("enabled_skills") or [])
             if skills_block:
@@ -4696,7 +4701,7 @@ class SingleAgentManager:
             default_cfg_pid = str((saved_cfg or eff_cfg).get("llm_profile_id") or "").strip()
 
             step = 0
-            while step < max_steps:
+            while max_steps <= 0 or step < max_steps:
                 if stop_ev.is_set():
                     self._finalize_goal_state(sess, "stopped")
                     return
@@ -4828,7 +4833,7 @@ class SingleAgentManager:
 
                 # Resilience #1: Thinking-Only Empty-Turn Nudge (max 2 nudges)
                 if not content and not tool_calls:
-                    if empty_nudges < MAX_EMPTY_NUDGES and (step + 1) < max_steps:
+                    if empty_nudges < MAX_EMPTY_NUDGES and (max_steps <= 0 or (step + 1) < max_steps):
                         empty_nudges += 1
                         with sess._lock:
                             sess.messages.append({
@@ -4874,7 +4879,7 @@ class SingleAgentManager:
                     with self._lock:
                         if stop_ev.is_set() or sess._stop_event is not stop_ev:
                             return
-                        if sess.has_pending_steer() and step < max_steps:
+                        if sess.has_pending_steer() and (max_steps <= 0 or step < max_steps):
                             keep_going = True
                         else:
                             keep_going = False
@@ -4903,7 +4908,7 @@ class SingleAgentManager:
                             elif (
                                 int(gs_chk.get("consecutive_nudges") or 0) < _GOAL_MAX_CONSECUTIVE_NUDGES
                                 and int(gs_chk.get("nudges") or 0) < _GOAL_MAX_TOTAL_NUDGES
-                                and step < max_steps
+                                and (max_steps <= 0 or step < max_steps)
                             ):
                                 with sess._lock:
                                     assert sess.goal_state is not None
@@ -4960,9 +4965,28 @@ class SingleAgentManager:
                     sess.emit("tool_start", call_id=call_id, name=fn_name, args=safe_event_args)
                     t_tool = time.perf_counter()
                     sess.set_active_tool(fn_name, t_tool, stop_ev=stop_ev)
+                    import hashlib as _hashlib
+
+                    try:
+                        call_sig = _hashlib.sha256(
+                            f"{fn_name}:{json.dumps(parsed_args, sort_keys=True, ensure_ascii=False)}".encode("utf-8", errors="replace")
+                        ).hexdigest()
+                    except Exception:
+                        call_sig = f"{fn_name}:{repr(parsed_args)[:500]}"
+                    prev_same_fails = failed_call_streaks.get(call_sig, 0)
                     try:
                         if parse_err:
                             tool_res: Dict[str, Any] = {"ok": False, "error": parse_err}
+                        elif prev_same_fails >= 2:
+                            tool_res = {
+                                "ok": False,
+                                "loop_blocked": True,
+                                "error": (
+                                    f"【防死循环熔断】工具 {fn_name} 使用完全相同的参数已连续失败 {prev_same_fails} 次，"
+                                    f"系统已拦截第 {prev_same_fails + 1} 次重复空转。"
+                                    "请精读上一次报错根因并实质性修改代码/参数，或切换替代工具。"
+                                ),
+                            }
                         elif guard_policy == "deny":
                             tool_res = {
                                 "ok": False,
@@ -5041,6 +5065,11 @@ class SingleAgentManager:
 
                     if stop_ev.is_set():
                         return
+
+                    if bool(tool_res.get("ok", True)):
+                        failed_call_streaks.pop(call_sig, None)
+                    elif not tool_res.get("loop_blocked"):
+                        failed_call_streaks[call_sig] = prev_same_fails + 1
 
                     ui_res = _compact_tool_result_for_ui(tool_res)
                     tool_end_extra: Dict[str, Any] = {}
@@ -5301,11 +5330,11 @@ def load_agent_config() -> Dict[str, Any]:
         out["description"] = saved["description"].strip()[:300]
     if isinstance(saved.get("llm_profile_id"), str):
         out["llm_profile_id"] = saved["llm_profile_id"].strip()
-    try:
-        ms = int(saved.get("max_steps") or MAX_STEPS_PER_TURN)
-        out["max_steps"] = max(1, min(60, ms))
-    except (TypeError, ValueError):
-        pass
+    if "max_steps" in saved and saved.get("max_steps") is not None:
+        try:
+            out["max_steps"] = max(0, min(1000, int(saved["max_steps"])))
+        except (TypeError, ValueError):
+            pass
     if isinstance(saved.get("system_prompt"), str) and saved["system_prompt"].strip():
         out["system_prompt"] = saved["system_prompt"]
     if isinstance(saved.get("enabled_tools"), list):
@@ -5346,9 +5375,9 @@ def save_agent_config(updates: Dict[str, Any]) -> Dict[str, Any]:
         if "llm_profile_id" in updates:
             raw_pid = str(updates.get("llm_profile_id") or "").strip()
             cur["llm_profile_id"] = "" if raw_pid == "__follow_global__" else raw_pid
-        if "max_steps" in updates:
+        if "max_steps" in updates and updates.get("max_steps") is not None:
             try:
-                cur["max_steps"] = max(1, min(60, int(updates["max_steps"])))
+                cur["max_steps"] = max(0, min(1000, int(updates["max_steps"])))
             except (TypeError, ValueError):
                 pass
         if "system_prompt" in updates and isinstance(updates.get("system_prompt"), str):
