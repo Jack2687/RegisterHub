@@ -38,7 +38,12 @@ _BLOCKED_HOST_SUFFIXES = (
     ".home.arpa",
     ".arpa",
 )
-_NUMERIC_DOT_QUAD_RE = re.compile(r"^[0-9xXa-fA-F.]+$")
+_HEX_INT_RE = re.compile(r"^0x[0-9a-f]+$", re.I)
+_UNICODE_DOTS_TABLE = str.maketrans({
+    "\u3002": ".",  # Ideographic Full Stop '。'
+    "\uff0e": ".",  # Fullwidth Full Stop '．'
+    "\uff61": ".",  # Halfwidth Ideographic Full Stop '｡'
+})
 _ALLOWED_PROXY_SCHEMES = frozenset({"http", "https", "socks5", "socks5h"})
 # Clash / Mihomo / Sing-box TUN 模式对公网域名统一分配 RFC 2544 (198.18.0.0/15) Fake-IP 虚拟映射
 _FAKE_IP_BENCHMARK_NET = ipaddress.ip_network("198.18.0.0/15")
@@ -60,20 +65,21 @@ def _is_public_ip(ip_obj: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool
 
 
 def _looks_like_obfuscated_ip(host: str) -> bool:
-    if not host:
+    """识别整数/八进制/0x十六进制/简写点分混淆 IP，但不误杀 cafe.de / 0x.org / dead.beef 等正常域名。"""
+    if not host or ":" in host:
         return False
-    if host.isdigit() or host.lower().startswith("0x"):
+    if host.isdigit() or _HEX_INT_RE.fullmatch(host):
         return True
-    if ":" not in host and _NUMERIC_DOT_QUAD_RE.fullmatch(host):
+    if "." in host:
         parts = host.split(".")
-        # 少于 4 段的数字简写 IP（如 127.1）或含前导 0/0x 的八进制/十六进制段（如 0177.0.0.1）
-        if any(
-            not seg.isdigit() or (len(seg) > 1 and seg.startswith("0"))
-            for seg in parts
-        ):
-            return True
-        if len(parts) != 4:
-            return True
+        if all(seg.isdigit() or bool(_HEX_INT_RE.fullmatch(seg)) for seg in parts):
+            if len(parts) != 4:
+                return True
+            if any(
+                bool(_HEX_INT_RE.fullmatch(seg)) or (len(seg) > 1 and seg.startswith("0"))
+                for seg in parts
+            ):
+                return True
     return False
 
 
@@ -95,11 +101,23 @@ def validate_public_http_url(url: str, *, resolve_dns: bool = True) -> str:
     except ValueError as exc:
         raise ValueError(f"目标 URL 端口非法: {clean!r}") from exc
 
-    host = parts.hostname.strip().rstrip(".").lower()
+    host = parts.hostname.strip().translate(_UNICODE_DOTS_TABLE).rstrip(".").lower()
+    if not host or ".." in host:
+        raise ValueError(f"目标 URL 主机名非法: {clean!r}")
     if "%" in host:
         raise PrivateAddressBlockedError(f"禁止包含网卡作用域标识的地址: {host}")
-    if host in _BLOCKED_EXACT_HOSTS or host.endswith(_BLOCKED_HOST_SUFFIXES):
+    try:
+        host_ascii = host.encode("idna").decode("ascii").rstrip(".").lower()
+    except UnicodeError as exc:
+        raise ValueError(f"目标 URL 域名编码非法: {host!r}") from exc
+    if (
+        host in _BLOCKED_EXACT_HOSTS
+        or host.endswith(_BLOCKED_HOST_SUFFIXES)
+        or host_ascii in _BLOCKED_EXACT_HOSTS
+        or host_ascii.endswith(_BLOCKED_HOST_SUFFIXES)
+    ):
         raise PrivateAddressBlockedError(f"禁止访问本机回环或内网保留主机名: {host}")
+    host = host_ascii
 
     # 先按标准 IP 字面量判定
     ip_literal: ipaddress.IPv4Address | ipaddress.IPv6Address | None = None
@@ -309,10 +327,15 @@ def safe_follow_redirects(
 
 
 def build_safe_urllib_opener(proxy: str = "", *, disable_env_proxy: bool = False) -> urllib.request.OpenerDirector:
-    """构建带防 SSRF 重定向守卫的 urllib Opener。"""
+    """构建带防 SSRF 重定向守卫的 urllib Opener（标准库 urllib 仅支持 http/https 代理）。"""
     clean_px = validate_proxy_url(proxy)
     handlers: list[urllib.request.BaseHandler] = []
     if clean_px:
+        px_scheme = (urlsplit(clean_px).scheme or "").lower()
+        if px_scheme not in ("http", "https"):
+            raise ValueError(
+                f"urllib 仅支持 http:// 或 https:// 代理，不支持 {px_scheme}://（请改用 HTTP 代理或支持 SOCKS 的客户端）"
+            )
         handlers.append(urllib.request.ProxyHandler({"http": clean_px, "https": clean_px}))
     elif disable_env_proxy:
         handlers.append(urllib.request.ProxyHandler({}))

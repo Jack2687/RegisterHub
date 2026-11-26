@@ -700,7 +700,7 @@ def get_window_layout(
                     }
 
             slots = data.get("slots")
-            if slots and isinstance(slots, list) and len(slots) > slot_id:
+            if slots and isinstance(slots, list) and len(slots) >= total_slots and len(slots) > slot_id:
                 s = slots[slot_id]
                 return {
                     "x": _safe_int(s.get("x"), 0, "x"),
@@ -868,7 +868,9 @@ def calibrate_window(
     save_path: Path | str | None = None,
     total_windows: int = 1,
 ) -> dict[str, Any]:
-    """极速启动交互式视窗标定工具（秒级冷启，支持 1 / 2 / 4 并发模式与防切割实时微调）。"""
+    """极速启动交互式视窗标定工具（秒级冷启，支持 1 / 2 / 4 / 6 并发模式与防切割实时微调）。"""
+    if total_windows not in (1, 2, 4, 6):
+        raise ValueError(f"不支持的并发标定档位: {total_windows}（仅支持 1 / 2 / 4 / 6）")
     target_path = Path(save_path) if save_path else DEFAULT_GEOMETRY_PATH
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_url = url.strip()
@@ -877,10 +879,10 @@ def calibrate_window(
     if total_windows == 2:
         slots_cfg = CONCURRENCY_PRESETS[2]
         mode_desc = "双并发左右并排模式 (2 窗口并排全屏)"
-    elif total_windows >= 6:
+    elif total_windows == 6:
         slots_cfg = CONCURRENCY_PRESETS[6]
         mode_desc = "六并发六宫格联动模式 (6 窗口标定)"
-    elif total_windows >= 4:
+    elif total_windows == 4:
         slots_cfg = CONCURRENCY_PRESETS[4]
         mode_desc = "四并发黄金四分屏模式 (4 窗口联动)"
     else:

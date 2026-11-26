@@ -219,7 +219,10 @@ class BuiltinPoolMailClient:
                         plain_htm = re.sub(r"<[^>]+>", " ", htm)
                         m = re.search(pattern, f"{subj}\n{txt}\n{plain_htm}")
                         if m:
-                            return m.group(1) if m.lastindex else m.group(0)
+                            if m.lastindex:
+                                non_empty = [g for g in m.groups() if g is not None]
+                                return non_empty[-1] if non_empty else m.group(0)
+                            return m.group(0)
             except Exception:
                 pass
             time.sleep(4)

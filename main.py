@@ -126,7 +126,7 @@ def inspect_url(target_url: str, cdp_endpoint: str = None):
             browser.close()
 
 
-def run_scaffold(site_name: str, target_url: str = None):
+def run_scaffold(site_name: str, target_url: str = None, *, overwrite: bool = False):
     from core.scaffold import scaffold_site
     print(f"[*] Scaffolding new adapter for '{site_name}'...")
     detected = {}
@@ -166,7 +166,11 @@ def run_scaffold(site_name: str, target_url: str = None):
         except Exception as e:
             print(f"[!] Warning: Pre-inspection timed out or failed ({e}), generating standard template instead.")
 
-    out_path = scaffold_site(site_name, target_url, detected)
+    try:
+        out_path = scaffold_site(site_name, target_url, detected, overwrite=overwrite)
+    except FileExistsError as exc:
+        print(f"[-] {exc}")
+        sys.exit(1)
     print(f"\n[+] Production scaffold successfully created at: {out_path.resolve()}")
     print(f"[*] You can now test and run it immediately:")
     print(f"    python main.py --run {site_name.lower()}\n")
@@ -178,6 +182,7 @@ def main():
     parser.add_argument("--list", action="store_true", help="List all available site adapters")
     parser.add_argument("--doctor", action="store_true", help="Run environment diagnostics (same as `python main.py doctor`)")
     parser.add_argument("--scaffold", type=str, default=None, help="Scaffold a new site adapter template (e.g. twitter, github)")
+    parser.add_argument("--force", action="store_true", help="Overwrite existing adapter file when used with --scaffold (saves .bak backup)")
     parser.add_argument("--count", type=int, default=1, help="Number of accounts to generate")
     parser.add_argument("--url", type=str, default=None, help="Inspect URL or target URL for scaffolding")
     parser.add_argument("--cdp", type=str, default=None, help="Connect to an external Fingerprint/Anti-Detect browser CDP (e.g. http://127.0.0.1:9222)")
@@ -213,7 +218,10 @@ def main():
 
     if args.calibrate:
         from core.calibrator import calibrate_window
-        calibrate_window(url=args.calibrate_url or (args.url or ""), total_windows=max(1, args.concurrency))
+        if args.concurrency not in (1, 2, 4, 6):
+            print(f"[-] Unsupported concurrency '{args.concurrency}' for --calibrate. Supported values: 1, 2, 4, 6")
+            sys.exit(1)
+        calibrate_window(url=args.calibrate_url or (args.url or ""), total_windows=args.concurrency)
         return
 
     if args.doctor or args.command == "doctor":
@@ -260,7 +268,7 @@ def main():
         return
 
     if args.scaffold:
-        run_scaffold(args.scaffold, target_url=args.url)
+        run_scaffold(args.scaffold, target_url=args.url, overwrite=args.force)
         return
 
     if args.url and not args.run:
@@ -273,8 +281,12 @@ def main():
 
     from sites import discover_adapters
     adapters = discover_adapters()
-    cmd_norm = args.command.lower().replace("-", "_") if args.command else None
-    target_name = args.run or (cmd_norm if cmd_norm and cmd_norm in adapters else None) or "demo"
+    if args.run:
+        target_name = args.run
+    elif args.command:
+        target_name = args.command
+    else:
+        target_name = "demo"
     adapter_name = target_name.lower().replace("-", "_")
     
     if adapter_name in adapters:
@@ -283,7 +295,7 @@ def main():
             sys.exit(1)
     else:
         available = ", ".join(sorted(adapters.keys()))
-        print(f"[-] Unknown adapter '{adapter_name}'. Available discovered adapters: {available}")
+        print(f"[-] Unknown adapter or command '{target_name}'. Available discovered adapters: {available}")
         sys.exit(1)
 
 

@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from core import llm_client
 from core.locks import atomic_write_text_safe, interprocess_file_lock
+from core.secrets import mask_proxy_url
 
 _STORE_LOCK = threading.Lock()
 
@@ -73,11 +74,15 @@ def _normalize_key_entry(raw: Any) -> Optional[Dict[str, Any]]:
         val = str(raw.get("key") or "").strip()
         if not val:
             return None
+        try:
+            fails_val = max(0, int(raw.get("fails") or 0))
+        except (TypeError, ValueError):
+            fails_val = 0
         return {
             "id": str(raw.get("id") or f"k_{secrets.token_hex(4)}"),
             "key": val,
             "state": "resting" if raw.get("state") == "resting" else "ok",
-            "fails": max(0, int(raw.get("fails") or 0)),
+            "fails": fails_val,
             "last_error": str(raw.get("last_error") or ""),
         }
     return None
@@ -189,7 +194,7 @@ def to_public_profile(prof: Dict[str, Any], active_id: str) -> Dict[str, Any]:
         "format": prof["format"],
         "model": prof["model"],
         "base_url": prof["base_url"],
-        "proxy_url": prof["proxy_url"],
+        "proxy_url": mask_proxy_url(prof["proxy_url"]) if prof.get("proxy_url") else "",
         "api_key_hint": hint,
         "api_key_masked": hint,
         "has_key": bool(first_key),
@@ -201,7 +206,7 @@ def to_public_profile(prof: Dict[str, Any], active_id: str) -> Dict[str, Any]:
                 "id": k["id"],
                 "hint": llm_client.mask_api_key(k["key"]),
                 "state": k.get("state", "ok"),
-                "fails": int(k.get("fails", 0)),
+                "fails": llm_client._safe_nonneg_int(k.get("fails")),
                 "last_error": str(k.get("last_error", "")),
             }
             for k in keys
@@ -650,6 +655,9 @@ def resolve_runtime_override(
     if model_override and model_override != "__follow_profile__":
         out["model"] = str(model_override).strip()
     if isinstance(extra_overrides, dict):
+        prof_origin = llm_client._origin_tuple(out.get("base_url") or "")
+        base_overridden = False
+        explicit_key = False
         for k in ("format", "base_url", "model", "max_tokens", "max_tokens_field", "temperature", "thinking_mode", "reasoning_effort"):
             v = extra_overrides.get(k)
             if v is not None and str(v).strip() != "":
@@ -659,6 +667,8 @@ def resolve_runtime_override(
                             continue
                     except Exception:
                         continue
+                if k == "base_url":
+                    base_overridden = True
                 out[k] = v
         if "streaming" in extra_overrides and isinstance(extra_overrides.get("streaming"), bool):
             out["streaming"] = extra_overrides["streaming"]
@@ -667,4 +677,7 @@ def resolve_runtime_override(
         raw_k = str(extra_overrides.get("api_key") or "").strip()
         if raw_k and raw_k != "***":
             out["api_key"] = raw_k
+            explicit_key = True
+        if base_overridden and not explicit_key and prof_origin != llm_client._origin_tuple(out.get("base_url") or ""):
+            out["api_key"] = ""
     return out

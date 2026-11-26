@@ -616,23 +616,30 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
         dead_cnt = sum(1 for f in fails if f.get("category") == "dead")
         soft_cnt = sum(1 for f in fails if f.get("category") in ("soft", "captcha"))
 
-        # 14-day trend
+        # 14-day trend (deduplicate failed job vs failed.txt line per day, matching /api/overview)
         today = datetime.date.today()
         day_map: Dict[str, Dict[str, int]] = {}
+        job_failed_by_day: Dict[str, int] = {}
+        ledger_failed_by_day: Dict[str, int] = {}
         for offset in range(13, -1, -1):
             d = today - datetime.timedelta(days=offset)
-            day_map[d.strftime("%Y-%m-%d")] = {"success": 0, "failed": 0}
+            dk = d.strftime("%Y-%m-%d")
+            day_map[dk] = {"success": 0, "failed": 0}
+            job_failed_by_day[dk] = 0
+            ledger_failed_by_day[dk] = 0
         for j in jobs:
             day_k = str(j.get("started_at") or "")[:10]
             if day_k in day_map:
                 if j.get("status") == "done":
                     day_map[day_k]["success"] += int(j.get("count") or 1)
                 elif j.get("status") == "failed":
-                    day_map[day_k]["failed"] += 1
+                    job_failed_by_day[day_k] += 1
         for f in fails:
             day_k = str(f.get("time") or "")[:10]
             if day_k in day_map:
-                day_map[day_k]["failed"] += 1
+                ledger_failed_by_day[day_k] += 1
+        for dk in day_map:
+            day_map[dk]["failed"] = max(job_failed_by_day[dk], ledger_failed_by_day[dk])
 
         trend = [
             {"date": k[5:], "full_date": k, "success": v["success"], "failed": v["failed"]}
@@ -812,9 +819,9 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
                 "queue_count": 0,
                 "ok_total": len(matched),
                 "valid_keys": valid_k,
-                "failed_lines": len(site_fails),
+                "failed_lines": len(err_src),
                 "retriable_count": 0,
-                "dead_count": sum(1 for f in site_fails if f.get("category") == "dead"),
+                "dead_count": sum(1 for f in err_src if f.get("category") == "dead"),
                 "unknown_count": 0,
                 "top_reasons": [],
                 "metrics": {"count": len(matched), "success_rate": None, "avg_duration_s": None},
@@ -1087,7 +1094,8 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
         except Exception:
             lim = 200
         calls = srv.llm_client.list_llm_calls(limit=lim)
-        handler._send_json({"ok": True, "calls": calls, "total": len(calls)})
+        true_total = max(len(calls), srv.llm_client.count_llm_calls())
+        handler._send_json({"ok": True, "calls": calls, "total": true_total})
         return True
 
     m_call_id = re.fullmatch(r"/api/llm/calls/([^/]+)", path)
@@ -1143,12 +1151,24 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
             handler._send_json({"ok": False, "error": "Agent session not found"}, status=404)
             return True
         try:
-            after_seq = max(0, int((qs.get("after_seq") or ["0"])[0]))
+            after_seq = int((qs.get("after_seq") or ["0"])[0])
         except Exception:
             after_seq = 0
+        limit = _parse_int_param((qs.get("limit") or ["200"])[0], 200, 1, 1000)
         detail = sess.to_detail()
-        evs = [e for e in (detail.get("events") or []) if isinstance(e, dict) and int(e.get("seq") or 0) > after_seq]
-        handler._send_json({"ok": True, "events": evs, "last_seq": detail.get("next_seq", 0), "has_more": False})
+        all_after = [
+            e
+            for e in (detail.get("events") or [])
+            if isinstance(e, dict) and int(e.get("seq") or 0) > after_seq
+        ]
+        has_more = len(all_after) > limit
+        page_evs = all_after[:limit]
+        next_seq_val = int(detail.get("next_seq") or 0)
+        if page_evs:
+            last_seq = int(page_evs[-1].get("seq") or 0)
+        else:
+            last_seq = max(after_seq, max(0, next_seq_val - 1))
+        handler._send_json({"ok": True, "events": page_evs, "last_seq": last_seq, "has_more": has_more})
         return True
 
     if path == "/api/mail/builtin/formats":
@@ -1358,15 +1378,28 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
 
     if path == "/api/services/ip-score/batch":
         from core.ip_scorer import score_ip
+        from core.net_guard import PrivateAddressBlockedError, validate_proxy_url, validate_public_http_url
 
         raw_items = body.get("items") if isinstance(body.get("items"), list) else []
         target_url = str(body.get("target_url") or "").strip()
+        if target_url:
+            try:
+                target_url = validate_public_http_url(target_url, resolve_dns=True)
+            except (PrivateAddressBlockedError, ValueError) as e:
+                handler._send_json({"ok": False, "error": str(e)}, status=400)
+                return True
         results = []
         for raw in raw_items[:10]:
             s = str(raw or "").strip()
             if not s:
                 continue
             is_px = "://" in s
+            if is_px:
+                try:
+                    s = validate_proxy_url(s)
+                except ValueError as e:
+                    results.append({"ok": False, "ip": "", "proxy": s, "score": 0, "grade": "D", "error": str(e)})
+                    continue
             results.append(score_ip(ip="" if is_px else s, proxy_url=s if is_px else "", target_url=target_url))
         handler._send_json({"ok": True, "total": len(results), "results": results})
         return True
@@ -1703,7 +1736,7 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
             res = srv._parse_har_community(har_text, site_name=site_name)
             handler._send_json({
                 "har_file": "upload.har",
-                "site": res.get("site_name") or site_name or "custom_site",
+                "site": res.get("site") or res.get("site_name") or site_name or "custom_site",
                 "origin": res.get("origin") or "",
                 "total_entries": int(res.get("total_entries") or len(res.get("api_steps") or [])),
                 "api_steps": res.get("api_steps") or [],
@@ -1725,6 +1758,7 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
 
         items = body.get("keys") if isinstance(body.get("keys"), list) else []
         base_url = str(body.get("base_url") or "").strip().rstrip("/")
+        ping_chat = bool(body.get("ping_chat", False))
         cfg = srv._load_raw_config_dict()
         raw_px = str((cfg.get("browser") or {}).get("proxy") or "").strip()
 
@@ -1784,23 +1818,86 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
                         with opener.open(req, timeout=10) as r:
                             raw = r.read(65536).decode("utf-8", errors="ignore")
                             cnt = 0
+                            first_model = ""
                             try:
                                 j = json.loads(raw)
                                 if isinstance(j, dict) and isinstance(j.get("data"), list):
                                     cnt = len(j["data"])
+                                    for m_item in j["data"]:
+                                        if isinstance(m_item, dict) and str(m_item.get("id") or "").strip():
+                                            first_model = str(m_item["id"]).strip()
+                                            break
+                                        if isinstance(m_item, str) and m_item.strip():
+                                            first_model = m_item.strip()
+                                            break
                             except Exception:
                                 pass
                             ms = round((time.perf_counter() - t0) * 1000, 1)
-                            live_cnt += 1
-                            ev = {
-                                "type": "item",
-                                "index": idx,
-                                "key": k,
-                                "project": proj,
-                                "ok": True,
-                                "status": "valid",
-                                "detail": f"HTTP {r.status} · {cnt} 模型 · {ms}ms",
-                            }
+                            if ping_chat:
+                                chat_url = f"{clean_base}/chat/completions" if clean_base.endswith("/v1") else f"{clean_base}/v1/chat/completions"
+                                chat_payload = json.dumps({
+                                    "model": first_model or "gpt-4o-mini",
+                                    "messages": [{"role": "user", "content": "hi"}],
+                                    "max_tokens": 1,
+                                }).encode("utf-8")
+                                chat_req = urllib.request.Request(
+                                    chat_url,
+                                    data=chat_payload,
+                                    headers={
+                                        "Authorization": f"Bearer {k}",
+                                        "Content-Type": "application/json",
+                                        "Accept": "application/json",
+                                        "User-Agent": "RegisterHub/2.1",
+                                    },
+                                    method="POST",
+                                )
+                                try:
+                                    with opener.open(chat_req, timeout=12) as cr:
+                                        cr.read(4096)
+                                        ms = round((time.perf_counter() - t0) * 1000, 1)
+                                        live_cnt += 1
+                                        ev = {
+                                            "type": "item",
+                                            "index": idx,
+                                            "key": k,
+                                            "project": proj,
+                                            "ok": True,
+                                            "status": "valid",
+                                            "detail": f"HTTP {r.status} · {cnt} 模型 · Chat OK ({cr.status}) · {ms}ms",
+                                        }
+                                except urllib.error.HTTPError as che:
+                                    dead_cnt += 1
+                                    ev = {
+                                        "type": "item",
+                                        "index": idx,
+                                        "key": k,
+                                        "project": proj,
+                                        "ok": False,
+                                        "status": "invalid",
+                                        "detail": f"Models OK ({cnt}) 但 Chat 失败: HTTP {che.code}",
+                                    }
+                                except Exception as ce:
+                                    dead_cnt += 1
+                                    ev = {
+                                        "type": "item",
+                                        "index": idx,
+                                        "key": k,
+                                        "project": proj,
+                                        "ok": False,
+                                        "status": "invalid",
+                                        "detail": f"Models OK ({cnt}) 但 Chat 异常: {str(ce)[:80]}",
+                                    }
+                            else:
+                                live_cnt += 1
+                                ev = {
+                                    "type": "item",
+                                    "index": idx,
+                                    "key": k,
+                                    "project": proj,
+                                    "ok": True,
+                                    "status": "valid",
+                                    "detail": f"HTTP {r.status} · {cnt} 模型 · {ms}ms",
+                                }
                     except urllib.error.HTTPError as he:
                         dead_cnt += 1
                         ev = {
@@ -1846,16 +1943,41 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
 
     if path == "/api/keys/prune":
         items = body.get("items") if isinstance(body.get("items"), list) else []
-        keys_to_rm = {str(it.get("key") or "").strip() for it in items if isinstance(it, dict) and it.get("key")}
+        targets: List[Tuple[str, str]] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            k = str(it.get("key") or "").strip()
+            em = str(it.get("email") or "").strip().lower()
+            if len(k) >= 6:
+                targets.append((em, k))
         removed = 0
-        if keys_to_rm and srv.ACCOUNTS_FILE.exists():
+        if targets and srv.ACCOUNTS_FILE.exists():
             from core.locks import atomic_write_text_safe, interprocess_file_lock
 
             with interprocess_file_lock(srv.ACCOUNTS_FILE):
                 lines = srv.ACCOUNTS_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
                 kept = []
                 for ln in lines:
-                    if any(k in ln for k in keys_to_rm):
+                    s = ln.strip()
+                    if not s or s.startswith("#") or "----" not in s:
+                        kept.append(ln)
+                        continue
+                    parts = [p.strip() for p in s.split("----", 3)]
+                    em = (parts[0] if parts else "").lower()
+                    pwd_col = parts[1] if len(parts) > 1 else ""
+                    user_col = parts[2] if len(parts) > 2 else ""
+                    ak = parts[3] if len(parts) >= 4 else ""
+                    if not ak:
+                        if pwd_col.startswith(("sk-", "gsk_", "rk_", "api_")):
+                            ak = pwd_col
+                        elif len(parts) == 3 and user_col.startswith(("sk-", "gsk_", "rk_", "api_")):
+                            ak = user_col
+                    matched_rm = any(
+                        ((not te) or em == te) and (ak == tk)
+                        for te, tk in targets
+                    )
+                    if matched_rm:
                         removed += 1
                     else:
                         kept.append(ln)
@@ -1896,6 +2018,10 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
     if path == "/api/llm/models":
         from core import llm_profiles
 
+        self_err = srv._check_not_self_llm_url(handler, str(body.get("base_url") or ""))
+        if self_err:
+            handler._send_json({"ok": False, "models": [], "error": self_err}, status=400)
+            return True
         pid = str(body.get("profile_id") or "").strip()
         ov = llm_profiles.resolve_runtime_override(profile_id=pid, extra_overrides=body) if pid else (body if body else None)
         res = srv.llm_client.discover_models(overrides=ov)
@@ -1986,6 +2112,10 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
                 return True
             handler._send_json({"ok": True, "active_id": pid, "profile": prof})
         else:
+            self_err = srv._check_not_self_llm_url(handler, str(body.get("base_url") or ""))
+            if self_err:
+                handler._send_json({"ok": False, "error": self_err}, status=400)
+                return True
             ov = llm_profiles.resolve_runtime_override(
                 profile_id=pid,
                 model_override=str(body.get("model") or ""),
@@ -2379,7 +2509,7 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
         target_url = str(body.get("target_url") or "").strip()
         if target_url:
             try:
-                target_url = validate_public_http_url(target_url, resolve_dns=False)
+                target_url = validate_public_http_url(target_url, resolve_dns=True)
             except ValueError as e:
                 handler._send_json({"detail": str(e)}, status=400)
                 return True
@@ -2424,6 +2554,7 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
         return True
 
     if path == "/api/proxies/builtin/sources":
+        from core.net_guard import PrivateAddressBlockedError, validate_public_http_url
         from core.secrets import sanitize_error_text
 
         kind = str(body.get("kind") or "").strip().lower()
@@ -2434,6 +2565,11 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
             return True
         if len(url) < 8 or len(url) > 2048:
             handler._send_json({"detail": "请填写合法的代理源 URL"}, status=400)
+            return True
+        try:
+            validate_public_http_url(url, resolve_dns=False)
+        except (PrivateAddressBlockedError, ValueError) as e:
+            handler._send_json({"detail": sanitize_error_text(str(e))}, status=400)
             return True
         if scheme not in ("http", "https", "socks5", "socks5h"):
             handler._send_json({"detail": "default_scheme 仅支持 http / https / socks5 / socks5h"}, status=400)
@@ -2617,20 +2753,60 @@ def handle_studio_delete(handler: Any, srv: Any, path: str) -> bool:
     if m_fl_err:
         from core.locks import atomic_write_text_safe, interprocess_file_lock
 
+        adapters = srv.list_community_adapters()
+        adapter_names = {ad["name"] for ad in adapters}
+        req_proj = _canonicalize_site_name(m_fl_err.group(1), adapter_names) or m_fl_err.group(1).strip().lower()
+        legacy_snap_owner = "demo_site" if "demo_site" in adapter_names else (adapters[0]["name"] if adapters else "")
+
+        def _line_site_and_snap(raw_line: str) -> Tuple[str, str]:
+            parts = [p.strip() for p in raw_line.split("|")]
+            l_site = ""
+            l_snap = ""
+            for p in parts[2:]:
+                pl = p.lower()
+                if pl.startswith("site:"):
+                    l_site = _canonicalize_site_name(p.split(":", 1)[1].strip(), adapter_names)
+                elif pl.startswith("snapshot:"):
+                    l_snap = p.split(":", 1)[1].strip()
+            return l_site, l_snap
+
         removed = 0
+        removed_snaps: set[str] = set()
+        kept_snaps: set[str] = set()
         if srv.FAILED_FILE.exists():
             with interprocess_file_lock(srv.FAILED_FILE):
                 if srv.FAILED_FILE.exists():
-                    atomic_write_text_safe(srv.FAILED_FILE, "")
-                    removed += 1
-        if srv.SNAPSHOTS_DIR.exists():
-            for fp in srv.SNAPSHOTS_DIR.glob("*.png"):
-                try:
-                    fp.unlink()
-                    removed += 1
-                except OSError:
-                    pass
-        handler._send_json({"ok": True, "removed": removed})
+                    lines = srv.FAILED_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
+                    kept: List[str] = []
+                    for ln in lines:
+                        s = ln.strip()
+                        if not s or s.startswith("#"):
+                            kept.append(ln)
+                            continue
+                        l_site, l_snap = _line_site_and_snap(s)
+                        belongs_to_proj = (l_site == req_proj) or (not l_site and req_proj == legacy_snap_owner)
+                        if belongs_to_proj:
+                            removed += 1
+                            if l_snap:
+                                removed_snaps.add(l_snap)
+                        else:
+                            kept.append(ln)
+                            if l_snap:
+                                kept_snaps.add(l_snap)
+                    if removed > 0:
+                        atomic_write_text_safe(srv.FAILED_FILE, "\n".join(kept) + ("\n" if kept else ""))
+        snaps_to_unlink = removed_snaps - kept_snaps
+        if snaps_to_unlink and srv.SNAPSHOTS_DIR.exists():
+            snap_root = srv.SNAPSHOTS_DIR.resolve()
+            for sname in snaps_to_unlink:
+                fp = (snap_root / Path(sname).name).resolve()
+                if fp.parent == snap_root and fp.is_file():
+                    try:
+                        fp.unlink()
+                        removed += 1
+                    except OSError:
+                        pass
+        handler._send_json({"ok": True, "project": req_proj, "removed": removed})
         return True
 
     return False

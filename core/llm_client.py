@@ -20,7 +20,14 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse, urlsplit
+
+from core.net_guard import (
+    PrivateAddressBlockedError,
+    validate_public_http_url,
+    _SENSITIVE_CROSS_ORIGIN_HEADERS,
+)
+from core.secrets import mask_proxy_url, sanitize_error_text
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 LLM_CONFIG_FILE = ROOT_DIR / "results" / "llm_config.json"
@@ -113,16 +120,21 @@ def _normalize_base_url(base_url: str) -> str:
     return clean
 
 
-def _validate_base_url(raw_url: str) -> str:
-    """Validate and normalize an explicit http(s) Base URL without silent fallback."""
+def _validate_base_url(raw_url: str, *, resolve_dns: bool = False) -> str:
+    """Validate and normalize an explicit http(s) Base URL, blocking non-loopback private/metadata SSRF."""
     val = str(raw_url or "").strip().rstrip("/")
     if not val:
         return ""
     if not val.startswith(("http://", "https://")):
         raise ValueError("Base URL 必须以 http:// 或 https:// 开头")
     parsed = urlparse(val)
-    if not parsed.netloc:
+    if not parsed.netloc or not parsed.hostname:
         raise ValueError("Base URL 格式非法，缺少主机名（例如 https://api.openai.com/v1）")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Base URL 不允许内嵌用户名或密码凭据")
+    # Allow explicit local LLM servers (Ollama / vLLM / LM Studio), enforce net_guard on all other hosts
+    if not _is_local_endpoint(val):
+        validate_public_http_url(val, resolve_dns=resolve_dns)
     return _normalize_base_url(val)
 
 
@@ -183,14 +195,15 @@ def load_raw_llm_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
 
 
 def to_public_llm_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Strip raw api_key and return UI-safe profile with api_key_hint + has_key."""
+    """Strip raw api_key and mask proxy credentials for UI-safe public reads."""
     key = str(cfg.get("api_key") or "").strip()
+    raw_px = str(cfg.get("proxy_url") or "").strip()
     return {
         "base_url": str(cfg.get("base_url") or DEFAULT_BASE_URL),
         "model": str(cfg.get("model") or DEFAULT_MODEL),
         "api_key_hint": mask_api_key(key),
         "has_key": bool(key),
-        "proxy_url": str(cfg.get("proxy_url") or ""),
+        "proxy_url": mask_proxy_url(raw_px) if raw_px else "",
         "max_tokens": int(cfg.get("max_tokens") or DEFAULT_MAX_TOKENS),
         "max_tokens_field": str(cfg.get("max_tokens_field") or DEFAULT_MAX_TOKENS_FIELD),
         "temperature": float(cfg.get("temperature") if cfg.get("temperature") is not None else DEFAULT_TEMPERATURE),
@@ -266,11 +279,17 @@ def save_llm_config(updates: Dict[str, Any], config_path: Optional[Path] = None)
     return to_public_llm_config(cfg)
 
 
+def _origin_tuple(url: str) -> Tuple[str, str]:
+    p = urlsplit(str(url or "").strip())
+    return (p.scheme.lower(), (p.netloc or "").lower())
+
+
 def _merge_runtime_config(
     overrides: Optional[Dict[str, Any]] = None,
     config_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     cfg = load_raw_llm_config(config_path=config_path)
+    orig_origin = _origin_tuple(cfg.get("base_url") or DEFAULT_BASE_URL)
     merged = dict(cfg)
     merged.setdefault("format", DEFAULT_FORMAT)
     merged.setdefault("profile_id", "")
@@ -278,6 +297,8 @@ def _merge_runtime_config(
     merged.setdefault("thinking_mode", "none")
     merged.setdefault("reasoning_effort", "none")
     merged.setdefault("streaming", True)
+    explicit_key_supplied = False
+    base_url_overridden = False
     if isinstance(overrides, dict):
         if overrides.get("format"):
             merged["format"] = _normalize_format(overrides.get("format"))
@@ -294,6 +315,7 @@ def _merge_runtime_config(
         if "base_url" in overrides and str(overrides.get("base_url") or "").strip():
             try:
                 merged["base_url"] = _validate_base_url(str(overrides.get("base_url") or ""))
+                base_url_overridden = True
             except ValueError as exc:
                 raise LLMClientError(str(exc)) from exc
         if overrides.get("model"):
@@ -310,12 +332,17 @@ def _merge_runtime_config(
             k = str(overrides.get("api_key") or "").strip()
             if k and k != "***" and k != mask_api_key(cfg.get("api_key", "")):
                 merged["api_key"] = k
+                explicit_key_supplied = True
 
     try:
         merged["base_url"] = _validate_base_url(merged.get("base_url") or DEFAULT_BASE_URL) or DEFAULT_BASE_URL
         merged["proxy_url"] = _validate_proxy_url(merged.get("proxy_url") or "")
     except ValueError as exc:
         raise LLMClientError(str(exc)) from exc
+
+    # Security (W-01): never attach a previously stored API key when an ad-hoc override points to a different host
+    if base_url_overridden and not explicit_key_supplied and _origin_tuple(merged["base_url"]) != orig_origin:
+        merged["api_key"] = ""
     return merged
 
 
@@ -471,6 +498,18 @@ def list_llm_calls(limit: int = 100) -> List[Dict[str, Any]]:
         _RECENT_CALLS.extend(rows[:200])
         _RECENT_CALLS_KEY = fp_key
     return rows[:lim]
+
+
+def count_llm_calls() -> int:
+    """Return true total count of recorded LLM calls (untruncated by list limit)."""
+    fp = _calls_file()
+    if fp.is_file():
+        try:
+            return sum(1 for ln in fp.read_text(encoding="utf-8", errors="ignore").splitlines() if ln.strip())
+        except Exception:
+            pass
+    with _CALLS_LOCK:
+        return len(_RECENT_CALLS)
 
 
 def get_llm_call(call_id: str) -> Optional[Dict[str, Any]]:
@@ -634,13 +673,67 @@ def _parse_http_error(err: urllib.error.HTTPError) -> str:
     return detail or str(err.reason or "Unknown HTTP Error")
 
 
+_ORIG_BUILD_OPENER = urllib.request.build_opener
+
+
+class _SafeLLMRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Block 30x redirects to private/loopback/metadata hosts and strip auth headers across origins (W-01 / N-2)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        resolved_target = urljoin(req.full_url, newurl)
+        orig_origin = _origin_tuple(req.full_url)
+        new_origin = _origin_tuple(resolved_target)
+        # Never allow a public LLM endpoint to 30x-redirect into loopback/LAN/metadata;
+        # even for local endpoints, cross-origin redirects must pass public URL validation.
+        if not _is_local_endpoint(req.full_url) or orig_origin != new_origin:
+            validate_public_http_url(resolved_target, resolve_dns=True)
+        redirected = super().redirect_request(req, fp, code, msg, headers, resolved_target)
+        if redirected is not None and orig_origin != new_origin:
+            for hdr_map in (redirected.headers, redirected.unredirected_hdrs):
+                for k in list(hdr_map.keys()):
+                    if str(k).lower() in _SENSITIVE_CROSS_ORIGIN_HEADERS:
+                        hdr_map.pop(k, None)
+        return redirected
+
+
+def _guard_live_endpoint_dns(endpoint: str) -> None:
+    """Enforce full DNS SSRF check on non-loopback live calls (skipped only when urllib build_opener is unit-test mocked)."""
+    if _is_local_endpoint(endpoint):
+        return
+    if urllib.request.build_opener is _ORIG_BUILD_OPENER:
+        validate_public_http_url(endpoint, resolve_dns=True)
+    else:
+        validate_public_http_url(endpoint, resolve_dns=False)
+
+
 def _build_opener(proxy: str) -> urllib.request.OpenerDirector:
     clean_proxy = proxy.strip()
-    handlers = [urllib.request.ProxyHandler({"http": clean_proxy, "https": clean_proxy})] if clean_proxy else []
+    handlers: List[urllib.request.BaseHandler] = []
+    if clean_proxy:
+        handlers.append(urllib.request.ProxyHandler({"http": clean_proxy, "https": clean_proxy}))
+    handlers.append(_SafeLLMRedirectHandler())
     return urllib.request.build_opener(*handlers)
 
 
 _SECRET_VAL_RE = re.compile(r"\b(sk-[A-Za-z0-9_-]{12,}|Bearer\s+[A-Za-z0-9._-]{12,})")
+
+
+def _safe_nonneg_int(val: Any) -> int:
+    """Coerce int, float, or numeric string (including decimals like '12.5') into a non-negative int."""
+    if val is None or isinstance(val, bool):
+        return 0
+    if isinstance(val, int):
+        return max(0, val)
+    if isinstance(val, float):
+        return max(0, int(val)) if val == val else 0
+    try:
+        return max(0, int(val))
+    except (TypeError, ValueError):
+        try:
+            f = float(str(val).strip())
+            return max(0, int(f)) if f == f else 0
+        except (TypeError, ValueError):
+            return 0
 
 
 def _extract_usage_metrics(usage_raw: Any, fmt: str) -> Tuple[int, int, int, int]:
@@ -648,46 +741,38 @@ def _extract_usage_metrics(usage_raw: Any, fmt: str) -> Tuple[int, int, int, int
     if not isinstance(usage_raw, dict):
         return 0, 0, 0, 0
     if fmt == "anthropic":
-        raw_in = max(0, int(usage_raw.get("input_tokens") or 0))
-        cr = max(0, int(usage_raw.get("cache_read_input_tokens") or 0))
-        cw = max(0, int(usage_raw.get("cache_creation_input_tokens") or 0))
-        comp_t = max(0, int(usage_raw.get("output_tokens") or 0))
+        raw_in = _safe_nonneg_int(usage_raw.get("input_tokens"))
+        cr = _safe_nonneg_int(usage_raw.get("cache_read_input_tokens"))
+        cw = _safe_nonneg_int(usage_raw.get("cache_creation_input_tokens"))
+        comp_t = _safe_nonneg_int(usage_raw.get("output_tokens"))
         return raw_in + cr + cw, comp_t, cr, cw
 
     if fmt == "openai-responses":
-        prompt_t = max(0, int(usage_raw.get("input_tokens") or usage_raw.get("prompt_tokens") or 0))
-        comp_t = max(0, int(usage_raw.get("output_tokens") or usage_raw.get("completion_tokens") or 0))
+        prompt_t = _safe_nonneg_int(usage_raw.get("input_tokens") if usage_raw.get("input_tokens") is not None else usage_raw.get("prompt_tokens"))
+        comp_t = _safe_nonneg_int(usage_raw.get("output_tokens") if usage_raw.get("output_tokens") is not None else usage_raw.get("completion_tokens"))
         det = usage_raw.get("input_tokens_details") or usage_raw.get("prompt_tokens_details") or {}
         if not isinstance(det, dict):
             det = {}
-        cr = max(0, int(det.get("cached_tokens") or usage_raw.get("cached_tokens") or usage_raw.get("cache_read_input_tokens") or 0))
-        cw = max(0, int(det.get("cache_creation_tokens") or usage_raw.get("cache_creation_input_tokens") or 0))
+        cr = _safe_nonneg_int(det.get("cached_tokens") or usage_raw.get("cached_tokens") or usage_raw.get("cache_read_input_tokens"))
+        cw = _safe_nonneg_int(det.get("cache_creation_tokens") or usage_raw.get("cache_creation_input_tokens"))
         if prompt_t > 0 and cr > prompt_t:
             cr = prompt_t
         return prompt_t, comp_t, cr, cw
 
-    prompt_t = max(0, int(usage_raw.get("prompt_tokens") or usage_raw.get("input_tokens") or 0))
-    comp_t = max(0, int(usage_raw.get("completion_tokens") or usage_raw.get("output_tokens") or 0))
+    prompt_t = _safe_nonneg_int(usage_raw.get("prompt_tokens") if usage_raw.get("prompt_tokens") is not None else usage_raw.get("input_tokens"))
+    comp_t = _safe_nonneg_int(usage_raw.get("completion_tokens") if usage_raw.get("completion_tokens") is not None else usage_raw.get("output_tokens"))
     det = usage_raw.get("prompt_tokens_details") or usage_raw.get("input_tokens_details") or {}
     if not isinstance(det, dict):
         det = {}
-    cr = max(
-        0,
-        int(
-            det.get("cached_tokens")
-            or usage_raw.get("prompt_cache_hit_tokens")
-            or usage_raw.get("cached_tokens")
-            or usage_raw.get("cache_read_input_tokens")
-            or 0
-        ),
+    cr = _safe_nonneg_int(
+        det.get("cached_tokens")
+        or usage_raw.get("prompt_cache_hit_tokens")
+        or usage_raw.get("cached_tokens")
+        or usage_raw.get("cache_read_input_tokens")
     )
-    cw = max(
-        0,
-        int(
-            det.get("cache_creation_tokens")
-            or usage_raw.get("cache_creation_input_tokens")
-            or 0
-        ),
+    cw = _safe_nonneg_int(
+        det.get("cache_creation_tokens")
+        or usage_raw.get("cache_creation_input_tokens")
     )
     if prompt_t > 0 and cr > prompt_t:
         cr = prompt_t
@@ -1072,7 +1157,7 @@ def _emit_call_log(
         "cache_write_tokens": cache_w,
         "cache_hit_pct": hit_pct,
         "context_tokens": in_t,
-        "error": err_msg[:240] if err_msg else "",
+        "error": sanitize_error_text(err_msg, max_len=240) if err_msg else "",
     }
     if req_body is not None or resp_body is not None:
         entry["has_bodies"] = True
@@ -1102,6 +1187,13 @@ def chat_completion(
         messages, tools, system_prompt, cfg, int(max_tok), stream=False
     )
 
+    try:
+        _guard_live_endpoint_dns(endpoint)
+    except Exception as exc:
+        err_s = sanitize_error_text(f"目标端点被安全策略拦截: {exc}")
+        _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
+        raise LLMClientError(err_s) from exc
+
     opener = _build_opener(cfg.get("proxy_url", ""))
     req = urllib.request.Request(
         endpoint,
@@ -1114,11 +1206,11 @@ def chat_completion(
         with opener.open(req, timeout=timeout) as resp:
             raw_bytes = resp.read()
     except urllib.error.HTTPError as he:
-        err_s = f"HTTP {he.code}: {_parse_http_error(he)}"
+        err_s = sanitize_error_text(f"HTTP {he.code}: {_parse_http_error(he)}")
         _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
         raise LLMClientError(err_s, status_code=he.code) from he
     except urllib.error.URLError as ue:
-        err_s = f"网络请求失败: {ue.reason}"
+        err_s = sanitize_error_text(f"网络请求失败: {ue.reason}")
         _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
         raise LLMClientError(err_s) from ue
     except TimeoutError as te:
@@ -1126,14 +1218,14 @@ def chat_completion(
         _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
         raise LLMClientError(err_s) from te
     except Exception as exc:
-        err_s = f"LLM 调用异常: {exc}"
+        err_s = sanitize_error_text(f"LLM 调用异常: {exc}")
         _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
         raise LLMClientError(err_s) from exc
 
     try:
         data = json.loads(raw_bytes.decode("utf-8", errors="replace"))
     except Exception as exc:
-        err_s = f"LLM 返回内容不是合法 JSON: {exc}"
+        err_s = sanitize_error_text(f"LLM 返回内容不是合法 JSON: {exc}")
         _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
         raise LLMClientError(err_s) from exc
 
@@ -1146,6 +1238,10 @@ def chat_completion(
     except LLMClientError as exc:
         _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=str(exc), req_body=payload, resp_body=data)
         raise
+    except Exception as exc:
+        err_s = sanitize_error_text(f"LLM 响应解析失败: {exc}")
+        _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload, resp_body=data)
+        raise LLMClientError(err_s) from exc
 
     _emit_call_log(
         cfg,
@@ -1212,6 +1308,12 @@ def stream_chat_completion(
     fmt, endpoint, headers, payload = _build_request_spec(
         messages, tools, system_prompt, cfg, int(max_tok), stream=True, include_stream_options=include_stream_opts
     )
+    try:
+        _guard_live_endpoint_dns(endpoint)
+    except Exception as exc:
+        err_s = sanitize_error_text(f"目标端点被安全策略拦截: {exc}")
+        _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
+        raise LLMClientError(err_s) from exc
     opener = _build_opener(cfg.get("proxy_url", ""))
 
     def _open_stream(req_payload: Dict[str, Any]) -> Any:
@@ -1421,7 +1523,7 @@ def stream_chat_completion(
                         u_d = ev.get("usage")
                         if isinstance(u_d, dict):
                             if u_d.get("output_tokens") is not None:
-                                comp_t = max(comp_t, int(u_d.get("output_tokens") or 0))
+                                comp_t = max(comp_t, _safe_nonneg_int(u_d.get("output_tokens")))
                             if u_d.get("input_tokens") is not None:
                                 p1, c1, cr1, cw1 = _extract_usage_metrics(u_d, fmt)
                                 prompt_t = max(prompt_t, p1)
@@ -1700,23 +1802,28 @@ def discover_models(
 
     for url in candidates:
         last_url = url
+        try:
+            _guard_live_endpoint_dns(url)
+        except Exception as exc:
+            last_error = sanitize_error_text(f"目标端点被安全策略拦截: {exc}")
+            break
         req = urllib.request.Request(url, headers=headers, method="GET")
         try:
             with opener.open(req, timeout=timeout) as resp:
                 raw_bytes = resp.read(2_000_000)
         except urllib.error.HTTPError as he:
-            last_error = f"HTTP {he.code}: {_parse_http_error(he)}"
+            last_error = sanitize_error_text(f"HTTP {he.code}: {_parse_http_error(he)}")
             if he.code in (401, 403):
                 break
             continue
         except urllib.error.URLError as ue:
-            last_error = f"网络请求失败: {ue.reason}"
+            last_error = sanitize_error_text(f"网络请求失败: {ue.reason}")
             continue
         except TimeoutError:
             last_error = f"拉取模型列表超时 ({int(timeout)}s)"
             continue
         except Exception as exc:
-            last_error = f"拉取模型列表异常: {exc}"
+            last_error = sanitize_error_text(f"拉取模型列表异常: {exc}")
             continue
 
         try:
@@ -1795,5 +1902,5 @@ def test_connection(
             "latency_ms": latency_ms,
             "reply": "",
             "model": cfg_preview.get("model", DEFAULT_MODEL),
-            "error": str(exc),
+            "error": sanitize_error_text(str(exc)),
         }

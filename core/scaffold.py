@@ -141,15 +141,23 @@ def to_camel_case(snake_str: str) -> str:
     return "".join(x.title() for x in components if x) + "Adapter"
 
 
-def scaffold_site(site_name: str, target_url: Optional[str] = None, detected_fields: Optional[Dict[str, Optional[str]]] = None) -> Path:
-    """Generate a clean, high-grade site adapter file under sites/ directory (atomic write)."""
+def scaffold_site(
+    site_name: str,
+    target_url: Optional[str] = None,
+    detected_fields: Optional[Dict[str, Optional[str]]] = None,
+    *,
+    overwrite: bool = False,
+    sites_dir: Optional[Path] = None,
+) -> Path:
+    """Generate a clean, high-grade site adapter file under sites/ directory (atomic write with overwrite guard)."""
     raw = (site_name or "").strip().lower().replace("-", "_")
     if not raw or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", raw):
         raise ValueError(f"Invalid site name: {site_name!r} (only letters, digits, underscores, hyphens allowed)")
     clean_name = raw
 
     class_name = to_camel_case(clean_name)
-    target_url = target_url or f"https://{clean_name}.com/signup"
+    target_url = str(target_url or f"https://{clean_name}.com/signup").strip()
+    safe_doc_url = target_url.replace('"""', "'''").replace("\r", " ").replace("\n", " ")
     detected = detected_fields or {}
 
     email_sel = repr(detected.get("email") or 'input[type="email"], input[name="email"]')
@@ -160,7 +168,7 @@ def scaffold_site(site_name: str, target_url: Optional[str] = None, detected_fie
     code = SCAFFOLD_CODE_TEMPLATE.format(
         site_name=clean_name,
         class_name=class_name,
-        target_url=target_url,
+        target_url=safe_doc_url,
         target_url_repr=repr(target_url),
         email_selector=email_sel,
         password_selector=pwd_sel,
@@ -168,8 +176,16 @@ def scaffold_site(site_name: str, target_url: Optional[str] = None, detected_fie
         submit_selector=submit_sel
     )
 
-    root_dir = Path(__file__).resolve().parent.parent
-    out_file = root_dir / "sites" / f"{clean_name}.py"
+    base_sites = Path(sites_dir) if sites_dir is not None else (Path(__file__).resolve().parent.parent / "sites")
+    out_file = base_sites / f"{clean_name}.py"
+    if out_file.exists():
+        if not overwrite:
+            raise FileExistsError(
+                f"Adapter already exists: {out_file} (pass --force or overwrite=True to overwrite)"
+            )
+        bak_file = out_file.with_suffix(".py.bak")
+        bak_file.write_text(out_file.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
+
     out_file.parent.mkdir(parents=True, exist_ok=True)
     tmp_file = out_file.with_suffix(".py.tmp")
     tmp_file.write_text(code, encoding="utf-8")

@@ -107,12 +107,36 @@ def smart_agree_tos(page: Page) -> bool:
         try:
             locs = page.locator(sel)
             count = locs.count()
-            if count > 0:
-                for i in range(count):
-                    box = locs.nth(i)
-                    if box.is_visible() and not box.is_checked():
-                        box.check(force=True)
+            checked_any = False
+            for i in range(count):
+                box = locs.nth(i)
+                if box.is_checked():
+                    checked_any = True
+                    continue
+                if box.is_visible():
+                    box.check(force=True)
+                    time.sleep(random.uniform(0.1, 0.2))
+                    if box.is_checked():
+                        checked_any = True
+                else:
+                    # Custom checkbox pattern: hidden <input> paired with visible <label>
+                    clicked = False
+                    box_id = (box.get_attribute("id") or "").strip()
+                    if box_id:
+                        lbl = page.locator(f'label[for="{box_id}"]').first
+                        if lbl.count() > 0 and lbl.is_visible():
+                            lbl.click()
+                            clicked = True
+                    if not clicked:
+                        parent_lbl = box.locator("xpath=ancestor::label[1]")
+                        if parent_lbl.count() > 0 and parent_lbl.is_visible():
+                            parent_lbl.click()
+                            clicked = True
+                    if clicked:
                         time.sleep(random.uniform(0.1, 0.2))
+                        if box.is_checked():
+                            checked_any = True
+            if checked_any:
                 return True
         except Exception:
             continue
@@ -184,4 +208,4 @@ def smart_create_key_flow(page: Page, default_name: str = "AutoKey", timeout: in
         except Exception:
             continue
 
-    return filled
+    return False

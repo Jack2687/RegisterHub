@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import sys
 import threading
@@ -51,6 +52,7 @@ class AtomicClaimLock:
         safe_name = re.sub(r"[^a-zA-Z0-9_\-]", "_", self.resource_id.lower())
         disambig = hashlib.sha1(self.resource_id.encode("utf-8")).hexdigest()[:8]
         self.lock_file = os.path.join(self.claim_dir, f"{safe_name}_{disambig}.lock")
+        self._owner_token = f"{os.getpid()}:{threading.get_ident()}:{secrets.token_hex(8)}"
         self._acquired = False
 
     def acquire(self) -> bool:
@@ -58,7 +60,7 @@ class AtomicClaimLock:
         try:
             fd = os.open(self.lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(f"{os.getpid()}----{time.time()}----{self.resource_id}\n")
+                f.write(f"{os.getpid()}----{time.time()}----{self.resource_id}----{self._owner_token}\n")
             self._acquired = True
             return True
         except FileExistsError:
@@ -81,13 +83,27 @@ class AtomicClaimLock:
             return False
 
     def release(self):
-        """主动释放锁（通常在发信失败或异常退出时调用）。"""
+        """主动释放锁（仅释放自己持有且归属令牌一致的锁文件，绝不误删他人锁）。"""
+        if not self._acquired:
+            return
         try:
             if os.path.exists(self.lock_file):
-                os.remove(self.lock_file)
-            self._acquired = False
+                should_remove = False
+                try:
+                    content = Path(self.lock_file).read_text(encoding="utf-8", errors="replace").strip()
+                    parts = content.split("----")
+                    if len(parts) >= 4:
+                        should_remove = parts[-1].strip() == self._owner_token
+                    else:
+                        should_remove = parts[0].strip() == str(os.getpid())
+                except OSError:
+                    should_remove = False
+                if should_remove:
+                    os.remove(self.lock_file)
         except Exception:
             pass
+        finally:
+            self._acquired = False
 
     def __enter__(self) -> "AtomicClaimLock":
         """进入 with 块，返回锁对象自身。
@@ -200,9 +216,21 @@ def interprocess_file_lock(lock_file_path: Path, timeout: float = 10.0):
     lock_file.parent.mkdir(parents=True, exist_ok=True)
 
     # 只对【同一个 lock_file】互斥；不同目标文件可并发写。
-    with _thread_lock_for(str(lock_file.resolve())):
+    # 线程锁与 OS 文件锁共享同一份 timeout 预算，防止进程内多线程竞争或同线程误重入无限期卡死。
+    total_timeout = max(0.0, float(timeout))
+    deadline = time.monotonic() + total_timeout
+    thread_lock = _thread_lock_for(str(lock_file.resolve()))
+    acquired_thread = (
+        thread_lock.acquire(timeout=total_timeout)
+        if total_timeout > 0.0
+        else thread_lock.acquire(blocking=False)
+    )
+    if not acquired_thread:
+        raise TimeoutError(
+            f"文件锁等待 {timeout}s 超时（进程内线程锁竞争），已拒绝写入（避免无锁写坏 {lock_file}）"
+        )
+    try:
         fd = None
-        start_time = time.time()
         while True:
             try:
                 if sys.platform == "win32":
@@ -221,7 +249,8 @@ def interprocess_file_lock(lock_file_path: Path, timeout: float = 10.0):
                     except Exception:
                         pass
                     fd = None
-                if time.time() - start_time > timeout:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0.0:
                     # ★ 超时后禁止写入（清单第 4 条）：原行为是打 WARN 后照样 `yield`，
                     #   而 `fd` 已是 None —— 等于**无锁写入**共享台账。
                     #   两个终端并行跑时会把对方的行盖掉。现改为抛异常，
@@ -229,7 +258,7 @@ def interprocess_file_lock(lock_file_path: Path, timeout: float = 10.0):
                     raise TimeoutError(
                         f"文件锁等待 {timeout}s 超时，已拒绝写入（避免无锁写坏 {lock_file}）"
                     )
-                time.sleep(0.05)
+                time.sleep(min(0.05, remaining))
 
         try:
             yield
@@ -250,3 +279,5 @@ def interprocess_file_lock(lock_file_path: Path, timeout: float = 10.0):
                         fd.close()
                     except Exception:
                         pass
+    finally:
+        thread_lock.release()

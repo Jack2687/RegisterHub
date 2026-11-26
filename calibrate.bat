@@ -46,9 +46,9 @@ goto MENU
 :do_demo
 echo.
 set "sec="
-set /p sec="每套布局停留几秒 [默认 8]: "
+set /p "sec=每套布局停留几秒 [默认 8]: "
 if "%sec%"=="" set "sec=8"
-python main.py --demo-layouts --demo-sec %sec%
+python main.py --demo-layouts --demo-sec "%sec%"
 pause
 goto MENU
 
@@ -77,28 +77,28 @@ goto MENU
 :manual_cal
 echo.
 set "cc="
-set /p cc="请输入要微调的并发窗口数 (1 / 2 / 4 / 6) [默认 2]: "
+set /p "cc=请输入要微调的并发窗口数 (1 / 2 / 4 / 6) [默认 2]: "
 if "%cc%"=="" set "cc=2"
-python main.py --calibrate -c %cc%
+python main.py --calibrate -c "%cc%"
 pause
 goto MENU
 
 :mode_single
-python main.py --calibrate -c 1 %2 %3
+python main.py --calibrate -c 1 "%~2" "%~3"
 pause
 exit /b 0
 
 :mode_dual
-python main.py --calibrate -c 2 %2 %3
+python main.py --calibrate -c 2 "%~2" "%~3"
 pause
 exit /b 0
 
 :mode_quad
-python main.py --calibrate -c 4 %2 %3
+python main.py --calibrate -c 4 "%~2" "%~3"
 pause
 exit /b 0
 
 :mode_hex
-python main.py --calibrate -c 6 %2 %3
+python main.py --calibrate -c 6 "%~2" "%~3"
 pause
 exit /b 0

@@ -24,7 +24,7 @@ Provider capability matrix (verified live):
 """
 import re
 import time
-import random
+import secrets
 import string
 from typing import Optional, List, Dict, Any, Tuple, Callable
 
@@ -48,15 +48,15 @@ class NoProviderAvailable(MailboxError):
 # ---------------------------------------------------------------------------
 
 def _random_local_part(length: int = 12) -> str:
-    """Return a random lowercase-alphanumeric local part for an address."""
+    """Return a cryptographically random lowercase-alphanumeric local part for an address."""
     alphabet = string.ascii_lowercase + string.digits
-    return "".join(random.choices(alphabet, k=length))
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 def _random_password(length: int = 16) -> str:
-    """Return a random password suitable for provider account creation."""
+    """Return a cryptographically random password suitable for provider account creation."""
     alphabet = string.ascii_letters + string.digits + "!@#$%"
-    return "".join(random.choices(alphabet, k=length))
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 # ---------------------------------------------------------------------------
@@ -418,17 +418,20 @@ class DisposableMailClient:
                 mid = msg.get("id")
                 if mid in seen:
                     continue
-                seen.add(mid)
 
                 excerpt = msg.get("body") or ""
                 match = re.search(pattern, excerpt)
                 if match:
+                    seen.add(mid)
                     return match.group(0)
                 full_text = self.read_message(mid)
-                if full_text and full_text != excerpt:
-                    match = re.search(pattern, full_text)
-                    if match:
-                        return match.group(0)
+                if full_text:
+                    # Only mark message as seen once its full body was actually fetched
+                    seen.add(mid)
+                    if full_text != excerpt:
+                        match = re.search(pattern, full_text)
+                        if match:
+                            return match.group(0)
 
             time.sleep(interval)
             interval = min(interval * 1.3, max_interval)
@@ -455,17 +458,20 @@ class DisposableMailClient:
                 mid = msg.get("id")
                 if mid in seen:
                     continue
-                seen.add(mid)
 
                 excerpt = msg.get("body") or ""
                 match = re.search(url_pattern, excerpt)
                 if match:
+                    seen.add(mid)
                     return match.group(0).rstrip(".,;)\"'")
                 full_text = self.read_message(mid)
-                if full_text and full_text != excerpt:
-                    match = re.search(url_pattern, full_text)
-                    if match:
-                        return match.group(0).rstrip(".,;)\"'")
+                if full_text:
+                    # Only mark message as seen once its full body was actually fetched
+                    seen.add(mid)
+                    if full_text != excerpt:
+                        match = re.search(url_pattern, full_text)
+                        if match:
+                            return match.group(0).rstrip(".,;)\"'")
 
             time.sleep(interval)
             interval = min(interval * 1.3, max_interval)

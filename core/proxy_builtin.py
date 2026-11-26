@@ -1089,7 +1089,13 @@ class BuiltinProxyStore:
 
         ok = bool(res.get("ok"))
         exit_ip = str(res.get("ip") or "")
-        cc = str(res.get("country_code") or row["country"] or "").lower()
+        existing_cc = str(row["country"] or "").strip().lower()
+        probed_cc = str(res.get("country_code") or "").strip().lower()
+        # 住宅网关的 country 字段参与 {country} 粘性会话模板渲染，绝不能被单次探测出口国家反向覆写
+        if str(row["kind"]) == "residential_gateway":
+            cc = existing_cc
+        else:
+            cc = probed_cc or existing_cc
         is_res = bool(res.get("residential")) or (str(row["kind"]) == "residential_gateway")
         score_val = int(res.get("score") or 0)
         grade_val = str(res.get("grade") or "")

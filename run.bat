@@ -56,19 +56,22 @@ if "%choice%"=="4" (
 )
 if "%choice%"=="5" (
     echo.
-    set /p target_url="请输入目标注册网址: "
-    python main.py --url %target_url%
+    set "target_url="
+    set /p "target_url=请输入目标注册网址: "
+    python main.py --url "%target_url%"
     pause
     goto MENU
 )
 if "%choice%"=="6" (
     echo.
-    set /p sname="请输入新站点名称 (例如 github / twitter): "
-    set /p surl="请输入目标注册网址 (可选，直接回车跳过): "
+    set "sname="
+    set "surl="
+    set /p "sname=请输入新站点名称 (例如 github / twitter): "
+    set /p "surl=请输入目标注册网址 (可选，直接回车跳过): "
     if "%surl%"=="" (
-        python main.py --scaffold %sname%
+        python main.py --scaffold "%sname%"
     ) else (
-        python main.py --scaffold %sname% --url %surl%
+        python main.py --scaffold "%sname%" --url "%surl%"
     )
     pause
     goto MENU

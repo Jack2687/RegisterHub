@@ -497,11 +497,23 @@ def _load_raw_config_dict() -> Dict[str, Any]:
     return default_cfg
 
 
+def _safe_int_param(raw: Any, default: int, lo: int, hi: int) -> int:
+    try:
+        return max(lo, min(hi, int(raw)))
+    except (TypeError, ValueError):
+        return default
+
+
 def load_config_dict() -> Dict[str, Any]:
+    from core.secrets import mask_proxy_url
+
     cfg = _load_raw_config_dict()
     safe = json.loads(json.dumps(cfg))
     if safe.get("mail", {}).get("imap_password"):
         safe["mail"]["imap_password"] = "***"
+    raw_px = str((safe.get("browser") or {}).get("proxy") or "").strip()
+    if raw_px:
+        safe["browser"]["proxy"] = mask_proxy_url(raw_px)
     return safe
 
 
@@ -514,9 +526,9 @@ def save_config_dict(updates: Dict[str, Any]) -> Dict[str, Any]:
     if "headless" in updates:
         b["headless"] = bool(updates["headless"])
     if "slow_mo" in updates:
-        b["slow_mo"] = max(0, min(2000, int(updates["slow_mo"] or 0)))
+        b["slow_mo"] = _safe_int_param(updates["slow_mo"], 0, 0, 2000)
     if "timeout" in updates:
-        b["timeout"] = max(5000, min(120000, int(updates["timeout"] or 30000)))
+        b["timeout"] = _safe_int_param(updates["timeout"], 30000, 5000, 120000)
     if "enable_stealth" in updates:
         b["enable_stealth"] = bool(updates["enable_stealth"])
     if "use_chrome_channel" in updates:
@@ -527,9 +539,13 @@ def save_config_dict(updates: Dict[str, Any]) -> Dict[str, Any]:
             b["proxy_mode"] = pm
     if "proxy" in updates:
         val = str(updates["proxy"] or "").strip()
-        b["proxy"] = val or None
+        # Preserve stored proxy credentials when UI echoes back a masked placeholder (http://***@host:port)
+        if "***@" in val and b.get("proxy"):
+            pass
+        else:
+            b["proxy"] = val or None
         if "proxy_mode" not in updates and b.get("proxy_mode") != "builtin":
-            b["proxy_mode"] = "proxy" if val else "direct"
+            b["proxy_mode"] = "proxy" if b.get("proxy") else "direct"
     if "cdp_endpoint" in updates:
         val = str(updates["cdp_endpoint"] or "").strip()
         b["cdp_endpoint"] = val or None
@@ -537,7 +553,7 @@ def save_config_dict(updates: Dict[str, Any]) -> Dict[str, Any]:
     if "country" in updates and str(updates["country"]).upper() in ("US", "UK", "DE"):
         d["country"] = str(updates["country"]).upper()
     if "password_length" in updates:
-        d["password_length"] = max(10, min(32, int(updates["password_length"] or 14)))
+        d["password_length"] = _safe_int_param(updates["password_length"], 14, 10, 32)
     if "mail_provider" in updates:
         mp = str(updates["mail_provider"] or "tempmail").strip().lower()
         if mp in ("tempmail", "imap", "builtin"):
@@ -554,7 +570,7 @@ def save_config_dict(updates: Dict[str, Any]) -> Dict[str, Any]:
     if "imap_server" in updates:
         m["imap_server"] = str(updates["imap_server"] or "").strip()
     if "imap_port" in updates:
-        m["imap_port"] = max(1, min(65535, int(updates["imap_port"] or 993)))
+        m["imap_port"] = _safe_int_param(updates["imap_port"], 993, 1, 65535)
     if "imap_user" in updates:
         m["imap_user"] = str(updates["imap_user"] or "").strip()
     if "imap_password" in updates:
@@ -569,10 +585,18 @@ def save_config_dict(updates: Dict[str, Any]) -> Dict[str, Any]:
     return load_config_dict()
 
 
-def list_snapshots() -> List[Dict[str, Any]]:
+def count_snapshots() -> int:
+    if not SNAPSHOTS_DIR.exists():
+        return 0
+    return sum(1 for _ in SNAPSHOTS_DIR.glob("*.png"))
+
+
+def list_snapshots(limit: Optional[int] = 40) -> List[Dict[str, Any]]:
     if not SNAPSHOTS_DIR.exists():
         return []
-    files = sorted(SNAPSHOTS_DIR.glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)[:40]
+    files = sorted(SNAPSHOTS_DIR.glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if limit is not None and limit > 0:
+        files = files[:limit]
     out: List[Dict[str, Any]] = []
     for fp in files:
         st = fp.stat()
@@ -585,10 +609,20 @@ def list_snapshots() -> List[Dict[str, Any]]:
     return out
 
 
-def list_failures() -> List[Dict[str, Any]]:
+def count_failures() -> int:
+    if not FAILED_FILE.exists():
+        return 0
+    return sum(
+        1
+        for raw in FAILED_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
+        if raw.strip() and not raw.strip().startswith("#")
+    )
+
+
+def list_failures(limit: Optional[int] = 100) -> List[Dict[str, Any]]:
     if not FAILED_FILE.exists():
         return []
-    snap_names = {s["name"] for s in list_snapshots()}
+    snap_names = {s["name"] for s in list_snapshots(limit=None)}
     rows: List[Dict[str, Any]] = []
     for idx, raw in enumerate(FAILED_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()):
         line = raw.strip()
@@ -628,7 +662,7 @@ def list_failures() -> List[Dict[str, Any]]:
             "snapshot_url": f"/api/snapshots/{snap_name}" if snap_name else "",
         })
     rows.reverse()
-    return rows[:100]
+    return rows[:limit] if (limit is not None and limit > 0) else rows
 
 
 def collect_doctor_report(include_network: bool = True) -> Dict[str, Any]:
@@ -774,8 +808,8 @@ def build_overview_payload() -> Dict[str, Any]:
         "kpi": {
             "accounts_total": len(accounts),
             "accounts_with_key": with_key,
-            "failures_total": len(failures),
-            "snapshots_total": len(snaps),
+            "failures_total": count_failures(),
+            "snapshots_total": count_snapshots(),
             "adapters_total": len(adapters),
             "running": 1 if act else 0,
             "agent_running": 1 if agent_manager.active_session_id() else 0,
@@ -887,6 +921,37 @@ def _probe_target_page(target_url: str) -> Dict[str, Any]:
                 pass
 
 
+_ALLOWED_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "testserver"})
+
+
+def _extract_host_header_hostname(raw_host: str) -> str:
+    val = (raw_host or "").strip().lower()
+    if not val:
+        return ""
+    if val.startswith("["):
+        end = val.find("]")
+        return val[1:end] if end > 0 else val
+    return val.split(":", 1)[0]
+
+
+def _check_not_self_llm_url(handler: Any, raw_url: str) -> Optional[str]:
+    clean = str(raw_url or "").strip()
+    if not clean:
+        return None
+    try:
+        p = urlparse(clean)
+        host = (p.hostname or "").strip().lower()
+        srv_addr = getattr(getattr(handler, "server", None), "server_address", None)
+        srv_port = int(srv_addr[1]) if isinstance(srv_addr, (tuple, list)) and len(srv_addr) >= 2 else 0
+        if host in ("127.0.0.1", "localhost", "::1") and srv_port > 0:
+            eff_port = p.port or (443 if p.scheme == "https" else 80)
+            if eff_port == srv_port:
+                return "禁止将 LLM Base URL 指向 RegisterHub 自身监听端口"
+    except Exception:
+        return None
+    return None
+
+
 class LiteRequestHandler(BaseHTTPRequestHandler):
     server_version = "RegisterHubLite/2.0"
 
@@ -903,16 +968,137 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
-    def _read_json(self) -> Dict[str, Any]:
-        length = int(self.headers.get("Content-Length") or "0")
-        if length <= 0 or length > 16_000_000:
+    def _is_same_local_origin(self, raw_origin: str) -> bool:
+        val = (raw_origin or "").strip()
+        if not val or val.lower() == "null":
+            return False
+        try:
+            p = urlparse(val)
+        except Exception:
+            return False
+        if (p.scheme or "").lower() not in ("http", "https"):
+            return False
+        host = (p.hostname or "").strip().lower()
+        if host not in _ALLOWED_LOCAL_HOSTS:
+            return False
+        srv_addr = getattr(getattr(self, "server", None), "server_address", None)
+        srv_port = int(srv_addr[1]) if isinstance(srv_addr, (tuple, list)) and len(srv_addr) >= 2 else 0
+        if srv_port > 0:
+            eff_port = p.port or (443 if p.scheme.lower() == "https" else 80)
+            if eff_port != srv_port:
+                return False
+        return True
+
+    def _drain_small_body(self) -> None:
+        """Drain small unread request bodies before early 4xx responses to avoid Windows TCP RST (WinError 10053)."""
+        try:
+            length = int((self.headers.get("Content-Length") or "0").strip())
+        except ValueError:
+            return
+        if 0 < length <= 65_536:
+            try:
+                self.rfile.read(length)
+            except Exception:
+                pass
+
+    def _reject_early(self, payload: Any, status: int) -> None:
+        self._drain_small_body()
+        self.close_connection = True
+        self._send_json(payload, status=status)
+
+    def _check_local_origin_guard(self, path: str, *, is_write: bool = False) -> bool:
+        """Zero-password transparent browser-origin & Host guard (B-1): blocks DNS rebinding & cross-site CSRF."""
+        # 1. Host header allowlist (blocks DNS rebinding where attacker.com resolves to 127.0.0.1)
+        raw_host = self.headers.get("Host") or ""
+        if raw_host:
+            host_only = _extract_host_header_hostname(raw_host)
+            if host_only not in _ALLOWED_LOCAL_HOSTS:
+                self._reject_early({"ok": False, "error": "Forbidden: invalid Host header"}, status=403)
+                return False
+
+        # 2. Modern browser Sec-Fetch-Site guard (blocks cross-site / cross-port fetch, XHR, EventSource, form)
+        sfs = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        if sfs:
+            if path.startswith("/api/") or is_write:
+                if sfs not in ("same-origin", "none"):
+                    self._reject_early({"ok": False, "error": "Forbidden: cross-site request blocked"}, status=403)
+                    return False
+            else:
+                sfm = (self.headers.get("Sec-Fetch-Mode") or "").strip().lower()
+                if sfs not in ("same-origin", "none") and sfm != "navigate":
+                    self._reject_early({"ok": False, "error": "Forbidden: cross-site asset request blocked"}, status=403)
+                    return False
+
+        # 3. Origin / Referer same-origin enforcement (covers browsers without Sec-Fetch-Site)
+        origin = (self.headers.get("Origin") or "").strip()
+        if origin:
+            if not self._is_same_local_origin(origin):
+                self._reject_early({"ok": False, "error": "Forbidden: cross-origin request blocked"}, status=403)
+                return False
+        elif is_write:
+            referer = (self.headers.get("Referer") or "").strip()
+            if referer and not self._is_same_local_origin(referer):
+                self._reject_early({"ok": False, "error": "Forbidden: cross-origin referer blocked"}, status=403)
+                return False
+
+        # 4. Optional explicit API token gate (only enforced when user sets REGISTERHUB_API_TOKEN env var)
+        env_tok = os.environ.get("REGISTERHUB_API_TOKEN", "").strip()
+        if env_tok and path.startswith("/api/"):
+            import hmac
+
+            auth_hdr = (self.headers.get("Authorization") or "").strip()
+            bearer = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else ""
+            x_tok = (self.headers.get("X-RegisterHub-Token") or "").strip()
+            provided = bearer or x_tok
+            if not provided or not hmac.compare_digest(provided, env_tok):
+                self._reject_early({"ok": False, "error": "Unauthorized: invalid REGISTERHUB_API_TOKEN"}, status=401)
+                return False
+
+        return True
+
+    def _read_json(self) -> Optional[Dict[str, Any]]:
+        """Safely read JSON request body; enforces Content-Length bounds & application/json Content-Type (B-1, W-10)."""
+        raw_len = (self.headers.get("Content-Length") or "0").strip()
+        try:
+            length = int(raw_len)
+        except ValueError:
+            self.close_connection = True
+            self._send_json({"ok": False, "error": "Invalid Content-Length header"}, status=400)
+            return None
+        if length < 0:
+            self.close_connection = True
+            self._send_json({"ok": False, "error": "Invalid negative Content-Length"}, status=400)
+            return None
+        if length > 16_000_000:
+            self.close_connection = True
+            self._send_json({"ok": False, "error": "Request body too large (max 16MB)"}, status=413)
+            return None
+        if length == 0:
             return {}
+
+        # Reject non-JSON simple-request Content-Types (e.g., text/plain, form-urlencoded) to block cross-site CSRF
+        ctype = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+        if ctype and ctype != "application/json" and not ctype.endswith("+json"):
+            self._reject_early(
+                {"ok": False, "error": f"Unsupported Media Type: {ctype} (expected application/json)"},
+                status=415,
+            )
+            return None
+
         raw = self.rfile.read(length)
         try:
             data = json.loads(raw.decode("utf-8"))
             return data if isinstance(data, dict) else {}
         except Exception:
             return {}
+
+    def do_OPTIONS(self) -> None:
+        path = urlparse(self.path).path
+        if not self._check_local_origin_guard(path, is_write=True):
+            return
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _serve_file(self, target: Path, base_dir: Path) -> None:
         resolved = target.resolve()
@@ -947,6 +1133,8 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         qs = parse_qs(parsed.query)
+        if not self._check_local_origin_guard(path, is_write=False):
+            return
 
         if studio_bridge.handle_studio_get(self, sys.modules[__name__], path, qs):
             return
@@ -1071,12 +1259,12 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/api/failures":
             fails = list_failures()
-            self._send_json({"total": len(fails), "failures": fails})
+            self._send_json({"total": count_failures(), "failures": fails})
             return
 
         if path == "/api/snapshots":
             snaps = list_snapshots()
-            self._send_json({"total": len(snaps), "snapshots": snaps})
+            self._send_json({"total": count_snapshots(), "snapshots": snaps})
             return
 
         m_snap = re.fullmatch(r"/api/snapshots/([A-Za-z0-9._-]+)", path)
@@ -1313,7 +1501,11 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
+        if not self._check_local_origin_guard(path, is_write=True):
+            return
         body = self._read_json()
+        if body is None:
+            return
 
         if studio_bridge.handle_studio_post(self, sys.modules[__name__], path, body):
             return
@@ -1371,7 +1563,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             cfg = _load_raw_config_dict()
             mc = cfg.get("mail") or {}
             server = str(body.get("imap_server") or mc.get("imap_server") or "").strip()
-            port = int(body.get("imap_port") or mc.get("imap_port") or 993)
+            port = _safe_int_param(body.get("imap_port") or mc.get("imap_port"), 993, 1, 65535)
             user = str(body.get("imap_user") or mc.get("imap_user") or "").strip()
             pw = str(body.get("imap_password") or "")
             if not pw or pw == "***":
@@ -1458,8 +1650,8 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             loc = str(body.get("country") or "US").strip().upper()
             if loc not in ("US", "UK", "DE"):
                 loc = "US"
-            cnt = max(1, min(6, int(body.get("count") or 2)))
-            pw_len = max(10, min(32, int(body.get("password_length") or 14)))
+            cnt = _safe_int_param(body.get("count"), 2, 1, 6)
+            pw_len = _safe_int_param(body.get("password_length"), 14, 10, 32)
             domain = str(body.get("domain") or "").strip() or None
             items = [generate_identity(email_domain=domain, locale=loc, use_disposable=False, password_length=pw_len) for _ in range(cnt)]
             self._send_json({"ok": True, "count": len(items), "identities": items})
@@ -1504,7 +1696,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             }
             bname, d_bin, clen, cvv_len = brands.get(str(body.get("brand") or "visa").lower(), brands["visa"])
             prefix = re.sub(r"\D", "", str(body.get("bin_prefix") or ""))[:8] or d_bin
-            cnt = max(1, min(12, int(body.get("count") or 6)))
+            cnt = _safe_int_param(body.get("count"), 6, 1, 12)
             cards = []
             for _ in range(cnt):
                 num = _luhn_complete(prefix, clen)
@@ -1734,7 +1926,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             try:
                 from core.scaffold import scaffold_site
 
-                out_path = scaffold_site(site_name, target_url or None, detected_fields=detected_fields)
+                out_path = scaffold_site(site_name, target_url or None, detected_fields=detected_fields, overwrite=overwrite)
                 self._send_json({
                     "ok": True,
                     "success": True,
@@ -1875,11 +2067,19 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/llm/test":
+            self_err = _check_not_self_llm_url(self, str(body.get("base_url") or ""))
+            if self_err:
+                self._send_json({"ok": False, "error": self_err}, status=400)
+                return
             res = llm_client.test_connection(overrides=body if body else None)
             self._send_json(res)
             return
 
         if path == "/api/llm/models":
+            self_err = _check_not_self_llm_url(self, str(body.get("base_url") or ""))
+            if self_err:
+                self._send_json({"ok": False, "models": [], "error": self_err}, status=400)
+                return
             res = llm_client.discover_models(overrides=body if body else None)
             self._send_json(res)
             return
@@ -1939,7 +2139,11 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:
         path = urlparse(self.path).path
+        if not self._check_local_origin_guard(path, is_write=True):
+            return
         body = self._read_json()
+        if body is None:
+            return
 
         if studio_bridge.handle_studio_put(self, sys.modules[__name__], path, body):
             return
@@ -1958,7 +2162,11 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
 
     def do_PATCH(self) -> None:
         path = urlparse(self.path).path
+        if not self._check_local_origin_guard(path, is_write=True):
+            return
         body = self._read_json()
+        if body is None:
+            return
 
         if studio_bridge.handle_studio_patch(self, sys.modules[__name__], path, body):
             return
@@ -1966,26 +2174,25 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         m_ag_patch = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)", path)
         if m_ag_patch:
             sid = m_ag_patch.group(1)
+            patchable = ("title", "llm_model", "llm_profile_id", "pinned", "target_url")
+            if not any(k in body for k in patchable):
+                self._send_json({"ok": False, "error": "缺少可更新字段"}, status=400)
+                return
+            sess = agent_manager.get_session(sid)
+            if not sess:
+                self._send_json({"ok": False, "error": "Agent session not found"}, status=404)
+                return
             if "title" in body:
                 raw_title = body.get("title")
                 if not isinstance(raw_title, str):
                     self._send_json({"ok": False, "error": "会话标题不能为空"}, status=400)
                     return
                 try:
-                    summary = agent_manager.rename_session(sid, raw_title)
+                    agent_manager.rename_session(sid, raw_title)
                 except ValueError as ve:
                     self._send_json({"ok": False, "error": str(ve)}, status=400)
                     return
-                if summary is None:
-                    self._send_json({"ok": False, "error": "Agent session not found"}, status=404)
-                    return
-                self._send_json({"ok": True, "session": studio_bridge.enrich_agent_summary(summary)})
-                return
             if any(k in body for k in ("llm_model", "llm_profile_id", "pinned", "target_url")):
-                sess = agent_manager.get_session(sid)
-                if not sess:
-                    self._send_json({"ok": False, "error": "Agent session not found"}, status=404)
-                    return
                 with sess._lock:
                     if "llm_profile_id" in body:
                         sess.llm_profile_id = str(body.get("llm_profile_id") or "").strip()
@@ -1994,17 +2201,19 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                         sess.llm_model = "" if raw_m == "__follow_profile__" else raw_m
                     if "target_url" in body and isinstance(body.get("target_url"), str):
                         sess.target_url = body["target_url"].strip()
+                    if "pinned" in body:
+                        sess.pinned = bool(body.get("pinned"))
                     sess.updated_at = time.strftime("%Y-%m-%d %H:%M:%S")
                 sess.persist()
-                self._send_json({"ok": True, "session": studio_bridge.enrich_agent_summary(sess.to_summary())})
-                return
-            self._send_json({"ok": False, "error": "会话标题不能为空"}, status=400)
+            self._send_json({"ok": True, "session": studio_bridge.enrich_agent_summary(sess.to_summary())})
             return
 
         self._send_json({"error": "Not Found"}, status=404)
 
     def do_DELETE(self) -> None:
         path = urlparse(self.path).path
+        if not self._check_local_origin_guard(path, is_write=True):
+            return
 
         if studio_bridge.handle_studio_delete(self, sys.modules[__name__], path):
             return

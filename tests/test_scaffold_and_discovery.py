@@ -14,54 +14,61 @@ def test_to_camel_case():
 
 
 def test_scaffold_and_discovery(tmp_path):
+    import importlib.util
     import pytest
+
     with pytest.raises(ValueError):
-        scaffold_site("../escape", target_url="https://example.com/signup")
+        scaffold_site("../escape", target_url="https://example.com/signup", sites_dir=tmp_path)
 
     test_site_name = "unit_test_demo"
-    out_file = scaffold_site(test_site_name, target_url="https://example.com/signup")
+    out_file = scaffold_site(test_site_name, target_url="https://example.com/signup", sites_dir=tmp_path)
     assert out_file.exists(), "Scaffold file must be created"
+    assert out_file.parent == tmp_path
     assert not out_file.with_suffix(".py.tmp").exists()
     content = out_file.read_text(encoding="utf-8")
     assert "wait_for_timeout" not in content
     assert '"verify"' not in content
 
-    try:
-        adapters = discover_adapters()
-        assert test_site_name in adapters or "unit_test_demo" in adapters
-        adapter_cls = adapters.get(test_site_name)
-        assert issubclass(adapter_cls, BaseSiteAdapter)
-    finally:
-        if out_file.exists():
-            out_file.unlink()
+    # Overwrite guard rejects accidental clobber unless overwrite=True
+    with pytest.raises(FileExistsError):
+        scaffold_site(test_site_name, target_url="https://example.com/signup", sites_dir=tmp_path)
+
+    # Load dynamically from tmp_path without polluting repository sites/
+    spec = importlib.util.spec_from_file_location(f"sites.{test_site_name}", out_file)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    adapter_cls = getattr(mod, "UnitTestDemoAdapter", None)
+    assert adapter_cls is not None and issubclass(adapter_cls, BaseSiteAdapter)
+    assert "demo" in discover_adapters()
 
 
-def test_scaffold_auto_wires_single_imap_client():
+def test_scaffold_auto_wires_single_imap_client(tmp_path):
+    import importlib.util
     from core.imap_mail import SingleImapMailClient
 
     test_site_name = "unit_test_imap_wire"
-    out_file = scaffold_site(test_site_name, target_url="https://demo.example.com/signup")
-    try:
-        adapters = discover_adapters()
-        cls = adapters[test_site_name]
-        cfg = {
-            "defaults": {"use_disposable_mail": False, "country": "US", "password_length": 14},
-            "mail": {
-                "imap_server": "imap.example.com",
-                "imap_port": 993,
-                "imap_user": "alice@example.com",
-                "imap_password": "app-password-demo",
-            },
-        }
-        inst = cls(page=None, context=None, config=cfg)
-        ident = inst.prepare_identity()
-        assert ident["email"] == "alice@example.com"
-        assert isinstance(inst.mail_client, SingleImapMailClient)
-        assert inst.mail_client.server == "imap.example.com"
-        assert inst.mail_client.port == 993
-    finally:
-        if out_file.exists():
-            out_file.unlink()
+    out_file = scaffold_site(test_site_name, target_url="https://demo.example.com/signup", sites_dir=tmp_path)
+    spec = importlib.util.spec_from_file_location(f"sites.{test_site_name}", out_file)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    cls = getattr(mod, "UnitTestImapWireAdapter")
+    cfg = {
+        "defaults": {"use_disposable_mail": False, "country": "US", "password_length": 14},
+        "mail": {
+            "imap_server": "imap.example.com",
+            "imap_port": 993,
+            "imap_user": "alice@example.com",
+            "imap_password": "app-password-demo",
+        },
+    }
+    inst = cls(page=None, context=None, config=cfg)
+    ident = inst.prepare_identity()
+    assert ident["email"] == "alice@example.com"
+    assert isinstance(inst.mail_client, SingleImapMailClient)
+    assert inst.mail_client.server == "imap.example.com"
+    assert inst.mail_client.port == 993
 
 
 def test_mail_client_list_html_and_excerpt_fallback():

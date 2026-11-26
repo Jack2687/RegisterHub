@@ -14,7 +14,7 @@ import time
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 _IP_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$|^[0-9a-fA-F:]{3,45}$")
 _CLOUD_KEYWORDS = (
@@ -68,8 +68,20 @@ def _validate_http_url(url: str, *, resolve_dns: bool = False) -> str:
 def _probe_target(target_url: str, proxy_url: str = "", timeout: float = 8.0) -> Dict[str, Any]:
     from .net_guard import build_safe_urllib_opener
 
-    target_url = _validate_http_url(target_url, resolve_dns=True)
-    opener = build_safe_urllib_opener(proxy_url)
+    t0 = time.perf_counter()
+    try:
+        target_url = _validate_http_url(target_url, resolve_dns=True)
+        opener = build_safe_urllib_opener(proxy_url)
+    except Exception as e:
+        ms = round((time.perf_counter() - t0) * 1000.0, 1)
+        return {
+            "url": target_url,
+            "status_code": 0,
+            "passed": False,
+            "challenge": False,
+            "latency_ms": ms,
+            "detail": f"目标地址或代理非法，已跳过: {str(e)[:90]}",
+        }
     req = urllib.request.Request(
         target_url,
         headers={
@@ -77,7 +89,6 @@ def _probe_target(target_url: str, proxy_url: str = "", timeout: float = 8.0) ->
             "Accept": "text/html,application/json,*/*;q=0.8",
         },
     )
-    t0 = time.perf_counter()
     try:
         with opener.open(req, timeout=timeout) as resp:
             ms = round((time.perf_counter() - t0) * 1000.0, 1)
@@ -137,7 +148,14 @@ def score_ip(
     """Probe an IP (directly or through proxy_url) and compute a 0–100 purity score."""
     clean_ip = (ip or "").strip()
     clean_proxy = (proxy_url or "").strip()
-    clean_target = _validate_http_url(target_url) if (target_url or "").strip() else ""
+    raw_target = (target_url or "").strip()
+    clean_target = ""
+    target_validation_err = ""
+    if raw_target:
+        try:
+            clean_target = _validate_http_url(raw_target)
+        except Exception as exc:
+            target_validation_err = str(exc)
     t0 = time.perf_counter()
     intel_timeout = min(float(timeout), 6.0)
 
@@ -145,8 +163,9 @@ def score_ip(
     # Fallback to ipify ONLY if exit IP is still unknown.
     meta_proxy = clean_proxy if not clean_ip else ""
     ipcom_fields = "status,message,country,countryCode,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,mobile,proxy,hosting,query"
-    q_ipapi = f"https://api.ipapi.is/?q={clean_ip}" if clean_ip else "https://api.ipapi.is/"
-    q_ipcom = f"http://ip-api.com/json/{clean_ip}?fields={ipcom_fields}" if clean_ip else f"http://ip-api.com/json/?fields={ipcom_fields}"
+    encoded_ip = quote(clean_ip, safe=":") if clean_ip else ""
+    q_ipapi = f"https://api.ipapi.is/?q={encoded_ip}" if encoded_ip else "https://api.ipapi.is/"
+    q_ipcom = f"http://ip-api.com/json/{encoded_ip}?fields={ipcom_fields}" if encoded_ip else f"http://ip-api.com/json/?fields={ipcom_fields}"
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
         f_d1 = ex.submit(_fetch_json, q_ipapi, meta_proxy, intel_timeout)
@@ -175,7 +194,7 @@ def score_ip(
         if ip_resp and ip_resp.get("ip"):
             clean_ip = str(ip_resp["ip"]).strip()
             if not d2:
-                d2 = _fetch_json(f"http://ip-api.com/json/{clean_ip}?fields={ipcom_fields}", proxy_url="", timeout=intel_timeout)
+                d2 = _fetch_json(f"http://ip-api.com/json/{quote(clean_ip, safe=':')}?fields={ipcom_fields}", proxy_url="", timeout=intel_timeout)
                 if d2 and d2.get("status") != "success":
                     d2 = None
 
@@ -285,7 +304,16 @@ def score_ip(
 
     # Optional target-site passability probe
     target_probe: Optional[Dict[str, Any]] = None
-    if clean_target:
+    if target_validation_err:
+        target_probe = {
+            "url": raw_target,
+            "status_code": 0,
+            "passed": False,
+            "challenge": False,
+            "latency_ms": 0.0,
+            "detail": f"目标 URL 非法或受限已跳过: {target_validation_err[:120]}",
+        }
+    elif clean_target:
         target_probe = _probe_target(clean_target, proxy_url=clean_proxy, timeout=timeout)
         if target_probe["passed"]:
             factors.append({"label": f"目标站直连放行 ({target_probe['status_code']})", "delta": 0, "tone": "emerald"})
@@ -355,7 +383,14 @@ def score_batch(
     max_workers: int = 6,
 ) -> Dict[str, Any]:
     """Concurrently score up to 24 IPs or proxy URLs, sorted highest score first."""
-    clean_target = _validate_http_url(target_url) if (target_url or "").strip() else ""
+    raw_target = (target_url or "").strip()
+    clean_target = ""
+    target_warning = ""
+    if raw_target:
+        try:
+            clean_target = _validate_http_url(raw_target)
+        except Exception as exc:
+            target_warning = str(exc)
     capped = entries[:24]
 
     def _one(ent: Dict[str, str]) -> Dict[str, Any]:
@@ -380,9 +415,12 @@ def score_batch(
         if g in grade_counts:
             grade_counts[g] += 1
     avg_score = round(sum(r.get("score", 0) for r in results) / len(results), 1) if results else 0.0
-    return {
+    out: Dict[str, Any] = {
         "total": len(results),
         "avg_score": avg_score,
         "grades": grade_counts,
         "items": results,
     }
+    if target_warning:
+        out["target_warning"] = f"目标 URL 非法或受限已跳过探测: {target_warning}"
+    return out

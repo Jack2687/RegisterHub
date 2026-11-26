@@ -53,7 +53,14 @@ def connect_fingerprint_browser(playwright: Playwright, cdp_endpoint: str) -> Br
       - BitBrowser: http://127.0.0.1:9222
       - Hubstudio: ws://127.0.0.1:9222/devtools/browser/...
     """
-    if not cdp_endpoint.startswith("http://") and not cdp_endpoint.startswith("https://") and not cdp_endpoint.startswith("ws://"):
-        cdp_endpoint = f"http://127.0.0.1:{cdp_endpoint}"
-        
-    return playwright.chromium.connect_over_cdp(cdp_endpoint)
+    ep = (cdp_endpoint or "").strip()
+    if not ep:
+        raise ValueError("CDP endpoint cannot be empty")
+    low = ep.lower()
+    if low.startswith(("http://", "https://", "ws://", "wss://")):
+        normalized = ep
+    elif ep.isdigit():
+        normalized = f"http://127.0.0.1:{ep}"
+    else:
+        normalized = f"http://{ep}"
+    return playwright.chromium.connect_over_cdp(normalized)

@@ -261,6 +261,58 @@ class StandardRunner:
                 return {"server": str(self.proxy_server)}, mask_proxy_url(str(self.proxy_server))
         return None, ""
 
+    def _attach_context_ssrf_guard(self, context) -> None:
+        """Install browser-level SSRF route & WebSocket guard blocking loopback/LAN/metadata targets."""
+        route_fn = getattr(context, "route", None)
+        if not callable(route_fn):
+            return
+        from core.net_guard import validate_public_http_url
+
+        def _http_guard(route) -> None:
+            req_url = str(getattr(route.request, "url", "") or "").strip()
+            low = req_url.lower()
+            if low.startswith(("data:", "about:", "blob:")):
+                route.continue_()
+                return
+            try:
+                validate_public_http_url(req_url, resolve_dns=True)
+            except Exception:
+                try:
+                    route.abort("blockedbyclient")
+                except Exception:
+                    pass
+                return
+            route.continue_()
+
+        try:
+            route_fn("**/*", _http_guard)
+        except Exception:
+            pass
+
+        ws_route_fn = getattr(context, "route_web_socket", None)
+        if callable(ws_route_fn):
+            def _ws_guard(ws_route) -> None:
+                ws_url = str(getattr(ws_route, "url", "") or "").strip()
+                check_url = ws_url
+                if check_url.lower().startswith("ws://"):
+                    check_url = "http://" + check_url[5:]
+                elif check_url.lower().startswith("wss://"):
+                    check_url = "https://" + check_url[6:]
+                try:
+                    validate_public_http_url(check_url, resolve_dns=True)
+                except Exception:
+                    try:
+                        ws_route.close(code=1008, reason="Blocked by SSRF guard")
+                    except Exception:
+                        pass
+                    return
+                ws_route.connect_to_server()
+
+            try:
+                ws_route_fn("**/*", _ws_guard)
+            except Exception:
+                pass
+
     def execute_adapter(self, adapter_cls: Type[BaseSiteAdapter], count: int = 1) -> int:
         success_count = 0
         site_name = _resolve_adapter_site_name(adapter_cls)
@@ -287,6 +339,9 @@ class StandardRunner:
                 apply_stealth_to_context(context)
                 self.log("info", "Anti-fingerprint masking scripts injected into context.")
 
+            if not (self.config.get("browser") or {}).get("allow_private_targets"):
+                self._attach_context_ssrf_guard(context)
+
             if getattr(self, "_calibrated_zoom", None) and not self.headless:
                 try:
                     from core.calibrator import build_zoom_init_script
@@ -298,10 +353,11 @@ class StandardRunner:
                 self.log("info", f"=== Processing task [{idx}/{count}] ===")
                 page = context.new_page()
                 page.set_default_timeout(self.timeout_ms)
-                adapter = adapter_cls(page, context, self.config)
+                adapter = None
                 task_start = time.time()
                 
                 try:
+                    adapter = adapter_cls(page, context, self.config)
                     ok = adapter.run()
                     elapsed = round(time.time() - task_start, 2)
                     if ok:
@@ -321,12 +377,13 @@ class StandardRunner:
                     elapsed = round(time.time() - task_start, 2)
                     snap = self.capture_snapshot(page, f"task_{idx}_exception")
                     self.log("error", f"Task [{idx}/{count}] encountered exception after {elapsed}s: {e}")
-                    self.save_failed(str(e), adapter.account_data, snap, site_name=site_name)
+                    acc_data = getattr(adapter, "account_data", {}) if adapter is not None else {}
+                    self.save_failed(str(e), acc_data, snap, site_name=site_name)
                     if not self.headless:
                         self.log("info", "Keeping window visible for 6 seconds before closing...")
                         time.sleep(6)
                 finally:
-                    mc = getattr(adapter, "mail_client", None)
+                    mc = getattr(adapter, "mail_client", None) if adapter is not None else None
                     if mc is not None and callable(getattr(mc, "release", None)):
                         try:
                             mc.release()

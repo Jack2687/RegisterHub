@@ -133,6 +133,7 @@
       loadAgentSessions(false);
     }
     if (target === 'llm') loadLlmConfig(true);
+    if (target === 'doctor') loadDoctor();
     if (target === 'config') loadConfig();
     if (target === 'accounts') loadAccounts();
     if (target === 'snapshots') loadFailuresAndSnapshots();
@@ -1384,8 +1385,8 @@
   function syncLayoutRangeFill(val) {
     const slider = $('#layout-zoom-range');
     if (!slider) return;
-    const min = Number(slider.min || 45);
-    const max = Number(slider.max || 125);
+    const min = Number(slider.min || 40);
+    const max = Number(slider.max || 150);
     const cur = Math.max(min, Math.min(max, Number(val ?? slider.value) || 100));
     const pct = max > min ? ((cur - min) / (max - min)) * 100 : 0;
     slider.style.setProperty('--range-pct', `${pct.toFixed(2)}%`);
@@ -1550,7 +1551,7 @@
     }
 
     const curZoomPct = slots.length ? Math.round((slots[0].zoom || 1) * 100) : 100;
-    const clampedZoom = Math.max(45, Math.min(125, curZoomPct));
+    const clampedZoom = Math.max(40, Math.min(150, curZoomPct));
     $('#layout-zoom-range').value = String(clampedZoom);
     $('#layout-zoom-val').textContent = `${curZoomPct}%`;
     syncLayoutRangeFill(clampedZoom);

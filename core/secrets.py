@@ -30,9 +30,16 @@ _LOCAL_KEY_LOCK = threading.Lock()
 _ALLOWED_PROXY_SCHEMES = frozenset({"http", "https", "socks5", "socks5h"})
 _CRED_URL_RE = re.compile(r"((?:https?|socks5h?)://)([^/\s@:]+):([^/\s@]+)@", re.I)
 _BEARER_RE = re.compile(r"(Bearer\s+)[A-Za-z0-9._\-~+/=]{8,}", re.I)
-_KV_SECRET_RE = re.compile(
-    r"((?:refresh_token|access_token|client_secret|password|passwd|api_key|auth_key|secret|token|key)\s*[=:]\s*)([^\s&,\"';]{4,})",
+_JSON_KV_SECRET_RE = re.compile(
+    r"""(["']?(?:refresh_token|access_token|client_secret|password|passwd|api_key|apikey|auth_key|secret_key|secret|token|key)["']?\s*[:=]\s*["'])([^"'\r\n]{1,})(["'])""",
     re.I,
+)
+_KV_SECRET_RE = re.compile(
+    r"((?:refresh_token|access_token|client_secret|password|passwd|api_key|apikey|auth_key|secret_key|secret|token|key)\s*[=:]\s*)([^\s&,\"';]{4,})",
+    re.I,
+)
+_BARE_KEY_RE = re.compile(
+    r"\b(?:sk-(?:proj-|ant-)?[A-Za-z0-9_\-]{8,}|gsk_[A-Za-z0-9_\-]{8,}|rk_[A-Za-z0-9_\-]{8,}|ghp_[A-Za-z0-9]{16,}|AIza[0-9A-Za-z_\-]{20,})\b"
 )
 
 
@@ -264,13 +271,15 @@ def mask_secret(value: str, *, head: int = 2, tail: int = 4) -> str:
 
 
 def sanitize_error_text(text: str, max_len: int = 240) -> str:
-    """清理异常文本中可能夹带的代理账密、Bearer Token 或 OAuth 密钥后再入库/落日志。"""
+    """清理异常文本中可能夹带的代理账密、Bearer Token、JSON 凭据字段或裸 API Key 后再入库/落日志。"""
     s = str(text or "").strip()
     if not s:
         return ""
     s = _CRED_URL_RE.sub(r"\1***@", s)
     s = _BEARER_RE.sub(r"\1***", s)
+    s = _JSON_KV_SECRET_RE.sub(r"\1***\3", s)
     s = _KV_SECRET_RE.sub(r"\1***", s)
+    s = _BARE_KEY_RE.sub("***", s)
     return s[:max_len]
 
 

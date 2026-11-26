@@ -1686,19 +1686,30 @@ class BuiltinMailStore:
             updated = conn.execute("SELECT * FROM mail_accounts WHERE id=?", (int(row["id"]),)).fetchone()
             return self._row_to_public(updated, now=now) if updated else None
 
-    def release_lease(self, email: str, *, owner: str = "", mark_status: str | None = None) -> bool:
+    def release_lease(
+        self,
+        email: str,
+        *,
+        owner: str = "",
+        mark_status: str | None = None,
+        force: bool = False,
+    ) -> bool:
         em = (email or "").strip().lower()
         if not em:
             return False
         now = time.time()
+        req_owner = (owner or "").strip()
         with self._connect(write=True) as conn:
-            if owner:
-                row = conn.execute(
-                    "SELECT id, leased_by FROM mail_accounts WHERE LOWER(email)=?", (em,)
-                ).fetchone()
-                if not row:
-                    return False
-                if row["leased_by"] and row["leased_by"] != owner:
+            row = conn.execute(
+                "SELECT id, leased_by, lease_expires_at FROM mail_accounts WHERE LOWER(email)=?", (em,)
+            ).fetchone()
+            if not row:
+                return False
+            held_by = str(row["leased_by"] or "").strip()
+            lease_exp = float(row["lease_expires_at"] or 0.0)
+            actively_leased = bool(held_by) and (lease_exp <= 0.0 or lease_exp > now)
+            if actively_leased and not force:
+                if not req_owner or held_by != req_owner:
                     return False
             if mark_status in ("valid", "dead", "unknown"):
                 cur = conn.execute(
@@ -2159,10 +2170,13 @@ class BuiltinMailStore:
     def get_message(self, email: str, msg_id: str) -> dict[str, Any]:
         em = email.strip().lower()
         mid = str(msg_id)
+        now = time.monotonic()
         with self._msg_cache_lock:
             hit = self._msg_cache.get((em, mid))
             if hit is not None:
-                return hit[1]
+                if (now - hit[0]) < _MSG_CACHE_TTL_S:
+                    return hit[1]
+                self._msg_cache.pop((em, mid), None)
         msgs = self.list_messages(em, top=10)
         for m in msgs:
             if str(m.get("id")) == mid:

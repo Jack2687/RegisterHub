@@ -28,6 +28,7 @@ import queue
 import re
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -451,7 +452,7 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
 
 
 def _kill_process_tree(pid: Optional[int], proc: Optional[subprocess.Popen[str]] = None) -> None:
-    """Terminate ONLY the child process tree we spawned (never touch unrelated Chrome)."""
+    """Terminate ONLY the child process tree we spawned (Windows taskkill /T; POSIX process-group killpg)."""
     if pid and os.name == "nt":
         try:
             subprocess.run(
@@ -461,6 +462,27 @@ def _kill_process_tree(pid: Optional[int], proc: Optional[subprocess.Popen[str]]
                 check=False,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
+            return
+        except Exception:
+            pass
+    elif pid and os.name != "nt":
+        try:
+            pgid = os.getpgid(pid)
+            os.killpg(pgid, signal.SIGTERM)
+            if proc is not None:
+                try:
+                    proc.wait(timeout=2)
+                    return
+                except Exception:
+                    pass
+            os.killpg(pgid, signal.SIGKILL)
+            if proc is not None:
+                try:
+                    proc.wait(timeout=2)
+                except Exception:
+                    pass
+            return
+        except ProcessLookupError:
             return
         except Exception:
             pass
@@ -776,16 +798,77 @@ def tool_read_adapter(
 
 
 def _detect_fake_placeholder_violation(tree: ast.AST) -> Optional[str]:
-    """Reject fake placeholder credentials such as api_key='Active', key or 'Active', or {'api_key': 'Active'}."""
+    """Reject fake placeholder credentials including concatenated/f-string/encoded forms (A-4)."""
+
+    def _fold_const_str(node: Optional[ast.AST], _depth: int = 0) -> Optional[str]:
+        if node is None or _depth > 8:
+            return None
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left = _fold_const_str(node.left, _depth + 1)
+            right = _fold_const_str(node.right, _depth + 1)
+            if left is not None and right is not None:
+                return left + right
+            return None
+        if isinstance(node, ast.JoinedStr):
+            parts: List[str] = []
+            for v in node.values:
+                if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                    parts.append(v.value)
+                elif isinstance(v, ast.FormattedValue):
+                    folded = _fold_const_str(v.value, _depth + 1)
+                    if folded is None:
+                        return None
+                    parts.append(folded)
+                else:
+                    return None
+            return "".join(parts)
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id == "chr" and len(node.args) == 1:
+                arg0 = node.args[0]
+                if isinstance(arg0, ast.Constant) and isinstance(arg0.value, int) and 0 <= arg0.value <= 0x10FFFF:
+                    try:
+                        return chr(arg0.value)
+                    except ValueError:
+                        return None
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "decode"
+                and isinstance(node.func.value, ast.Call)
+                and isinstance(node.func.value.func, ast.Attribute)
+                and node.func.value.func.attr == "fromhex"
+                and len(node.func.value.args) == 1
+            ):
+                hex_str = _fold_const_str(node.func.value.args[0], _depth + 1)
+                if hex_str is not None:
+                    try:
+                        return bytes.fromhex(hex_str).decode("utf-8", errors="ignore")
+                    except ValueError:
+                        return None
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "join"
+                and len(node.args) == 1
+                and isinstance(node.args[0], (ast.List, ast.Tuple))
+            ):
+                sep = _fold_const_str(node.func.value, _depth + 1)
+                if sep is not None:
+                    elems = [_fold_const_str(el, _depth + 1) for el in node.args[0].elts]
+                    if all(e is not None for e in elems):
+                        return sep.join(e for e in elems if e is not None)
+        return None
 
     def _is_fake_str(node: Optional[ast.AST]) -> Optional[str]:
         if node is None:
             return None
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            val = node.value.strip()
+        folded = _fold_const_str(node)
+        if folded is not None:
+            val = folded.strip()
             if val.lower() in _FAKE_PLACEHOLDER_VALUES:
                 return val
-        elif isinstance(node, ast.BoolOp):
+            return None
+        if isinstance(node, ast.BoolOp):
             for sub_val in node.values:
                 hit = _is_fake_str(sub_val)
                 if hit:
@@ -820,18 +903,20 @@ def _detect_fake_placeholder_violation(tree: ast.AST) -> Optional[str]:
         if isinstance(target, ast.Attribute):
             return target.attr.lower() in _CREDENTIAL_FIELD_NAMES
         if isinstance(target, ast.Subscript):
-            sl = target.slice
-            if isinstance(sl, ast.Constant) and isinstance(sl.value, str):
-                return sl.value.strip().lower() in _CREDENTIAL_FIELD_NAMES
+            sl_str = _fold_const_str(target.slice)
+            if sl_str is not None:
+                return sl_str.strip().lower() in _CREDENTIAL_FIELD_NAMES
         return False
 
     for node in ast.walk(tree):
-        # 1. Direct string literal containing fake ledger columns like "----Active"
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            low_s = node.value.lower()
-            for marker in _FAKE_LEDGER_SUBSTRINGS:
-                if marker in low_s:
-                    return f"禁止写入伪造占位凭据字面量 ({node.value[:40]!r})"
+        # 1. Direct or folded string expression containing fake ledger columns like "----Active"
+        if isinstance(node, (ast.Constant, ast.BinOp, ast.JoinedStr)):
+            folded_lit = _fold_const_str(node)
+            if folded_lit:
+                low_s = folded_lit.lower()
+                for marker in _FAKE_LEDGER_SUBSTRINGS:
+                    if marker in low_s:
+                        return f"禁止写入伪造占位凭据字面量 ({folded_lit[:40]!r})"
 
         # 2. Assignment: self.api_key = "Active" / account_data["api_key"] = key or "Active"
         if isinstance(node, ast.Assign):
@@ -849,30 +934,35 @@ def _detect_fake_placeholder_violation(tree: ast.AST) -> Optional[str]:
         # 3. Dict literal: {"api_key": "Active"} / {"api_key": key or "Active"}
         if isinstance(node, ast.Dict):
             for k_node, v_node in zip(node.keys, node.values):
-                if isinstance(k_node, ast.Constant) and isinstance(k_node.value, str):
-                    if k_node.value.strip().lower() in _CREDENTIAL_FIELD_NAMES:
-                        fake = _is_fake_str(v_node)
-                        if fake:
-                            return f"禁止在字典中将 {k_node.value!r} 设为假占位值 {fake!r}"
+                k_str = _fold_const_str(k_node)
+                if k_str is not None and k_str.strip().lower() in _CREDENTIAL_FIELD_NAMES:
+                    fake = _is_fake_str(v_node)
+                    if fake:
+                        return f"禁止在字典中将 {k_str!r} 设为假占位值 {fake!r}"
 
-        # 4. Keyword args & dict.setdefault("api_key", "Active") / dict.get("api_key", "Active")
+        # 4. Keyword args, setattr(obj, "api_key", "Active"), & dict.setdefault/get
         if isinstance(node, ast.Call):
             for kw in node.keywords:
                 if kw.arg and kw.arg.lower() in _CREDENTIAL_FIELD_NAMES:
                     fake = _is_fake_str(kw.value)
                     if fake:
                         return f"禁止将参数 {kw.arg} 设为假占位值 {fake!r}"
+            if isinstance(node.func, ast.Name) and node.func.id == "setattr" and len(node.args) >= 3:
+                attr_s = _fold_const_str(node.args[1])
+                if attr_s is not None and attr_s.strip().lower() in _CREDENTIAL_FIELD_NAMES:
+                    fake = _is_fake_str(node.args[2])
+                    if fake:
+                        return f"禁止通过 setattr 将 {attr_s!r} 设为假占位值 {fake!r}"
             if (
                 isinstance(node.func, ast.Attribute)
                 and node.func.attr in ("setdefault", "get")
                 and len(node.args) >= 2
-                and isinstance(node.args[0], ast.Constant)
-                and isinstance(node.args[0].value, str)
-                and node.args[0].value.strip().lower() in _CREDENTIAL_FIELD_NAMES
             ):
-                fake = _is_fake_str(node.args[1])
-                if fake:
-                    return f"禁止为凭据键 {node.args[0].value!r} 提供假占位默认值 {fake!r}"
+                key_s = _fold_const_str(node.args[0])
+                if key_s is not None and key_s.strip().lower() in _CREDENTIAL_FIELD_NAMES:
+                    fake = _is_fake_str(node.args[1])
+                    if fake:
+                        return f"禁止为凭据键 {key_s!r} 提供假占位默认值 {fake!r}"
 
         # 5. Key/token getter returning "Active" or `key or "Active"`
         if isinstance(node, ast.FunctionDef) and any(k in node.name.lower() for k in ("api_key", "extract_key", "get_key", "fetch_key", "token")):
@@ -1262,16 +1352,22 @@ def tool_run_scratch_python(
     env["PYTHONPATH"] = f"{ROOT_DIR}{os.pathsep}{existing_pp}" if existing_pp else str(ROOT_DIR)
 
     t0 = time.time()
+    popen_kwargs: Dict[str, Any] = {
+        "cwd": str(ROOT_DIR),
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "env": env,
+    }
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    else:
+        popen_kwargs["start_new_session"] = True
     proc = subprocess.Popen(
         [sys.executable, "-u", str(script_path)],
-        cwd=str(ROOT_DIR),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        **popen_kwargs,
     )
     if session is not None:
         session.set_active_process(proc, stop_ev=stop_ev)
@@ -1467,13 +1563,15 @@ def _analyze_har_payload(har_text: str, site_name: str = "") -> Dict[str, Any]:
         f"        # {i + 1}. {s['method']} {s['path']} -> HTTP {s['status']} keys={s['req_keys']}"
         for i, s in enumerate(api_steps[:12])
     )
+    safe_doc_origin = (origin or clean_site).replace('"""', "'''").replace("\r", " ").replace("\n", " ")
+    target_url_repr = repr(origin or "https://example.com")
     skeleton = (
-        f'"""Auto-generated skeleton from HAR ({origin or clean_site})."""\n\n'
+        f'"""Auto-generated skeleton from HAR ({safe_doc_origin})."""\n\n'
         "from core.adapter import BaseSiteAdapter\n"
         "from core.identity import generate_identity\n\n\n"
         f"class {cls_name}(BaseSiteAdapter):\n"
         "    def target_url(self) -> str:\n"
-        f'        return "{origin or "https://example.com"}"\n\n'
+        f"        return {target_url_repr}\n\n"
         "    def prepare_identity(self) -> dict:\n"
         "        return generate_identity()\n\n"
         "    def fill_form(self, identity: dict) -> None:\n"
@@ -1653,7 +1751,7 @@ def tool_manage_builtin_mail(
         if act == "release":
             if not str(email or "").strip():
                 return {"ok": False, "error": "release 操作需要提供 email"}
-            ok = store.release_lease(email.strip(), mark_status=mark_status)
+            ok = store.release_lease(email.strip(), owner="ai_agent", mark_status=mark_status)
             return {"ok": ok, "released": ok, "stats": store.get_stats()}
         if act == "cleanup_dead":
             deleted = store.cleanup_dead_accounts()
@@ -1902,17 +2000,20 @@ def tool_run_adapter_once(
         return bool(session is not None and session.is_stop_requested())
 
     t0 = time.time()
-    proc = subprocess.Popen(
-        cmd,
-        cwd=str(ROOT_DIR),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
+    run_popen_kwargs: Dict[str, Any] = {
+        "cwd": str(ROOT_DIR),
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "env": env,
+    }
+    if os.name == "nt":
+        run_popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    else:
+        run_popen_kwargs["start_new_session"] = True
+    proc = subprocess.Popen(cmd, **run_popen_kwargs)
 
     if session is not None:
         session.set_active_process(proc, stop_ev=stop_ev)
@@ -2049,21 +2150,48 @@ def _repair_dangling_tool_calls(messages: List[Dict[str, Any]]) -> List[Dict[str
             i += 1
             continue
         if role == "assistant" and msg.get("tool_calls"):
-            tool_calls = [tc for tc in (msg.get("tool_calls") or []) if isinstance(tc, dict)]
-            expected_ids = {str(tc.get("id") or "") for tc in tool_calls if str(tc.get("id") or "")}
-            repaired.append(msg)
+            raw_tcs = [tc for tc in (msg.get("tool_calls") or []) if isinstance(tc, dict)]
+            norm_tcs: List[Dict[str, Any]] = []
+            repaired_empty_ids: List[Tuple[str, str]] = []
+            for idx, tc in enumerate(raw_tcs):
+                tc_copy = dict(tc)
+                tid = str(tc_copy.get("id") or "").strip()
+                if not tid:
+                    tid = f"call_repaired_{i}_{idx + 1}"
+                    tc_copy["id"] = tid
+                    fn_nm = str((tc_copy.get("function") or {}).get("name") or "")
+                    repaired_empty_ids.append((tid, fn_nm))
+                norm_tcs.append(tc_copy)
+            msg_copy = dict(msg)
+            msg_copy["tool_calls"] = norm_tcs
+            expected_ids = {str(tc["id"]) for tc in norm_tcs}
+            repaired.append(msg_copy)
             i += 1
             answered_ids = set()
             while i < n and isinstance(messages[i], dict) and messages[i].get("role") == "tool":
                 tmsg = messages[i]
-                tid = str(tmsg.get("tool_call_id") or "")
-                if not expected_ids or tid in expected_ids:
-                    if tid:
-                        answered_ids.add(tid)
+                tid = str(tmsg.get("tool_call_id") or "").strip()
+                if not tid and repaired_empty_ids:
+                    tname = str(tmsg.get("name") or "")
+                    match_idx = next(
+                        (k for k, (cand_id, cand_nm) in enumerate(repaired_empty_ids) if cand_id not in answered_ids and (not cand_nm or cand_nm == tname)),
+                        None,
+                    )
+                    if match_idx is None:
+                        match_idx = next(
+                            (k for k, (cand_id, _) in enumerate(repaired_empty_ids) if cand_id not in answered_ids),
+                            None,
+                        )
+                    if match_idx is not None:
+                        tid = repaired_empty_ids[match_idx][0]
+                        tmsg = dict(tmsg)
+                        tmsg["tool_call_id"] = tid
+                if tid in expected_ids and tid not in answered_ids:
+                    answered_ids.add(tid)
                     repaired.append(tmsg)
                 i += 1
-            for idx, tc in enumerate(tool_calls):
-                tid = str(tc.get("id") or f"call_stopped_{idx + 1}")
+            for tc in norm_tcs:
+                tid = str(tc["id"])
                 if tid not in answered_ids:
                     fn = tc.get("function") or {}
                     repaired.append({
@@ -2082,9 +2210,21 @@ def _repair_dangling_tool_calls(messages: List[Dict[str, Any]]) -> List[Dict[str
 
 
 def _slice_messages_safely(messages: List[Dict[str, Any]], max_count: int = 80) -> List[Dict[str, Any]]:
-    """Slice to at most `max_count` recent messages without ever cutting between assistant(tool_calls) and tool replies."""
+    """Slice to at most `max_count` recent messages, preserving leading compaction checkpoint & tool-call pairs."""
     if max_count <= 0 or len(messages) <= max_count:
         return list(messages)
+    has_ckpt = (
+        bool(messages)
+        and isinstance(messages[0], dict)
+        and _COMPACTION_TAG_OPEN in str(messages[0].get("content") or "")
+    )
+    if has_ckpt and max_count >= 2:
+        rest = messages[1:]
+        tail_cap = max_count - 1
+        start = max(0, len(rest) - tail_cap)
+        while start < len(rest) and isinstance(rest[start], dict) and rest[start].get("role") == "tool":
+            start += 1
+        return [messages[0]] + list(rest[start:])
     start = len(messages) - max_count
     while start < len(messages) and isinstance(messages[start], dict) and messages[start].get("role") == "tool":
         start += 1
@@ -2276,11 +2416,13 @@ class AgentSession:
         uploads: Optional[List[Dict[str, Any]]] = None,
         queued_messages: Optional[List[Dict[str, Any]]] = None,
         goal_state: Optional[Dict[str, Any]] = None,
+        pinned: bool = False,
     ) -> None:
         now_s = time.strftime("%Y-%m-%d %H:%M:%S")
         self.id = session_id
         self.title = title or "新 AI 直跑会话"
         self.target_url = target_url
+        self.pinned: bool = bool(pinned)
         self.status = status
         self.last_error = str(last_error or "")
         self.llm_profile_id = str(llm_profile_id or "").strip()
@@ -2341,6 +2483,11 @@ class AgentSession:
         self._active_tool_name: Optional[str] = None
         self._active_tool_started_at: Optional[float] = None
         self._persist_lock = threading.Lock()
+        self._deleted: bool = False
+
+    def mark_deleted(self) -> None:
+        with self._lock:
+            self._deleted = True
 
     def is_stop_requested(self) -> bool:
         with self._lock:
@@ -2498,6 +2645,7 @@ class AgentSession:
                 "id": self.id,
                 "title": self.title,
                 "target_url": self.target_url,
+                "pinned": bool(self.pinned),
                 "status": self.status,
                 "error": self.last_error,
                 "llm_profile_id": self.llm_profile_id,
@@ -2535,6 +2683,7 @@ class AgentSession:
                 "id": self.id,
                 "title": self.title,
                 "target_url": self.target_url,
+                "pinned": bool(self.pinned),
                 "status": self.status,
                 "error": self.last_error,
                 "llm_profile_id": self.llm_profile_id,
@@ -2725,15 +2874,18 @@ class AgentSession:
         return "\n".join(lines).rstrip() + "\n"
 
     def persist(self, *, status_override: Optional[str] = None, error_override: Optional[str] = None) -> None:
-        if not _SAFE_SESSION_ID_RE.fullmatch(self.id):
+        if not _SAFE_SESSION_ID_RE.fullmatch(self.id) or self._deleted:
             return
         with self._persist_lock:
             with self._lock:
+                if self._deleted:
+                    return
                 trimmed_msgs = _slice_messages_safely(self.messages, _PERSIST_MAX_MESSAGES)
                 payload = {
                     "id": self.id,
                     "title": self.title,
                     "target_url": self.target_url,
+                    "pinned": bool(self.pinned),
                     "status": self.status if status_override is None else status_override,
                     "error": self.last_error if error_override is None else error_override,
                     "llm_profile_id": self.llm_profile_id,
@@ -2762,6 +2914,11 @@ class AgentSession:
                 out_path = AGENT_SESSIONS_DIR / f"{self.id}.json"
                 tmp_path = out_path.with_suffix(".json.tmp")
                 tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                if os.name != "nt":
+                    try:
+                        os.chmod(tmp_path, 0o600)
+                    except OSError:
+                        pass
                 os.replace(tmp_path, out_path)
             except Exception:
                 pass
@@ -2778,6 +2935,7 @@ class AgentSession:
             session_id=str(data["id"]),
             title=str(data.get("title") or ""),
             target_url=str(data.get("target_url") or ""),
+            pinned=bool(data.get("pinned", False)),
             status=status,
             last_error=str(data.get("error") or ""),
             created_at=data.get("created_at"),
@@ -3059,6 +3217,74 @@ def _call_compat_chat_completion(
     return fn(**kwargs)
 
 
+_BUILTIN_HARD_DENY_RULES: Tuple[Dict[str, Any], ...] = (
+    {
+        "id": "builtin_no_fake_active",
+        "name": "内置底线：禁止假 Active 占位凭据",
+        "description": "不可被规则文件清空或覆盖：禁止写入/修补适配器硬编码 Active/OK/placeholder 作为 api_key。",
+        "tools": ("write_adapter", "patch_adapter"),
+        "pattern": r"""["']api_key["']\s*[:=]\s*["'](Active|OK|placeholder)["']""",
+        "policy": "deny",
+        "priority": 10000,
+        "enabled": True,
+    },
+    {
+        "id": "builtin_protect_guard_and_init",
+        "name": "内置底线：禁止诊断脚本篡改护栏或适配器入口",
+        "description": "禁止 run_scratch_python 直接改写 sites/__init__.py 或 agent_guard_rules.json。",
+        "tools": ("run_scratch_python",),
+        "pattern": r"""(?:sites[/\\]+__init__\.py|agent_guard_rules\.json)""",
+        "policy": "deny",
+        "priority": 10000,
+        "enabled": True,
+    },
+)
+
+
+def _collect_guard_blobs(args: Any) -> List[str]:
+    """Extract raw unescaped string values plus JSON representation so regexes match double-quoted code (A-3)."""
+    blobs: List[str] = []
+    try:
+        blobs.append(json.dumps(args, ensure_ascii=False))
+    except Exception:
+        pass
+
+    def _walk(obj: Any, depth: int = 0) -> None:
+        if depth > 6:
+            return
+        if isinstance(obj, str):
+            if obj:
+                blobs.append(obj)
+        elif isinstance(obj, dict):
+            for v in obj.values():
+                _walk(v, depth + 1)
+        elif isinstance(obj, (list, tuple)):
+            for item in obj[:50]:
+                _walk(item, depth + 1)
+
+    _walk(args)
+    return blobs
+
+
+def _redact_tool_args_for_event(fn_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    """Redact bulk-import credential payloads before persisting tool_start events to session JSON (A-5)."""
+    if not isinstance(args, dict):
+        return {}
+    if fn_name not in ("manage_builtin_mail", "manage_builtin_proxies"):
+        return dict(args)
+    from core.secrets import mask_proxy_url, mask_secret_url
+
+    redacted = dict(args)
+    if "text" in redacted and isinstance(redacted["text"], str) and redacted["text"].strip():
+        lines = [ln for ln in redacted["text"].splitlines() if ln.strip() and not ln.strip().startswith("#")]
+        redacted["text"] = f"[已脱敏：共 {len(lines)} 条导入数据]"
+    if "gateway_url" in redacted and isinstance(redacted["gateway_url"], str) and redacted["gateway_url"].strip():
+        redacted["gateway_url"] = mask_proxy_url(redacted["gateway_url"])
+    if "url" in redacted and isinstance(redacted["url"], str) and redacted["url"].strip():
+        redacted["url"] = mask_secret_url(redacted["url"])
+    return redacted
+
+
 class SingleAgentManager:
     """Strict single-thread manager for autonomous registration sessions."""
 
@@ -3136,16 +3362,34 @@ class SingleAgentManager:
         return {"ok": True, "deleted": rid, "guard_rules": rules}
 
     def _evaluate_guard_detail(self, tool_name: str, args: Dict[str, Any]) -> Tuple[str, Optional[Dict[str, Any]]]:
-        haystack = json.dumps(args, ensure_ascii=False)
+        blobs = _collect_guard_blobs(args)
+        # 1. Non-overridable built-in safety floor (A-6)
+        for hr in _BUILTIN_HARD_DENY_RULES:
+            if tool_name not in hr.get("tools", ()):
+                continue
+            pat = str(hr.get("pattern") or "")
+            try:
+                if any(re.search(pat, b, re.I) for b in blobs):
+                    return str(hr.get("policy") or "deny"), dict(hr)
+            except re.error:
+                continue
+
+        # 2. User-configured guard rules (evaluated on unescaped raw string values + JSON, A-3)
         rules = sorted(load_guard_rules(), key=lambda r: int(r.get("priority") or 0), reverse=True)
         for r in rules:
             if not r.get("enabled", True):
                 continue
             rt = str(r.get("tool") or "*")
-            if rt != "*" and rt != tool_name:
+            matched_tool = (rt == "*" or rt == tool_name)
+            # Capability equivalence (A-2): if user guards run_adapter_once, also guard run_scratch_python invoking main.py --run
+            if not matched_tool and rt == "run_adapter_once" and tool_name == "run_scratch_python":
+                if any(re.search(r"main\.py[^\n\r]{0,80}--run", b, re.I) for b in blobs):
+                    matched_tool = True
+            if not matched_tool:
                 continue
             try:
-                if re.search(str(r.get("pattern") or ""), haystack, re.I):
+                pat = str(r.get("pattern") or "")
+                if any(re.search(pat, b, re.I) for b in blobs):
                     return str(r.get("policy") or "allow"), r
             except re.error:
                 continue
@@ -3273,7 +3517,7 @@ class SingleAgentManager:
                 clean_title = f"{host} AI 直跑" if host else "AI 直跑会话"
             else:
                 clean_title = f"AI 会话 {time.strftime('%H:%M:%S')}"
-        sid = f"ag_{int(time.time())}_{secrets.token_hex(3)}"
+        sid = f"ag_{int(time.time())}_{secrets.token_hex(8)}"
         sess = AgentSession(
             sid,
             title=clean_title,
@@ -3292,6 +3536,7 @@ class SingleAgentManager:
         sess = self.get_session(session_id)
         existed = sess is not None
         if sess is not None:
+            sess.mark_deleted()
             sess.stop()
             with self._lock:
                 self._sessions.pop(session_id, None)
@@ -3400,8 +3645,25 @@ class SingleAgentManager:
         target_file = Path(str(meta.get("file") or "")).resolve()
         if target_file.parent != sites_root:
             raise ValueError("安全校验失败：检查点目标文件不在 sites/ 目录下")
+        if (
+            target_file.suffix != ".py"
+            or target_file.name.startswith("_")
+            or target_file.stem.lower() in _RESERVED_ADAPTER_NAMES
+            or not _SAFE_ADAPTER_WRITE_RE.fullmatch(target_file.stem)
+        ):
+            raise ValueError(f"安全校验失败：禁止回滚覆盖非适配器核心文件 ({target_file.name})")
 
+        existed_before = meta.get("existed_before", True) is not False
         before_text = before_path.read_text(encoding="utf-8")
+        if existed_before and before_text.strip():
+            try:
+                tree = ast.parse(before_text, filename=target_file.name)
+            except SyntaxError as se:
+                raise ValueError(f"检查点快照语法无效，拒绝回滚: 第 {se.lineno} 行 {se.msg}") from se
+            fake_err = _detect_fake_placeholder_violation(tree)
+            if fake_err:
+                raise ValueError(f"检查点快照未通过反假成功校验，拒绝回滚: {fake_err}")
+
         current_text = target_file.read_text(encoding="utf-8", errors="ignore") if target_file.exists() else ""
 
         backup_cp_id = _save_adapter_checkpoint(
@@ -3409,11 +3671,35 @@ class SingleAgentManager:
             adapter_name=adapter_name,
             target_file=target_file,
             before_text=current_text,
-            after_text=before_text,
+            after_text=before_text if existed_before else "",
             existed_before=target_file.exists(),
             kind="pre_restore",
             prefix="pre_restore",
         )
+
+        if not existed_before:
+            if target_file.exists():
+                target_file.unlink()
+            if target_file.exists():
+                raise RuntimeError("回滚删除新建适配器失败，文件仍存在")
+            if adapter_name:
+                sys.modules.pop(f"sites.{adapter_name}", None)
+            note = (
+                f"已删除检查点 {cp_id} 新建的 sites/{target_file.name}，恢复至写入前不存在状态"
+                f"（原代码已备份为 {backup_cp_id}）"
+            )
+            sess.emit("system_msg", content=note)
+            sess.persist()
+            return {
+                "ok": True,
+                "session_id": session_id,
+                "checkpoint_id": cp_id,
+                "backup_checkpoint_id": backup_cp_id,
+                "project": adapter_name,
+                "file": str(target_file),
+                "deleted": True,
+                "restored_lines": 0,
+            }
 
         target_file.parent.mkdir(parents=True, exist_ok=True)
         tmp = target_file.with_suffix(".py.tmp")
@@ -3437,6 +3723,7 @@ class SingleAgentManager:
             "backup_checkpoint_id": backup_cp_id,
             "project": adapter_name,
             "file": str(target_file),
+            "deleted": False,
             "restored_lines": len(before_text.splitlines()),
         }
 
@@ -4378,21 +4665,28 @@ class SingleAgentManager:
         max_tokens_recovery_count = 0
         last_compact_step = -999
 
-        saved_cfg = _load_saved_agent_config_if_exists()
-        base_max_steps = int(saved_cfg["max_steps"]) if (saved_cfg and saved_cfg.get("max_steps")) else MAX_STEPS_PER_TURN
-        with sess._lock:
-            goal_init = dict(sess.goal_state) if (sess.goal_state and sess.goal_state.get("active")) else None
-        max_steps = max(base_max_steps, int(goal_init.get("max_steps") or _GOAL_DEFAULT_MAX_STEPS)) if goal_init else base_max_steps
-        eff_system_prompt = str(saved_cfg.get("system_prompt") or AGENT_SYSTEM_PROMPT) if saved_cfg else AGENT_SYSTEM_PROMPT
-        eff_cfg = load_agent_config()
-        skills_block = _render_enabled_skills_prompt(eff_cfg.get("enabled_skills") or [])
-        if skills_block:
-            eff_system_prompt = f"{eff_system_prompt.rstrip()}\n\n{skills_block}"
-        allowed_tools = set(eff_cfg.get("enabled_tools") or [t["function"]["name"] for t in TOOL_SCHEMAS])
-        eff_tools = [t for t in TOOL_SCHEMAS if t["function"]["name"] in allowed_tools]
-        default_cfg_pid = str(saved_cfg.get("llm_profile_id") or "").strip() if saved_cfg else ""
-
         try:
+            eff_cfg = load_agent_config()
+            saved_cfg = _load_saved_agent_config_if_exists()
+            try:
+                base_max_steps = max(1, min(200, int(eff_cfg.get("max_steps") or MAX_STEPS_PER_TURN)))
+            except (TypeError, ValueError):
+                base_max_steps = MAX_STEPS_PER_TURN
+            with sess._lock:
+                goal_init = dict(sess.goal_state) if (sess.goal_state and sess.goal_state.get("active")) else None
+            try:
+                goal_steps = int((goal_init or {}).get("max_steps") or _GOAL_DEFAULT_MAX_STEPS)
+            except (TypeError, ValueError):
+                goal_steps = _GOAL_DEFAULT_MAX_STEPS
+            max_steps = max(base_max_steps, goal_steps) if goal_init else base_max_steps
+            eff_system_prompt = str(eff_cfg.get("system_prompt") or AGENT_SYSTEM_PROMPT)
+            skills_block = _render_enabled_skills_prompt(eff_cfg.get("enabled_skills") or [])
+            if skills_block:
+                eff_system_prompt = f"{eff_system_prompt.rstrip()}\n\n{skills_block}"
+            allowed_tools = set(eff_cfg.get("enabled_tools") or [t["function"]["name"] for t in TOOL_SCHEMAS])
+            eff_tools = [t for t in TOOL_SCHEMAS if t["function"]["name"] in allowed_tools]
+            default_cfg_pid = str((saved_cfg or eff_cfg).get("llm_profile_id") or "").strip()
+
             step = 0
             while step < max_steps:
                 if stop_ev.is_set():
@@ -4654,7 +4948,8 @@ class SingleAgentManager:
                     guard_policy, matched_rule = ("allow", None) if parse_err else self._evaluate_guard_detail(fn_name, parsed_args)
                     rule_name = str(matched_rule.get("name") or matched_rule.get("id") or "") if matched_rule else ""
 
-                    sess.emit("tool_start", call_id=call_id, name=fn_name, args=parsed_args)
+                    safe_event_args = _redact_tool_args_for_event(fn_name, parsed_args)
+                    sess.emit("tool_start", call_id=call_id, name=fn_name, args=safe_event_args)
                     t_tool = time.perf_counter()
                     sess.set_active_tool(fn_name, t_tool, stop_ev=stop_ev)
                     try:
@@ -4670,7 +4965,7 @@ class SingleAgentManager:
                         else:
                             approved = True
                             if guard_policy == "ask":
-                                app_id = f"app_{secrets.token_hex(4)}"
+                                app_id = f"app_{secrets.token_hex(8)}"
                                 wait_ev = threading.Event()
                                 app_rec = {
                                     "id": app_id,
@@ -4679,7 +4974,7 @@ class SingleAgentManager:
                                     "tool": fn_name,
                                     "tool_name": fn_name,
                                     "rule_name": rule_name,
-                                    "args": parsed_args,
+                                    "args": safe_event_args,
                                     "status": "pending",
                                     "created_at": time.strftime("%H:%M:%S"),
                                 }
@@ -4693,7 +4988,7 @@ class SingleAgentManager:
                                     approval_id=app_id,
                                     tool_name=fn_name,
                                     rule_name=rule_name,
-                                    tool_args=parsed_args,
+                                    tool_args=safe_event_args,
                                     status="pending",
                                 )
                                 sess.emit("status", status="waiting_approval", error="")
@@ -4701,11 +4996,24 @@ class SingleAgentManager:
                                 deadline = time.monotonic() + 300.0
                                 while not wait_ev.is_set() and not stop_ev.is_set() and time.monotonic() < deadline:
                                     wait_ev.wait(timeout=0.25)
+                                timed_out_approval = False
                                 with self._lock:
                                     self._approval_events.pop(app_id, None)
                                     dec_status = str(app_rec.get("status") or "rejected")
+                                    if dec_status == "pending" and not stop_ev.is_set():
+                                        app_rec["status"] = "timeout"
+                                        app_rec["decided_at"] = time.strftime("%H:%M:%S")
+                                        dec_status = "timeout"
+                                        timed_out_approval = True
                                 if stop_ev.is_set():
                                     return
+                                if timed_out_approval:
+                                    with sess._lock:
+                                        if sess.status == "waiting_approval":
+                                            sess.status = "running"
+                                    sess.emit("approval_resolved", approval_id=app_id, status="timeout")
+                                    sess.emit("status", status="running", error="")
+                                    sess.persist()
                                 approved = dec_status == "approved"
                                 if not approved:
                                     tool_res = {

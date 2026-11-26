@@ -48,11 +48,19 @@ class FormInspector:
         # 2. Detect Password inputs (Distinguish password vs confirm_password)
         pwd_locs = self.page.locator('input[type="password"]')
         pwd_count = pwd_locs.count()
-        if pwd_count >= 2:
-            results["password"] = 'input[type="password"]:nth-of-type(1)'
-            results["confirm_password"] = 'input[type="password"]:nth-of-type(2)'
-        elif pwd_count == 1 and pwd_locs.first.is_visible():
-            results["password"] = 'input[type="password"]'
+        visible_pwd_indices = [
+            i for i in range(pwd_count)
+            if pwd_locs.nth(i).is_visible()
+        ]
+        if len(visible_pwd_indices) >= 2:
+            results["password"] = f'input[type="password"] >> nth={visible_pwd_indices[0]}'
+            results["confirm_password"] = f'input[type="password"] >> nth={visible_pwd_indices[1]}'
+        elif len(visible_pwd_indices) == 1:
+            results["password"] = (
+                'input[type="password"]'
+                if pwd_count == 1
+                else f'input[type="password"] >> nth={visible_pwd_indices[0]}'
+            )
         else:
             for sel in ['input[name*="password" i]', 'input[id*="password" i]', 'input[placeholder*="密码" i]']:
                 loc = self.page.locator(sel)
