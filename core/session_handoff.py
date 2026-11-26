@@ -681,8 +681,8 @@ def compute_staged_session_title(
         return None
 
     stage_label = str(prog.get("stage_label") or "").strip()
-    # 控制标题总长在 8..22 字符内，侧边栏单行清爽展示
-    max_label_len = max(6, 20 - len(stage_label) - 3)
+    # 控制标题长度适中且不截断常见站点主干名（ASCII 宽度约为汉字一半，侧边栏可单行完整展示）
+    max_label_len = max(12, 26 - len(stage_label) - 3)
     if len(label) > max_label_len:
         label = label[:max_label_len].rstrip("-_ .")
 
