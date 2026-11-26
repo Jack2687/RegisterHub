@@ -2367,6 +2367,48 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
             handler._send_json(res)
         return True
 
+    if path == "/api/agent/sessions/import-handoff":
+        raw_md = str(body.get("markdown") or "").strip()
+        if not raw_md:
+            handler._send_json({"ok": False, "error": "接力单内容不能为空"}, status=400)
+            return True
+        if len(raw_md) > 300_000:
+            handler._send_json({"ok": False, "error": "接力单内容超过 300KB 上限"}, status=400)
+            return True
+        try:
+            res = srv.agent_manager.import_session_handoff(
+                raw_md,
+                auto_start=bool(body.get("auto_start", False)),
+                llm_profile_id=str(body.get("llm_profile_id") or body.get("profile_id") or "").strip(),
+                llm_model=str(body.get("llm_model") or "").strip(),
+            )
+            if isinstance(res.get("session"), dict):
+                res["session"] = enrich_agent_detail(res["session"])
+            handler._send_json(res)
+        except ValueError as ve:
+            handler._send_json({"ok": False, "error": str(ve)}, status=400)
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=500)
+        return True
+
+    m_ag_share = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/share", path)
+    if m_ag_share:
+        sid = m_ag_share.group(1)
+        try:
+            res = srv.agent_manager.export_session_handoff(
+                sid,
+                include_code=bool(body.get("include_code", True)),
+                use_llm_refine=bool(body.get("use_llm_refine", False)),
+            )
+            handler._send_json(res)
+        except KeyError as ke:
+            handler._send_json({"ok": False, "error": str(ke)}, status=404)
+        except ValueError as ve:
+            handler._send_json({"ok": False, "error": str(ve)}, status=400)
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=500)
+        return True
+
     m_ag_btw = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)/side-question/stream", path)
     if m_ag_btw:
         sid = m_ag_btw.group(1)

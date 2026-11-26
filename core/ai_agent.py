@@ -40,6 +40,15 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from core import llm_client, llm_profiles
+from core.session_handoff import (
+    analyze_session_progress,
+    build_handoff_llm_refine_prompt,
+    build_handoff_markdown,
+    compute_staged_session_title,
+    infer_initial_title_source,
+    is_default_title,
+    parse_handoff_markdown,
+)
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 SITES_DIR = ROOT_DIR / "sites"
@@ -2425,10 +2434,12 @@ class AgentSession:
         queued_messages: Optional[List[Dict[str, Any]]] = None,
         goal_state: Optional[Dict[str, Any]] = None,
         pinned: bool = False,
+        title_source: str = "",
     ) -> None:
         now_s = time.strftime("%Y-%m-%d %H:%M:%S")
         self.id = session_id
         self.title = title or "新 AI 直跑会话"
+        self.title_source: str = str(title_source or "").strip()
         self.target_url = target_url
         self.pinned: bool = bool(pinned)
         self.status = status
@@ -2652,6 +2663,7 @@ class AgentSession:
             return {
                 "id": self.id,
                 "title": self.title,
+                "title_source": self.title_source,
                 "target_url": self.target_url,
                 "pinned": bool(self.pinned),
                 "status": self.status,
@@ -2690,6 +2702,7 @@ class AgentSession:
             return {
                 "id": self.id,
                 "title": self.title,
+                "title_source": self.title_source,
                 "target_url": self.target_url,
                 "pinned": bool(self.pinned),
                 "status": self.status,
@@ -2892,6 +2905,7 @@ class AgentSession:
                 payload = {
                     "id": self.id,
                     "title": self.title,
+                    "title_source": self.title_source,
                     "target_url": self.target_url,
                     "pinned": bool(self.pinned),
                     "status": self.status if status_override is None else status_override,
@@ -2942,6 +2956,7 @@ class AgentSession:
         return cls(
             session_id=str(data["id"]),
             title=str(data.get("title") or ""),
+            title_source=str(data.get("title_source") or ""),
             target_url=str(data.get("target_url") or ""),
             pinned=bool(data.get("pinned", False)),
             status=status,
@@ -3512,6 +3527,7 @@ class SingleAgentManager:
         *,
         llm_profile_id: str = "",
         llm_model: str = "",
+        title_source: str = "",
     ) -> AgentSession:
         clean_url = str(target_url or "").strip()
         clean_title = str(title or "").strip()[:80]
@@ -3519,12 +3535,19 @@ class SingleAgentManager:
         clean_pid = "" if raw_pid == "__follow_global__" else raw_pid
         raw_mod = str(llm_model or "").strip()
         clean_mod = "" if raw_mod == "__follow_profile__" else raw_mod
-        if not clean_title:
+        eff_src = str(title_source or "").strip().lower()
+        if not clean_title or is_default_title(clean_title):
             if clean_url:
                 host = (urlparse(clean_url).hostname or "").replace("www.", "")
-                clean_title = f"{host} AI 直跑" if host else "AI 直跑会话"
+                clean_title = f"直跑 · {host}" if host else "新 AI 直跑会话"
+                if not eff_src:
+                    eff_src = "auto" if host else "default"
             else:
-                clean_title = f"AI 会话 {time.strftime('%H:%M:%S')}"
+                clean_title = clean_title or "新 AI 直跑会话"
+                if not eff_src:
+                    eff_src = "default"
+        elif not eff_src:
+            eff_src = infer_initial_title_source(clean_title)
         sid = f"ag_{int(time.time())}_{secrets.token_hex(8)}"
         sess = AgentSession(
             sid,
@@ -3532,6 +3555,7 @@ class SingleAgentManager:
             target_url=clean_url,
             llm_profile_id=clean_pid,
             llm_model=clean_mod,
+            title_source=eff_src,
         )
         with self._lock:
             self._sessions[sid] = sess
@@ -3570,10 +3594,185 @@ class SingleAgentManager:
             return None
         with sess._lock:
             sess.title = clean_title
+            sess.title_source = "user"
             sess.updated_at = time.strftime("%Y-%m-%d %H:%M:%S")
         sess.emit("session_renamed", session_id=session_id, title=clean_title)
         sess.persist()
         return sess.to_summary()
+
+    def _find_session_adapter_code(self, sess_dict: Dict[str, Any]) -> Tuple[str, str]:
+        prog = analyze_session_progress(sess_dict)
+        sites_root = SITES_DIR.resolve()
+        cands: List[Path] = []
+        slug = str(prog.get("site_slug") or "").strip()
+        if slug and re.fullmatch(r"[A-Za-z0-9_]+", slug):
+            cands.append(sites_root / f"{slug}.py")
+        for fp in prog.get("touched_files") or []:
+            raw = str(fp or "").strip()
+            if raw.endswith(".py"):
+                p = Path(raw)
+                if not p.is_absolute():
+                    p = ROOT_DIR / raw
+                cands.append(p)
+        for p in cands:
+            try:
+                res = p.resolve()
+                if sites_root not in res.parents or not res.is_file() or res.stat().st_size > 300_000:
+                    continue
+                return res.read_text(encoding="utf-8", errors="replace"), f"sites/{res.name}"
+            except Exception:
+                continue
+        return "", ""
+
+    def export_session_handoff(
+        self,
+        session_id: str,
+        *,
+        include_code: bool = True,
+        use_llm_refine: bool = False,
+    ) -> Dict[str, Any]:
+        sess = self.get_session(session_id)
+        if sess is None:
+            raise KeyError(f"会话不存在: {session_id}")
+        with sess._lock:
+            snap = {
+                "id": sess.id,
+                "title": sess.title,
+                "title_source": sess.title_source,
+                "target_url": sess.target_url,
+                "status": sess.status,
+                "error": sess.last_error,
+                "steps_count": sess.steps_count,
+                "plan_steps": list(sess.plan),
+                "goal_state": dict(sess.goal_state) if sess.goal_state else None,
+                "messages": list(sess.messages),
+                "llm_profile_id": sess.llm_profile_id,
+                "llm_model": sess.llm_model,
+            }
+        adapter_code, adapter_path = self._find_session_adapter_code(snap) if include_code else ("", "")
+        base = build_handoff_markdown(
+            snap,
+            edition="community",
+            adapter_code=adapter_code,
+            adapter_path=adapter_path,
+            include_code=include_code,
+        )
+        if use_llm_refine:
+            try:
+                prompt = build_handoff_llm_refine_prompt(base["markdown"])
+                eff_cfg = load_agent_config()
+                default_pid = str(eff_cfg.get("llm_profile_id") or "").strip()
+                ov = self._resolve_runtime_override(
+                    str(snap.get("llm_profile_id") or ""),
+                    str(snap.get("llm_model") or ""),
+                    default_pid,
+                )
+                resp = llm_client.chat_completion(
+                    messages=[{"role": "user", "content": prompt}],
+                    tools=[],
+                    system_prompt="你是 RegisterHub 逆向与自动化专家，请严格按要求输出脱敏、精炼、高信噪比的 Markdown 摘要。",
+                    overrides=ov,
+                )
+                refined_txt = str((resp or {}).get("content") or "").strip()
+                if refined_txt:
+                    base = build_handoff_markdown(
+                        snap,
+                        edition="community",
+                        adapter_code=adapter_code,
+                        adapter_path=adapter_path,
+                        include_code=include_code,
+                        llm_summary=refined_txt,
+                    )
+                    base["llm_refined"] = True
+            except Exception:
+                base["llm_refined"] = False
+        else:
+            base["llm_refined"] = False
+        return base
+
+    def import_session_handoff(
+        self,
+        markdown: str,
+        *,
+        auto_start: bool = False,
+        llm_profile_id: str = "",
+        llm_model: str = "",
+    ) -> Dict[str, Any]:
+        parsed = parse_handoff_markdown(markdown, target_edition="community")
+        sess = self.create_session(
+            title=parsed["suggested_title"],
+            target_url=parsed["target_url"],
+            llm_profile_id=llm_profile_id,
+            llm_model=llm_model,
+            title_source="auto",
+        )
+        started = False
+        if auto_start:
+            self.send_message(
+                sess.id,
+                parsed["initial_prompt"],
+                target_url=parsed["target_url"],
+                llm_profile_id=llm_profile_id or None,
+                llm_model=llm_model or None,
+                mode="steer",
+            )
+            started = True
+        return {
+            "ok": True,
+            "session": sess.to_detail(),
+            "parsed": {k: v for k, v in parsed.items() if k != "adapter_code"},
+            "initial_prompt": parsed["initial_prompt"],
+            "started": started,
+        }
+
+    def _maybe_auto_update_title(
+        self,
+        sess: AgentSession,
+        *,
+        status_override: Optional[str] = None,
+        error_override: Optional[str] = None,
+    ) -> None:
+        try:
+            with sess._lock:
+                if sess.title_source == "user":
+                    return
+                snap = {
+                    "id": sess.id,
+                    "title": sess.title,
+                    "title_source": sess.title_source,
+                    "target_url": sess.target_url,
+                    "status": sess.status if status_override is None else status_override,
+                    "error": sess.last_error if error_override is None else error_override,
+                    "goal_state": dict(sess.goal_state) if sess.goal_state else None,
+                    "messages": list(sess.messages),
+                }
+            new_title = compute_staged_session_title(
+                snap,
+                current_title=str(snap["title"]),
+                title_source=str(snap["title_source"]),
+            )
+            prog = analyze_session_progress(snap)
+            changed_title = ""
+            changed_any = False
+            with sess._lock:
+                if sess.title_source == "user":
+                    return
+                if new_title and new_title != sess.title:
+                    sess.title = new_title
+                    sess.title_source = "auto"
+                    changed_title = new_title
+                    changed_any = True
+                if not sess.target_url and prog.get("target_url"):
+                    sess.target_url = str(prog["target_url"])[:512]
+                    changed_any = True
+                if changed_any:
+                    sess.updated_at = time.strftime("%Y-%m-%d %H:%M:%S")
+            if changed_title:
+                sess.emit("session_renamed", session_id=sess.id, title=changed_title, auto=True)
+            if changed_any:
+                sess.persist()
+        except Exception:
+            pass
 
     def stop_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         sess = self.get_session(session_id)
@@ -4630,6 +4829,7 @@ class SingleAgentManager:
                     return False
         # Persist complete message history to disk BEFORE flipping status so readers
         # observing `sess.status == "done"` never read a stale pre-final snapshot.
+        self._maybe_auto_update_title(sess, status_override=status, error_override=str(error or ""))
         sess.persist(status_override=status, error_override=str(error or ""))
 
         next_q: Optional[Dict[str, Any]] = None
@@ -4700,6 +4900,7 @@ class SingleAgentManager:
             eff_tools = [t for t in TOOL_SCHEMAS if t["function"]["name"] in allowed_tools]
             default_cfg_pid = str((saved_cfg or eff_cfg).get("llm_profile_id") or "").strip()
 
+            self._maybe_auto_update_title(sess, status_override="running")
             step = 0
             while max_steps <= 0 or step < max_steps:
                 if stop_ev.is_set():
@@ -5099,6 +5300,11 @@ class SingleAgentManager:
                             "content": tool_text,
                         })
                     sess.persist()
+                    if fn_name in (
+                        "probe_url", "analyze_har", "scaffold_site",
+                        "write_adapter", "patch_adapter", "run_adapter_once",
+                    ):
+                        self._maybe_auto_update_title(sess, status_override="running")
 
                     # Mid-run steering: inject user's new instruction right after current tool finishes
                     if sess.has_pending_steer():
