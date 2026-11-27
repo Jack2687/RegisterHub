@@ -2318,6 +2318,24 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
         handler._send_json({"ok": True, "reset": cnt})
         return True
 
+    m_prof_probe_reason = re.fullmatch(r"/api/llm/profiles/([^/]+)/probe-reasoning", path)
+    if m_prof_probe_reason:
+        from core import llm_profiles
+
+        pid = unquote(m_prof_probe_reason.group(1))
+        try:
+            res = llm_profiles.probe_reasoning_capability(
+                pid,
+                model=str(body.get("model") or ""),
+                force=bool(body.get("force", False)),
+            )
+            handler._send_json(res)
+        except KeyError as ke:
+            handler._send_json({"ok": False, "error": str(ke)}, status=404)
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
+        return True
+
     m_prof_export = re.fullmatch(r"/api/llm/profiles/([^/]+)/export-credentials", path)
     if m_prof_export:
         from core import llm_profiles

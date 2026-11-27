@@ -2422,6 +2422,7 @@ class AgentSession:
         next_seq: Optional[int] = None,
         llm_profile_id: str = "",
         llm_model: str = "",
+        llm_reasoning_effort: str = "",
         model: str = "",
         cache_read_tokens: int = 0,
         cache_write_tokens: int = 0,
@@ -2446,6 +2447,7 @@ class AgentSession:
         self.last_error = str(last_error or "")
         self.llm_profile_id = str(llm_profile_id or "").strip()
         self.llm_model = str(llm_model or "").strip()
+        self.llm_reasoning_effort = str(llm_reasoning_effort or "").strip()
         self.model = str(model or "").strip()
         self.created_at = created_at or now_s
         self.updated_at = updated_at or now_s
@@ -2670,6 +2672,7 @@ class AgentSession:
                 "error": self.last_error,
                 "llm_profile_id": self.llm_profile_id,
                 "llm_model": self.llm_model,
+                "llm_reasoning_effort": self.llm_reasoning_effort,
                 "model": self.model,
                 "steps_count": self.steps_count,
                 "input_tokens": int(self.usage.get("prompt_tokens") or 0),
@@ -2709,6 +2712,7 @@ class AgentSession:
                 "error": self.last_error,
                 "llm_profile_id": self.llm_profile_id,
                 "llm_model": self.llm_model,
+                "llm_reasoning_effort": self.llm_reasoning_effort,
                 "model": self.model,
                 "steps_count": self.steps_count,
                 "input_tokens": int(self.usage.get("prompt_tokens") or 0),
@@ -2912,6 +2916,7 @@ class AgentSession:
                     "error": self.last_error if error_override is None else error_override,
                     "llm_profile_id": self.llm_profile_id,
                     "llm_model": self.llm_model,
+                    "llm_reasoning_effort": self.llm_reasoning_effort,
                     "model": self.model,
                     "steps_count": self.steps_count,
                     "cache_read_tokens": self.cache_read_tokens,
@@ -2970,6 +2975,7 @@ class AgentSession:
             next_seq=raw_next_seq if isinstance(raw_next_seq, int) and not isinstance(raw_next_seq, bool) else None,
             llm_profile_id=str(data.get("llm_profile_id") or ""),
             llm_model=str(data.get("llm_model") or ""),
+            llm_reasoning_effort=str(data.get("llm_reasoning_effort") or ""),
             model=str(data.get("model") or ""),
             cache_read_tokens=int(data.get("cache_read_tokens") or 0),
             cache_write_tokens=int(data.get("cache_write_tokens") or 0),
@@ -3527,6 +3533,7 @@ class SingleAgentManager:
         *,
         llm_profile_id: str = "",
         llm_model: str = "",
+        llm_reasoning_effort: str = "",
         title_source: str = "",
     ) -> AgentSession:
         clean_url = str(target_url or "").strip()
@@ -3549,12 +3556,15 @@ class SingleAgentManager:
         elif not eff_src:
             eff_src = infer_initial_title_source(clean_title)
         sid = f"ag_{int(time.time())}_{secrets.token_hex(8)}"
+        from core.llm_context import normalize_session_reasoning_effort
+
         sess = AgentSession(
             sid,
             title=clean_title,
             target_url=clean_url,
             llm_profile_id=clean_pid,
             llm_model=clean_mod,
+            llm_reasoning_effort=normalize_session_reasoning_effort(llm_reasoning_effort),
             title_source=eff_src,
         )
         with self._lock:
@@ -4012,11 +4022,17 @@ class SingleAgentManager:
         prof_id: str = "",
         mod_ov: str = "",
         default_cfg_pid: str = "",
+        effort_ov: str = "",
     ) -> Optional[Dict[str, Any]]:
         eff_pid = str(prof_id or "").strip() or str(default_cfg_pid or "").strip()
         eff_mod = str(mod_ov or "").strip()
-        if eff_pid or eff_mod or llm_profiles._profiles_file().exists():
-            return llm_profiles.resolve_runtime_override(profile_id=eff_pid, model_override=eff_mod)
+        eff_effort = str(effort_ov or "").strip()
+        if eff_pid or eff_mod or eff_effort or llm_profiles._profiles_file().exists():
+            return llm_profiles.resolve_runtime_override(
+                profile_id=eff_pid,
+                model_override=eff_mod,
+                reasoning_effort_override=eff_effort,
+            )
         return None
 
     def _call_llm_for_turn(
@@ -4604,6 +4620,7 @@ class SingleAgentManager:
         *,
         llm_profile_id: Optional[str] = None,
         llm_model: Optional[str] = None,
+        llm_reasoning_effort: Optional[str] = None,
         mode: str = "steer",
         goal_mode: bool = False,
     ) -> Dict[str, Any]:
@@ -4633,7 +4650,9 @@ class SingleAgentManager:
                 "完成并实测验证后请在回复末尾输出 [GOAL_DONE]；若遇到必须人工处理的硬阻塞请输出 [GOAL_BLOCKED: 原因]。"
             )
 
-        if llm_profile_id is not None or llm_model is not None:
+        if llm_profile_id is not None or llm_model is not None or llm_reasoning_effort is not None:
+            from core.llm_context import normalize_session_reasoning_effort
+
             with sess._lock:
                 if llm_profile_id is not None:
                     rp = str(llm_profile_id or "").strip()
@@ -4647,6 +4666,8 @@ class SingleAgentManager:
                         sess.llm_model = ""
                     elif rm:
                         sess.llm_model = rm
+                if llm_reasoning_effort is not None:
+                    sess.llm_reasoning_effort = normalize_session_reasoning_effort(llm_reasoning_effort)
 
         turn_stop_ev: Optional[threading.Event] = None
         steered = False
@@ -4946,10 +4967,11 @@ class SingleAgentManager:
                     history_snapshot = _repair_dangling_tool_calls(list(sess.messages))
                     prof_id = sess.llm_profile_id
                     mod_ov = sess.llm_model
+                    effort_ov = sess.llm_reasoning_effort
                     rec_ctx = sess.context_tokens
                     cur_model = sess.model
 
-                runtime_ov = self._resolve_runtime_override(prof_id, mod_ov, default_cfg_pid)
+                runtime_ov = self._resolve_runtime_override(prof_id, mod_ov, default_cfg_pid, effort_ov)
 
                 # Automatic context compaction when approaching 85% of context window (cooldown >= 4 steps)
                 if (step - last_compact_step) >= _AUTO_COMPACT_COOLDOWN_STEPS and len(history_snapshot) >= 6:

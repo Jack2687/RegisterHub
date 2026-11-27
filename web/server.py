@@ -2141,11 +2141,13 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             target_url = str(body.get("target_url") or "").strip()
             llm_pid = str(body.get("llm_profile_id") or "").strip()
             llm_mod = str(body.get("llm_model") or "").strip()
+            llm_eff = str(body.get("llm_reasoning_effort") or "").strip()
             sess = agent_manager.create_session(
                 title=title,
                 target_url=target_url,
                 llm_profile_id=llm_pid,
                 llm_model=llm_mod,
+                llm_reasoning_effort=llm_eff,
             )
             self._send_json({"ok": True, "session": studio_bridge.enrich_agent_detail(sess.to_detail())})
             return
@@ -2157,6 +2159,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
             target_url = str(body.get("target_url") or "").strip()
             llm_pid = body.get("llm_profile_id") if "llm_profile_id" in body else body.get("profile_id")
             llm_mod = body.get("llm_model") if "llm_model" in body else None
+            llm_eff = body.get("llm_reasoning_effort") if "llm_reasoning_effort" in body else None
             mode = str(body.get("mode") or "steer").strip().lower()
             goal_mode = bool(body.get("goal_mode", False))
             try:
@@ -2166,6 +2169,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                     target_url=target_url,
                     llm_profile_id=str(llm_pid) if llm_pid is not None else None,
                     llm_model=str(llm_mod) if llm_mod is not None else None,
+                    llm_reasoning_effort=str(llm_eff) if llm_eff is not None else None,
                     mode=mode,
                     goal_mode=goal_mode,
                 )
@@ -2228,7 +2232,7 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
         m_ag_patch = re.fullmatch(r"/api/agent/sessions/([A-Za-z0-9_-]+)", path)
         if m_ag_patch:
             sid = m_ag_patch.group(1)
-            patchable = ("title", "llm_model", "llm_profile_id", "pinned", "target_url")
+            patchable = ("title", "llm_model", "llm_profile_id", "llm_reasoning_effort", "pinned", "target_url")
             if not any(k in body for k in patchable):
                 self._send_json({"ok": False, "error": "缺少可更新字段"}, status=400)
                 return
@@ -2246,13 +2250,29 @@ class LiteRequestHandler(BaseHTTPRequestHandler):
                 except ValueError as ve:
                     self._send_json({"ok": False, "error": str(ve)}, status=400)
                     return
-            if any(k in body for k in ("llm_model", "llm_profile_id", "pinned", "target_url")):
+            if any(k in body for k in ("llm_model", "llm_profile_id", "llm_reasoning_effort", "pinned", "target_url")):
+                from core.llm_context import normalize_session_reasoning_effort
+
                 with sess._lock:
+                    prof_changed = False
+                    model_changed = False
                     if "llm_profile_id" in body:
-                        sess.llm_profile_id = str(body.get("llm_profile_id") or "").strip()
+                        raw_p = str(body.get("llm_profile_id") or "").strip()
+                        new_p = "" if raw_p == "__follow_global__" else raw_p
+                        prof_changed = new_p != sess.llm_profile_id
+                        sess.llm_profile_id = new_p
+                        if "llm_model" not in body and prof_changed:
+                            sess.llm_model = ""
+                            model_changed = True
                     if "llm_model" in body:
                         raw_m = str(body.get("llm_model") or "").strip()
-                        sess.llm_model = "" if raw_m == "__follow_profile__" else raw_m
+                        new_m = "" if raw_m == "__follow_profile__" else raw_m
+                        model_changed = new_m != sess.llm_model
+                        sess.llm_model = new_m
+                    if "llm_reasoning_effort" in body:
+                        sess.llm_reasoning_effort = normalize_session_reasoning_effort(body.get("llm_reasoning_effort"))
+                    elif prof_changed or model_changed:
+                        sess.llm_reasoning_effort = ""
                     if "target_url" in body and isinstance(body.get("target_url"), str):
                         sess.target_url = body["target_url"].strip()
                     if "pinned" in body:

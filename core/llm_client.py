@@ -312,8 +312,10 @@ def _merge_runtime_config(
             merged["profile_name"] = str(overrides.get("profile_name") or "").strip()
         if overrides.get("thinking_mode") in ("none", "enabled", "disabled"):
             merged["thinking_mode"] = str(overrides.get("thinking_mode"))
-        if overrides.get("reasoning_effort") in ("none", "low", "medium", "high", "xhigh", "max"):
+        if overrides.get("reasoning_effort") in ("none", "minimal", "low", "medium", "high", "xhigh", "max"):
             merged["reasoning_effort"] = str(overrides.get("reasoning_effort"))
+        if overrides.get("_reasoning_toggle_wire") in ("thinking_toggle", "enable_thinking"):
+            merged["_reasoning_toggle_wire"] = str(overrides.get("_reasoning_toggle_wire"))
         if isinstance(overrides.get("streaming"), bool):
             merged["streaming"] = overrides["streaming"]
         if "base_url" in overrides and str(overrides.get("base_url") or "").strip():
@@ -910,9 +912,19 @@ def _build_request_spec(
                     "cache_control": {"type": "ephemeral"},
                 }
             ]
-        if thinking_mode == "enabled" and int(max_tok) > 1280:
-            budget = min(max(1024, int(max_tok) // 2), int(max_tok) - 256)
+        from core.llm_context import anthropic_thinking_budget_for_effort
+
+        eff_tmode = "enabled" if (thinking_mode == "none" and reasoning_effort and reasoning_effort != "none") else thinking_mode
+        if eff_tmode == "enabled" and int(max_tok) > 1280:
+            budget = (
+                anthropic_thinking_budget_for_effort(reasoning_effort, int(max_tok))
+                if (reasoning_effort and reasoning_effort != "none")
+                else min(max(1024, int(max_tok) // 2), int(max_tok) - 256)
+            )
             payload["thinking"] = {"type": "enabled", "budget_tokens": budget}
+        elif eff_tmode == "disabled":
+            payload["thinking"] = {"type": "disabled"}
+            payload["temperature"] = cfg["temperature"]
         else:
             payload["temperature"] = cfg["temperature"]
         anth_tools = _openai_tools_to_anthropic(tools)
@@ -933,10 +945,10 @@ def _build_request_spec(
         }
         if system_prompt:
             payload["instructions"] = system_prompt
-        if not _is_reasoning_model(cfg["model"], cfg["max_tokens_field"]):
-            payload["temperature"] = cfg["temperature"]
         if reasoning_effort and reasoning_effort != "none":
             payload["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
+        elif not _is_reasoning_model(cfg["model"], cfg["max_tokens_field"]):
+            payload["temperature"] = cfg["temperature"]
         resp_tools = _openai_tools_to_responses(tools)
         if resp_tools:
             payload["tools"] = resp_tools
@@ -954,10 +966,19 @@ def _build_request_spec(
             "messages": full_messages,
             cfg["max_tokens_field"]: int(max_tok),
         }
-        if not _is_reasoning_model(cfg["model"], cfg["max_tokens_field"]):
-            payload["temperature"] = cfg["temperature"]
-        if reasoning_effort and reasoning_effort != "none":
+        toggle_wire = str(cfg.get("_reasoning_toggle_wire") or "").strip().lower()
+        if toggle_wire == "thinking_toggle" and thinking_mode in ("enabled", "disabled"):
+            payload["thinking"] = {"type": thinking_mode}
+            if thinking_mode == "disabled" and not _is_reasoning_model(cfg["model"], cfg["max_tokens_field"]):
+                payload["temperature"] = cfg["temperature"]
+        elif toggle_wire == "enable_thinking" and thinking_mode in ("enabled", "disabled"):
+            payload["enable_thinking"] = thinking_mode == "enabled"
+            if thinking_mode == "disabled" and not _is_reasoning_model(cfg["model"], cfg["max_tokens_field"]):
+                payload["temperature"] = cfg["temperature"]
+        elif reasoning_effort and reasoning_effort != "none":
             payload["reasoning_effort"] = reasoning_effort
+        elif not _is_reasoning_model(cfg["model"], cfg["max_tokens_field"]):
+            payload["temperature"] = cfg["temperature"]
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
@@ -1092,6 +1113,16 @@ def _parse_non_stream_json_response(
     tok_s = round(comp_t / max(0.05, lat_ms / 1000.0), 1) if comp_t > 0 else 0.0
     truncated_tc = _check_truncated_tool_calls(norm_tool_calls, stop_reason)
 
+    raw_usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    r_det = (
+        raw_usage.get("completion_tokens_details")
+        if isinstance(raw_usage.get("completion_tokens_details"), dict)
+        else (raw_usage.get("output_tokens_details") if isinstance(raw_usage.get("output_tokens_details"), dict) else {})
+    )
+    reason_tok = _safe_nonneg_int(
+        r_det.get("reasoning_tokens") if r_det.get("reasoning_tokens") is not None else raw_usage.get("reasoning_tokens")
+    )
+
     return {
         "ok": True,
         "content": content,
@@ -1101,11 +1132,13 @@ def _parse_non_stream_json_response(
             "prompt_tokens": prompt_t,
             "completion_tokens": comp_t,
             "total_tokens": total_t,
+            "reasoning_tokens": reason_tok,
             "cache_read_tokens": cache_r,
             "cache_write_tokens": cache_w,
         },
         "input_tokens": prompt_t,
         "output_tokens": comp_t,
+        "reasoning_tokens": reason_tok,
         "cache_read_tokens": cache_r,
         "cache_write_tokens": cache_w,
         "cache_hit_pct": hit_pct,

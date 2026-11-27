@@ -17,9 +17,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from core import llm_client
 from core.llm_context import (
+    get_model_reasoning_spec,
     infer_model_context_window_k,
+    lookup_model_reasoning_cap,
+    normalize_session_reasoning_effort,
     resolve_context_window_tokens,
     sanitize_model_context_windows,
+    sanitize_model_reasoning_caps,
+    sanitize_reasoning_cap_entry,
 )
 from core.locks import atomic_write_text_safe, interprocess_file_lock
 from core.secrets import mask_proxy_url
@@ -146,6 +151,7 @@ def _normalize_profile(raw: Dict[str, Any], default_id: str = "") -> Dict[str, A
         "temperature": temp,
         "context_window_k": ctx_k,
         "model_context_windows": cleaned_mcw,
+        "model_reasoning_caps": sanitize_model_reasoning_caps(raw.get("model_reasoning_caps"), limit=200),
         "priority": prio,
         "enabled": raw.get("enabled") is not False,
         "excluded": bool(raw.get("excluded", False)),
@@ -214,6 +220,7 @@ def to_public_profile(prof: Dict[str, Any], active_id: str) -> Dict[str, Any]:
         "temperature": prof["temperature"],
         "context_window_k": prof["context_window_k"],
         "model_context_windows": prof["model_context_windows"],
+        "model_reasoning_caps": sanitize_model_reasoning_caps(prof.get("model_reasoning_caps"), limit=200),
         "priority": prof["priority"],
         "enabled": prof["enabled"],
         "excluded": prof["excluded"],
@@ -667,6 +674,7 @@ def resolve_runtime_override(
     profile_id: str = "",
     *,
     model_override: str = "",
+    reasoning_effort_override: str = "",
     key_id: str = "",
     extra_overrides: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
@@ -704,6 +712,28 @@ def resolve_runtime_override(
         }
     if model_override and model_override != "__follow_profile__":
         out["model"] = str(model_override).strip()
+    eff_ov = normalize_session_reasoning_effort(reasoning_effort_override)
+    if eff_ov:
+        cap = lookup_model_reasoning_cap(
+            str(out.get("model") or ""),
+            prof.get("model_reasoning_caps") if isinstance(prof, dict) else None,
+        )
+        wire = str(cap.get("wire_style") or "").strip().lower() if isinstance(cap, dict) else ""
+        if eff_ov == "off":
+            out["thinking_mode"] = "disabled"
+            out["reasoning_effort"] = "none"
+            if wire in ("thinking_toggle", "enable_thinking"):
+                out["_reasoning_toggle_wire"] = wire
+        elif eff_ov == "on":
+            out["thinking_mode"] = "enabled"
+            if wire in ("thinking_toggle", "enable_thinking"):
+                out["_reasoning_toggle_wire"] = wire
+                out["reasoning_effort"] = "none"
+            else:
+                out["reasoning_effort"] = "high"
+        else:
+            out["thinking_mode"] = "enabled"
+            out["reasoning_effort"] = eff_ov
     if isinstance(extra_overrides, dict):
         prof_origin = llm_client._origin_tuple(out.get("base_url") or "")
         base_overridden = False
@@ -735,3 +765,225 @@ def resolve_runtime_override(
         if base_overridden and not explicit_key and prof_origin != llm_client._origin_tuple(out.get("base_url") or ""):
             out["api_key"] = ""
     return out
+
+
+def probe_reasoning_capability(
+    profile_id: str,
+    *,
+    model: str = "",
+    force: bool = False,
+) -> Dict[str, Any]:
+    """按厂商原生思考能力矩阵，对当前渠道+单模型做极简思考能力实测并持久化 7 天缓存。"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    pid = str(profile_id or "").strip()
+    with _STORE_LOCK:
+        try:
+            store = _load_store_unlocked()
+        except Exception:
+            store = _seed_from_legacy()
+        prof = next((dict(p) for p in store["profiles"] if p["id"] == pid), None)
+    if prof is None:
+        raise KeyError(f"供应商不存在: {pid}")
+
+    target_model = (model or "").strip()[:160] or str(prof.get("model") or "").strip()
+    fmt = str(prof.get("format") or "openai").strip().lower()
+    spec = get_model_reasoning_spec(target_model, fmt)
+    now_ts = int(time.time())
+    ttl_s = 7 * 86400
+
+    if not force:
+        cached = lookup_model_reasoning_cap(target_model, prof.get("model_reasoning_caps"))
+        if cached and (now_ts - int(cached.get("probed_at") or 0)) < ttl_s:
+            return {"ok": True, "cached": True, "profile_id": pid, "model": target_model, "spec": spec, "capability": cached}
+
+    def _persist_cap(cap_raw: Dict[str, Any]) -> Dict[str, Any]:
+        cleaned = sanitize_reasoning_cap_entry(cap_raw) or cap_raw
+        with _STORE_LOCK:
+            try:
+                st = _load_store_unlocked()
+            except Exception:
+                st = _seed_from_legacy()
+            tp = next((p for p in st["profiles"] if p["id"] == pid), None)
+            if tp is not None:
+                caps = sanitize_model_reasoning_caps(tp.get("model_reasoning_caps"), limit=200)
+                caps[target_model] = cleaned
+                tp["model_reasoning_caps"] = caps
+                _save_store_unlocked(st)
+        return cleaned
+
+    if spec["control_type"] == "none" and not force:
+        cap_none = _persist_cap({
+            "status": "unsupported",
+            "mode": "rejected",
+            "control_type": "none",
+            "vendor": spec["vendor"],
+            "supported_levels": [],
+            "rejected_levels": [],
+            "wire_style": "none",
+            "summary": "该模型为非推理模型，无思考档位",
+            "samples": {},
+            "probed_at": now_ts,
+        })
+        return {"ok": True, "cached": False, "profile_id": pid, "model": target_model, "spec": spec, "capability": cap_none}
+
+    base_ov = resolve_runtime_override(profile_id=pid, model_override=target_model)
+    base_ov["streaming"] = False
+    base_ov["max_tokens"] = 2048 if fmt == "anthropic" else 1024
+    if not str(base_ov.get("api_key") or "").strip() and not llm_client._is_loopback_host(str(base_ov.get("base_url") or "")):
+        return {"ok": False, "cached": False, "profile_id": pid, "model": target_model, "spec": spec, "capability": None, "error": "该配置尚未填写 API Key"}
+
+    probe_msgs = [{"role": "user", "content": "What is 37*43+19*23? Reply ONLY the integer."}]
+    param_reject_kws = (
+        "reasoning", "thinking", "effort", "budget", "unsupported",
+        "invalid", "unknown", "not allowed", "unrecognized", "enum", "parameter", "extra_forbidden",
+    )
+
+    def _is_param_reject(sc: int, err: str) -> bool:
+        if sc not in (400, 422):
+            return False
+        el = (err or "").lower()
+        return any(k in el for k in param_reject_kws)
+
+    def _run_probe_once(mutator) -> Dict[str, Any]:
+        ov_run = dict(base_ov)
+        ov_run.pop("_reasoning_toggle_wire", None)
+        mutator(ov_run)
+        try:
+            r = llm_client.chat_completion(
+                messages=probe_msgs,
+                tools=None,
+                system_prompt="Reply ONLY with the integer answer.",
+                overrides=ov_run,
+                timeout=18,
+            )
+            return {
+                "ok": True,
+                "status_code": 200,
+                "param_rejected": False,
+                "reasoning_tokens": int(r.get("reasoning_tokens") or 0),
+                "thinking_chars": len(str(r.get("thinking") or "").strip()),
+                "completion_tokens": int(r.get("output_tokens") or 0),
+            }
+        except Exception as exc:
+            err_s = str(exc)[:160]
+            sc = 400 if ("HTTP 400" in err_s or " 400" in err_s) else (422 if ("HTTP 422" in err_s or " 422" in err_s) else 0)
+            return {"ok": False, "status_code": sc, "param_rejected": _is_param_reject(sc, err_s), "error": err_s}
+
+    def _sig_score(sample: Dict[str, Any]) -> int:
+        rt = int(sample.get("reasoning_tokens") or 0)
+        tc = int(sample.get("thinking_chars") or 0)
+        return rt if rt > 0 else tc
+
+    default_wire = "anthropic_thinking" if fmt == "anthropic" else ("openai_responses" if fmt == "openai-responses" else "reasoning_effort")
+
+    if spec["control_type"] == "toggle":
+        if fmt == "anthropic":
+            toggle_jobs = [
+                ("on", lambda p_r: (p_r.__setitem__("thinking_mode", "enabled"), p_r.__setitem__("reasoning_effort", "high"))),
+                ("off", lambda p_r: (p_r.__setitem__("thinking_mode", "disabled"), p_r.__setitem__("reasoning_effort", "none"))),
+            ]
+        else:
+            toggle_jobs = [
+                ("on", lambda p_r: (p_r.__setitem__("thinking_mode", "enabled"), p_r.__setitem__("reasoning_effort", "high"))),
+                ("off_thinking", lambda p_r: (p_r.__setitem__("thinking_mode", "disabled"), p_r.__setitem__("reasoning_effort", "none"), p_r.__setitem__("_reasoning_toggle_wire", "thinking_toggle"))),
+                ("off_enable", lambda p_r: (p_r.__setitem__("thinking_mode", "disabled"), p_r.__setitem__("reasoning_effort", "none"), p_r.__setitem__("_reasoning_toggle_wire", "enable_thinking"))),
+            ]
+        results: Dict[str, Dict[str, Any]] = {}
+        with ThreadPoolExecutor(max_workers=len(toggle_jobs)) as ex:
+            futs = {lbl: ex.submit(_run_probe_once, fn) for lbl, fn in toggle_jobs}
+            for lbl, fut in futs.items():
+                results[lbl] = fut.result()
+        on_res = results["on"]
+        if not on_res["ok"] and not on_res["param_rejected"]:
+            return {"ok": False, "cached": False, "profile_id": pid, "model": target_model, "spec": spec, "capability": None, "error": on_res.get("error") or "探测失败"}
+        if on_res["param_rejected"] and all(not r["ok"] for r in results.values()):
+            cap_rej = _persist_cap({"status": "unsupported", "mode": "rejected", "control_type": "toggle", "vendor": spec["vendor"], "supported_levels": [], "rejected_levels": ["off", "on"], "wire_style": "none", "summary": "上游接口拒收思考开关参数", "samples": results, "probed_at": now_ts})
+            return {"ok": True, "cached": False, "profile_id": pid, "model": target_model, "spec": spec, "capability": cap_rej}
+        on_sig = _sig_score(on_res) if on_res["ok"] else 0
+        on_comp = int(on_res.get("completion_tokens") or 0) if on_res["ok"] else 0
+        winning_off_wire, best_off = "", None
+        for off_k, w_name in (("off", "anthropic_thinking"), ("off_thinking", "thinking_toggle"), ("off_enable", "enable_thinking")):
+            cand = results.get(off_k)
+            if not cand or not cand["ok"]:
+                continue
+            if (on_sig > 0 and _sig_score(cand) < on_sig) or (on_comp - int(cand.get("completion_tokens") or 0) >= 15):
+                winning_off_wire, best_off = w_name, cand
+                break
+        if winning_off_wire and best_off is not None:
+            cap_tog = _persist_cap({"status": "verified", "mode": "toggle", "control_type": "toggle", "vendor": spec["vendor"], "supported_levels": ["off", "on"], "rejected_levels": [], "wire_style": winning_off_wire, "summary": f"实测支持思考开关（关 {best_off.get('completion_tokens', 0)} → 开 {on_comp} tok）", "samples": {"off": best_off, "on": on_res}, "probed_at": now_ts})
+        else:
+            cap_tog = _persist_cap({"status": "accepted", "mode": "fixed", "control_type": "toggle", "vendor": spec["vendor"], "supported_levels": ["off", "on"], "rejected_levels": [], "wire_style": default_wire, "summary": "接口接收参数，但当前渠道思考量无变化（固定思考）", "samples": {"on": on_res}, "probed_at": now_ts})
+        return {"ok": True, "cached": False, "profile_id": pid, "model": target_model, "spec": spec, "capability": cap_tog}
+
+    native_levels = list(spec.get("levels") or ["low", "medium", "high"])
+    extra_levels = list(spec.get("extra_probe_levels") or [])
+    wire_native = [x for x in native_levels if x != "off"] or ["low", "high"]
+    first_lvl = wire_native[0]
+
+    def _make_mut(lvl: str):
+        return lambda p_r: (p_r.__setitem__("thinking_mode", "enabled"), p_r.__setitem__("reasoning_effort", lvl))
+
+    first_res = _run_probe_once(_make_mut(first_lvl))
+    if not first_res["ok"]:
+        if first_res["param_rejected"]:
+            cap_u = _persist_cap({"status": "unsupported", "mode": "rejected", "control_type": "levels", "vendor": spec["vendor"], "supported_levels": [], "rejected_levels": wire_native + extra_levels, "wire_style": "none", "summary": f"上游拒收思考参数（{first_lvl} 返回 HTTP {first_res.get('status_code')}）", "samples": {first_lvl: first_res}, "probed_at": now_ts})
+            return {"ok": True, "cached": False, "profile_id": pid, "model": target_model, "spec": spec, "capability": cap_u}
+        return {"ok": False, "cached": False, "profile_id": pid, "model": target_model, "spec": spec, "capability": None, "error": first_res.get("error") or "探测失败"}
+
+    samples: Dict[str, Dict[str, Any]] = {first_lvl: first_res}
+    rest = [x for x in (wire_native[1:] + extra_levels) if x != "medium"]
+    if rest:
+        with ThreadPoolExecutor(max_workers=min(3, len(rest))) as ex:
+            futs = {lvl: ex.submit(_run_probe_once, _make_mut(lvl)) for lvl in rest}
+            for lvl, fut in futs.items():
+                samples[lvl] = fut.result()
+
+    supported: List[str] = ["off"] if "off" in native_levels else []
+    rejected: List[str] = []
+    for lvl in wire_native:
+        if lvl == "medium" and lvl not in samples:
+            if samples.get(first_lvl, {}).get("ok") and samples.get("high", {}).get("ok"):
+                supported.append("medium")
+            continue
+        sr = samples.get(lvl)
+        if sr and sr.get("ok"):
+            supported.append(lvl)
+        elif sr and sr.get("param_rejected"):
+            rejected.append(lvl)
+
+    prev_ok = [lvl for lvl in wire_native if samples.get(lvl, {}).get("ok")]
+    prev_top = prev_ok[-1] if prev_ok else first_lvl
+    prev_sig, prev_comp = _sig_score(samples.get(prev_top, {})), int(samples.get(prev_top, {}).get("completion_tokens") or 0)
+    for xlvl in extra_levels:
+        xsr = samples.get(xlvl)
+        if not xsr:
+            continue
+        if xsr.get("param_rejected"):
+            rejected.append(xlvl)
+        elif xsr.get("ok"):
+            xsig, xcomp = _sig_score(xsr), int(xsr.get("completion_tokens") or 0)
+            if (xsig > prev_sig) or (xsig == 0 and xcomp - prev_comp >= 12):
+                supported.append(xlvl)
+
+    ok_probed = [(lvl, samples[lvl]) for lvl in (wire_native + extra_levels) if samples.get(lvl, {}).get("ok") and lvl in supported]
+    low_lvl, low_s = ok_probed[0] if ok_probed else (first_lvl, first_res)
+    top_lvl, top_s = ok_probed[-1] if ok_probed else (first_lvl, first_res)
+    low_sig, top_sig = _sig_score(low_s), _sig_score(top_s)
+    low_comp, top_comp = int(low_s.get("completion_tokens") or 0), int(top_s.get("completion_tokens") or 0)
+    any_sig = max((_sig_score(s) for _, s in ok_probed), default=0)
+
+    if len(ok_probed) >= 2 and low_sig == 0 and top_sig > 0:
+        st_v, md_v, sm_v = "verified", "toggle", f"实测开关/高档激活思考（{low_lvl} 无思考 → {top_lvl} 触发思考）"
+    elif len(ok_probed) >= 2 and top_sig > low_sig and top_sig >= max(low_sig + 5, int(low_sig * 1.15)):
+        unit = "tok" if int(top_s.get("reasoning_tokens") or 0) > 0 else "字"
+        st_v, md_v, sm_v = "verified", "graded", f"实测分档生效（{low_lvl}→{top_lvl}: {low_sig}→{top_sig} {unit}）"
+    elif any_sig > 0:
+        st_v, md_v, sm_v = "verified", "present", f"实测支持思考参数（支持 {'/'.join(x for x in supported if x != 'off')}）"
+    elif len(ok_probed) >= 2 and (top_comp - low_comp) >= 15:
+        st_v, md_v, sm_v = "verified", "graded", f"实测输出随档位增长（{low_lvl}→{top_lvl}: {low_comp}→{top_comp} tok）"
+    else:
+        st_v, md_v, sm_v = "accepted", "fixed", "接口接收思考参数，但短题未测出明显档位差异"
+
+    cap_final = _persist_cap({"status": st_v, "mode": md_v, "control_type": "levels", "vendor": spec["vendor"], "supported_levels": supported, "rejected_levels": rejected, "wire_style": default_wire, "summary": sm_v, "samples": samples, "probed_at": now_ts})
+    return {"ok": True, "cached": False, "profile_id": pid, "model": target_model, "spec": spec, "capability": cap_final}

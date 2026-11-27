@@ -407,3 +407,460 @@ def split_inline_thinking_tags(content: str, existing_thinking: str = "") -> Tup
             merged_parts.append(chunk)
     merged_thinking = "\n\n".join(merged_parts).strip()
     return clean_content, merged_thinking
+
+
+# ---------------------------------------------------------------------------
+# 厂商原生思考强度能力矩阵与能力探测缓存清洗（三仓单一真相源）
+# ---------------------------------------------------------------------------
+
+VALID_SESSION_REASONING_EFFORTS: tuple[str, ...] = (
+    "",
+    "off",
+    "on",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+)
+
+_EFFORT_ALIASES: dict[str, str] = {
+    "none": "",
+    "default": "",
+    "__follow_profile__": "",
+    "disabled": "off",
+    "false": "off",
+    "enabled": "on",
+    "true": "on",
+}
+
+_ALLOWED_CAP_STATUSES = frozenset({"verified", "accepted", "unsupported"})
+_ALLOWED_CAP_MODES = frozenset({"graded", "toggle", "fixed", "present", "rejected"})
+_ALLOWED_CONTROL_TYPES = frozenset({"none", "toggle", "levels"})
+_ALLOWED_WIRE_STYLES = frozenset({
+    "reasoning_effort",
+    "anthropic_thinking",
+    "openai_responses",
+    "thinking_toggle",
+    "enable_thinking",
+    "none",
+})
+_ALLOWED_LEVEL_ITEMS = frozenset({"off", "on", "minimal", "low", "medium", "high", "xhigh", "max"})
+
+
+def normalize_session_reasoning_effort(raw: Any) -> str:
+    """将会话级思考强度覆盖值归一化为统一枚举（"" 代表跟随档案默认）。"""
+    val = str(raw or "").strip().lower()
+    if val in _EFFORT_ALIASES:
+        val = _EFFORT_ALIASES[val]
+    return val if val in VALID_SESSION_REASONING_EFFORTS else ""
+
+
+def anthropic_thinking_budget_for_effort(effort: str, max_tokens: int) -> int:
+    """将统一思考强度档位换算为 Anthropic `thinking.budget_tokens`（严格夹紧在安全区间）。"""
+    mt = max(1281, int(max_tokens or 16384))
+    upper = max(1024, mt - 256)
+    ef = str(effort or "").strip().lower()
+    table: dict[str, tuple[float, int]] = {
+        "minimal": (0.10, 1024),
+        "low": (0.15, 2048),
+        "medium": (0.35, 6144),
+        "high": (0.60, 12288),
+        "on": (0.60, 12288),
+        "xhigh": (0.75, 24576),
+        "max": (0.85, 32768),
+    }
+    ratio, cap = table.get(ef, (0.60, 12288))
+    raw_budget = min(cap, int(mt * ratio))
+    return max(1024, min(upper, raw_budget))
+
+
+def get_model_reasoning_spec(model_id: str, protocol_format: str = "openai") -> Dict[str, Any]:
+    """按模型厂商与家族返回原生思考控制形态与候选档位（绝不硬套固定 7 档）。
+
+    返回字段：
+      - vendor: 厂商标识
+      - vendor_label: 简短中文/英文厂商名
+      - control_type: 'none' | 'toggle' | 'levels'
+      - levels: 原生支持的档位列表（不含 '' 默认）
+      - extra_probe_levels: 渠道实测时可顺带探测的扩展档位（如部分中转对 GPT-5.4 开放 max）
+      - always_on: 是否默认常开思考（如 R1 / QwQ / Pro 推理模型）
+    """
+    raw = (model_id or "").strip()
+    fmt = (protocol_format or "openai").strip().lower()
+    low = raw.lower()
+    short = low.rsplit("/", 1)[-1]
+
+    if not short:
+        return {
+            "vendor": "other",
+            "vendor_label": "通用",
+            "control_type": "levels",
+            "levels": ["low", "medium", "high"],
+            "extra_probe_levels": [],
+            "always_on": False,
+        }
+
+    # --- OpenAI ---
+    if (
+        short.startswith("gpt-6")
+        or short.startswith("gpt-5.2")
+        or short.startswith("gpt-5.3")
+        or short.startswith("gpt-5.4")
+        or short.startswith("gpt-5.5")
+        or short.startswith("gpt-5.6")
+        or short.startswith("gpt-5.7")
+        or short.startswith("gpt-5.8")
+        or short.startswith("gpt-5.9")
+        or ("codex" in short and ("gpt-5" in short or "gpt-6" in short or short.startswith("codex")))
+    ):
+        return {
+            "vendor": "openai",
+            "vendor_label": "OpenAI",
+            "control_type": "levels",
+            "levels": ["off", "low", "medium", "high", "xhigh"],
+            "extra_probe_levels": ["max"],
+            "always_on": False,
+        }
+    if short.startswith("gpt-5"):
+        return {
+            "vendor": "openai",
+            "vendor_label": "OpenAI",
+            "control_type": "levels",
+            "levels": ["minimal", "low", "medium", "high"],
+            "extra_probe_levels": ["xhigh"],
+            "always_on": False,
+        }
+    if re.match(r"^o[134](?:$|[-\._:])", short):
+        return {
+            "vendor": "openai",
+            "vendor_label": "OpenAI",
+            "control_type": "levels",
+            "levels": ["low", "medium", "high"],
+            "extra_probe_levels": [],
+            "always_on": True,
+        }
+    if (
+        short.startswith("gpt-4")
+        or short.startswith("gpt-3.5")
+        or short.startswith("chatgpt-4o")
+    ):
+        return {
+            "vendor": "openai",
+            "vendor_label": "OpenAI",
+            "control_type": "none",
+            "levels": [],
+            "extra_probe_levels": [],
+            "always_on": False,
+        }
+
+    # --- Anthropic Claude ---
+    if short.startswith("claude-"):
+        if (
+            "opus-4-6" in short
+            or "opus-4.6" in short
+            or "opus-4-7" in short
+            or "opus-4.7" in short
+            or "opus-4-8" in short
+            or "opus-4.8" in short
+            or "opus-5" in short
+            or "opus-6" in short
+        ):
+            return {
+                "vendor": "anthropic",
+                "vendor_label": "Anthropic",
+                "control_type": "levels",
+                "levels": ["off", "low", "medium", "high", "max"],
+                "extra_probe_levels": [],
+                "always_on": False,
+            }
+        if (
+            "sonnet-4" in short
+            or "sonnet-5" in short
+            or "opus-4" in short
+            or "haiku-4-5" in short
+            or "haiku-4.5" in short
+            or "haiku-5" in short
+            or "fable-5" in short
+            or "3-7" in short
+            or "3.7" in short
+        ):
+            return {
+                "vendor": "anthropic",
+                "vendor_label": "Anthropic",
+                "control_type": "levels",
+                "levels": ["off", "low", "medium", "high"],
+                "extra_probe_levels": [],
+                "always_on": False,
+            }
+        return {
+            "vendor": "anthropic",
+            "vendor_label": "Anthropic",
+            "control_type": "none",
+            "levels": [],
+            "extra_probe_levels": [],
+            "always_on": False,
+        }
+
+    # --- Google Gemini ---
+    if short.startswith("gemini-"):
+        if "flash" in short and ("2.5" in short or "3" in short or "4" in short):
+            levels = ["minimal", "low", "medium", "high"] if ("gemini-3" in short or "gemini-4" in short) else ["off", "low", "medium", "high"]
+            return {
+                "vendor": "google",
+                "vendor_label": "Google",
+                "control_type": "levels",
+                "levels": levels,
+                "extra_probe_levels": [],
+                "always_on": False,
+            }
+        if "2.5" in short or "gemini-3" in short or "gemini-4" in short or "thinking" in short:
+            return {
+                "vendor": "google",
+                "vendor_label": "Google",
+                "control_type": "levels",
+                "levels": ["low", "medium", "high"],
+                "extra_probe_levels": [],
+                "always_on": True,
+            }
+        return {
+            "vendor": "google",
+            "vendor_label": "Google",
+            "control_type": "none",
+            "levels": [],
+            "extra_probe_levels": [],
+            "always_on": False,
+        }
+
+    # --- DeepSeek ---
+    if short.startswith("deepseek-"):
+        if "r1" in short or "reasoner" in short:
+            return {
+                "vendor": "deepseek",
+                "vendor_label": "DeepSeek",
+                "control_type": "toggle",
+                "levels": ["off", "on"],
+                "extra_probe_levels": [],
+                "always_on": True,
+            }
+        if "v4" in short or "v3.2" in short or "v3-2" in short or "think" in short:
+            return {
+                "vendor": "deepseek",
+                "vendor_label": "DeepSeek",
+                "control_type": "toggle",
+                "levels": ["off", "on"],
+                "extra_probe_levels": [],
+                "always_on": False,
+            }
+        return {
+            "vendor": "deepseek",
+            "vendor_label": "DeepSeek",
+            "control_type": "none",
+            "levels": [],
+            "extra_probe_levels": [],
+            "always_on": False,
+        }
+
+    # --- Qwen / QwQ ---
+    if short.startswith("qwq"):
+        return {
+            "vendor": "qwen",
+            "vendor_label": "Qwen",
+            "control_type": "toggle",
+            "levels": ["off", "on"],
+            "extra_probe_levels": [],
+            "always_on": True,
+        }
+    if short.startswith("qwen3") or short.startswith("qwen4") or short.startswith("qwen-3"):
+        return {
+            "vendor": "qwen",
+            "vendor_label": "Qwen",
+            "control_type": "toggle",
+            "levels": ["off", "on"],
+            "extra_probe_levels": [],
+            "always_on": False,
+        }
+
+    # --- GLM ---
+    if short.startswith("glm-4.5") or short.startswith("glm-4.6") or short.startswith("glm-4.7") or short.startswith("glm-5"):
+        return {
+            "vendor": "glm",
+            "vendor_label": "GLM",
+            "control_type": "toggle",
+            "levels": ["off", "on"],
+            "extra_probe_levels": [],
+            "always_on": False,
+        }
+
+    # --- xAI Grok ---
+    if short.startswith("grok-"):
+        if "grok-3-mini" in short or "grok-4" in short or "grok-5" in short:
+            return {
+                "vendor": "xai",
+                "vendor_label": "xAI",
+                "control_type": "levels",
+                "levels": ["low", "high"],
+                "extra_probe_levels": [],
+                "always_on": False,
+            }
+        return {
+            "vendor": "xai",
+            "vendor_label": "xAI",
+            "control_type": "none",
+            "levels": [],
+            "extra_probe_levels": [],
+            "always_on": False,
+        }
+
+    # --- Kimi / MiniMax / MiMo ---
+    if short.startswith("kimi-k3") or ("kimi" in short and "think" in short) or short.startswith("minimax-m2.7") or short.startswith("minimax-m3") or short.startswith("mimo-v2"):
+        return {
+            "vendor": "kimi" if short.startswith("kimi") else ("minimax" if short.startswith("minimax") else "other"),
+            "vendor_label": "Kimi" if short.startswith("kimi") else ("MiniMax" if short.startswith("minimax") else "通用"),
+            "control_type": "toggle",
+            "levels": ["off", "on"],
+            "extra_probe_levels": [],
+            "always_on": False,
+        }
+
+    # --- Anthropic 协议下的自定义别名默认支持思考开关与分档 ---
+    if fmt == "anthropic":
+        return {
+            "vendor": "anthropic",
+            "vendor_label": "Anthropic",
+            "control_type": "levels",
+            "levels": ["off", "low", "medium", "high"],
+            "extra_probe_levels": [],
+            "always_on": False,
+        }
+
+    # --- 其它未知模型：保守 3 档，由渠道自动探测裁定 ---
+    return {
+        "vendor": "other",
+        "vendor_label": "通用",
+        "control_type": "levels",
+        "levels": ["low", "medium", "high"],
+        "extra_probe_levels": [],
+        "always_on": False,
+    }
+
+
+def sanitize_reasoning_cap_entry(raw: Any) -> Optional[Dict[str, Any]]:
+    """清洗单条模型思考能力探测缓存，过滤非法字段与越界值。"""
+    if not isinstance(raw, dict):
+        return None
+    status = str(raw.get("status") or "").strip().lower()
+    if status not in _ALLOWED_CAP_STATUSES:
+        return None
+    mode = str(raw.get("mode") or "").strip().lower()
+    if mode not in _ALLOWED_CAP_MODES:
+        mode = "rejected" if status == "unsupported" else ("present" if status == "verified" else "fixed")
+    ctype = str(raw.get("control_type") or "levels").strip().lower()
+    if ctype not in _ALLOWED_CONTROL_TYPES:
+        ctype = "levels"
+    wire = str(raw.get("wire_style") or "reasoning_effort").strip().lower()
+    if wire not in _ALLOWED_WIRE_STYLES:
+        wire = "reasoning_effort"
+
+    def _clean_lvl_list(val: Any) -> list[str]:
+        if not isinstance(val, list):
+            return []
+        out_l: list[str] = []
+        seen_l: set[str] = set()
+        for item in val:
+            s = str(item or "").strip().lower()
+            if s in _ALLOWED_LEVEL_ITEMS and s not in seen_l:
+                seen_l.add(s)
+                out_l.append(s)
+        return out_l
+
+    sup = _clean_lvl_list(raw.get("supported_levels"))
+    rej = _clean_lvl_list(raw.get("rejected_levels"))
+    samples_raw = raw.get("samples")
+    samples_clean: Dict[str, Dict[str, Any]] = {}
+    if isinstance(samples_raw, dict):
+        for k, v in list(samples_raw.items())[:8]:
+            ks = str(k or "").strip().lower()
+            if not ks or not isinstance(v, dict):
+                continue
+            entry: Dict[str, Any] = {"ok": bool(v.get("ok"))}
+            for num_k in ("status_code", "reasoning_tokens", "thinking_chars", "completion_tokens"):
+                if v.get(num_k) is not None:
+                    try:
+                        entry[num_k] = max(0, int(v[num_k]))
+                    except (TypeError, ValueError):
+                        pass
+            if v.get("error"):
+                entry["error"] = str(v["error"])[:120]
+            samples_clean[ks] = entry
+
+    try:
+        probed_at = max(0, int(raw.get("probed_at") or 0))
+    except (TypeError, ValueError):
+        probed_at = 0
+
+    return {
+        "status": status,
+        "mode": mode,
+        "control_type": ctype,
+        "vendor": str(raw.get("vendor") or "other").strip().lower()[:32],
+        "supported_levels": sup,
+        "rejected_levels": rej,
+        "wire_style": wire,
+        "summary": str(raw.get("summary") or "").strip()[:180],
+        "samples": samples_clean,
+        "probed_at": probed_at,
+    }
+
+
+def sanitize_model_reasoning_caps(
+    raw: Any,
+    limit: int = 200,
+    *,
+    skip_model_fn: Optional[Callable[[str], bool]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """清洗持久化的 `model_reasoning_caps` 映射表。"""
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, Dict[str, Any]] = {}
+    for k, v in raw.items():
+        mid = str(k or "").strip()[:160]
+        if not mid or (skip_model_fn is not None and skip_model_fn(mid)):
+            continue
+        cleaned = sanitize_reasoning_cap_entry(v)
+        if cleaned is not None:
+            out[mid] = cleaned
+            if len(out) >= limit:
+                break
+    return out
+
+
+def lookup_model_reasoning_cap(
+    model_id: str,
+    caps_map: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Optional[Dict[str, Any]]:
+    """按精确 -> 去前缀短名 -> 忽略大小写精确 -> 短名回退查找单模型思考能力缓存。"""
+    mid = (model_id or "").strip()
+    if not mid or not isinstance(caps_map, dict) or not caps_map:
+        return None
+    if mid in caps_map and isinstance(caps_map[mid], dict):
+        return caps_map[mid]
+    short = mid.rsplit("/", 1)[-1]
+    if short in caps_map and isinstance(caps_map[short], dict):
+        return caps_map[short]
+    low_mid = mid.lower()
+    low_short = short.lower()
+    for k, v in caps_map.items():
+        if not isinstance(v, dict):
+            continue
+        if str(k or "").strip().lower() == low_mid:
+            return v
+    for k, v in caps_map.items():
+        if not isinstance(v, dict):
+            continue
+        kl = str(k or "").strip().lower()
+        if kl == low_short or kl.endswith("/" + low_short):
+            return v
+    return None
+
