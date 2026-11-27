@@ -459,6 +459,30 @@ def _calls_file() -> Path:
     return Path(LLM_CONFIG_FILE).with_name("llm_calls.jsonl")
 
 
+_USAGE_STORE_CACHE: Any = None
+_USAGE_STORE_KEY: str = ""
+
+
+def _usage_store() -> Any:
+    global _USAGE_STORE_CACHE, _USAGE_STORE_KEY
+    from core.llm_usage import JsonHourlyUsageStore
+
+    base = Path(LLM_CONFIG_FILE)
+    ledger_path = base.with_name("llm_usage_hourly.json")
+    calls_path = _calls_file()
+    sessions_dir = base.with_name("agent_sessions")
+    key = f"{ledger_path}|{calls_path}|{sessions_dir}"
+    with _CALLS_LOCK:
+        if _USAGE_STORE_CACHE is None or _USAGE_STORE_KEY != key:
+            _USAGE_STORE_CACHE = JsonHourlyUsageStore(
+                ledger_path,
+                sessions_dir=sessions_dir,
+                jsonl_calls_path=calls_path,
+            )
+            _USAGE_STORE_KEY = key
+        return _USAGE_STORE_CACHE
+
+
 def _record_llm_call(entry: Dict[str, Any]) -> None:
     global _RECENT_CALLS_KEY
     fp = _calls_file()
@@ -474,6 +498,36 @@ def _record_llm_call(entry: Dict[str, Any]) -> None:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception:
         pass
+    try:
+        _usage_store().record_call(entry)
+    except Exception:
+        pass
+
+
+def get_usage_analytics(
+    *,
+    range_key: str = "7d",
+    granularity: str = "auto",
+    profile_id: str = "",
+    model: str = "",
+    profiles_meta: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    from core.llm_usage import query_llm_usage
+
+    return query_llm_usage(
+        _usage_store(),
+        range_key=range_key,
+        granularity=granularity,
+        profile_id=profile_id,
+        model=model,
+        profiles_meta=profiles_meta,
+    )
+
+
+def get_dashboard_llm_kpi() -> Dict[str, Any]:
+    from core.llm_usage import get_dashboard_llm_kpi as _calc_kpi
+
+    return _calc_kpi(_usage_store())
 
 
 def list_llm_calls(limit: int = 100) -> List[Dict[str, Any]]:

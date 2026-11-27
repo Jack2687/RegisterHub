@@ -593,6 +593,25 @@ def enrich_agent_detail(detail: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _build_community_profiles_meta() -> Dict[str, Dict[str, Any]]:
+    pmeta: Dict[str, Dict[str, Any]] = {}
+    try:
+        from core import llm_profiles as _lp
+
+        plist = (_lp.list_profiles_response() or {}).get("profiles") or []
+        for p in plist:
+            if isinstance(p, dict) and p.get("id"):
+                pmeta[str(p["id"])] = {
+                    "name": str(p.get("name") or p["id"]),
+                    "format": str(p.get("format") or "openai"),
+                    "base_url": str(p.get("base_url") or ""),
+                    "icon_url": "",
+                }
+    except Exception:
+        pass
+    return pmeta
+
+
 def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]]) -> bool:
     """Handle Studio GET routes. Returns True if handled, False to fall through."""
     if path == "/api/console/meta":
@@ -685,6 +704,19 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
             for ad in adapters
         ]
 
+        llm_kpi: Dict[str, Any] = {
+            "llm_tokens_7d": 0,
+            "llm_tokens_today": 0,
+            "llm_cache_hit_pct": None,
+            "llm_calls_7d": 0,
+            "llm_cost_7d_usd": 0.0,
+            "llm_saved_7d_usd": 0.0,
+        }
+        try:
+            llm_kpi = srv.llm_client.get_dashboard_llm_kpi()
+        except Exception:
+            pass
+
         handler._send_json({
             "kpi": {
                 "projects_total": len(adapters),
@@ -696,6 +728,7 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
                 "avg_duration_s": avg_dur,
                 "today_ok": day_map[today_k]["success"],
                 "today_failed": day_map[today_k]["failed"],
+                **llm_kpi,
             },
             "daily_trend": trend,
             "key_distribution": key_dist,
@@ -1112,6 +1145,25 @@ def handle_studio_get(handler: Any, srv: Any, path: str, qs: Dict[str, List[str]
 
     if path == "/api/llm/magpie/status":
         handler._send_json({"available": False, "providers": []})
+        return True
+
+    if path == "/api/llm/usage":
+        rk = (qs.get("range") or ["7d"])[0]
+        gran = (qs.get("granularity") or ["auto"])[0]
+        pid = (qs.get("profile_id") or [""])[0]
+        mdl = (qs.get("model") or [""])[0]
+        try:
+            pmeta = _build_community_profiles_meta()
+            payload = srv.llm_client.get_usage_analytics(
+                range_key=rk,
+                granularity=gran,
+                profile_id=pid,
+                model=mdl,
+                profiles_meta=pmeta,
+            )
+            handler._send_json(payload)
+        except Exception as exc:
+            handler._send_json({"ok": False, "error": f"LLM 用量统计计算失败: {exc}"}, status=500)
         return True
 
     if path == "/api/agent/config":
