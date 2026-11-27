@@ -3604,10 +3604,13 @@ class SingleAgentManager:
         prog = analyze_session_progress(sess_dict)
         sites_root = SITES_DIR.resolve()
         cands: List[Path] = []
-        slug = str(prog.get("site_slug") or "").strip()
-        if slug and re.fullmatch(r"[A-Za-z0-9_]+", slug):
-            cands.append(sites_root / f"{slug}.py")
-        for fp in prog.get("touched_files") or []:
+        raw_slug = str(prog.get("site_slug") or "").strip()
+        if raw_slug:
+            norm_slug = raw_slug.lower().replace("-", "_")
+            for s_cand in (norm_slug, raw_slug):
+                if s_cand and re.fullmatch(r"[A-Za-z0-9_]+", s_cand):
+                    cands.append(sites_root / f"{s_cand}.py")
+        for fp in reversed(prog.get("touched_files") or []):
             raw = str(fp or "").strip()
             if raw.endswith(".py"):
                 p = Path(raw)
@@ -3618,6 +3621,8 @@ class SingleAgentManager:
             try:
                 res = p.resolve()
                 if sites_root not in res.parents or not res.is_file() or res.stat().st_size > 300_000:
+                    continue
+                if res.name in ("__init__.py", "base.py", "_template.py") or res.name.startswith("_"):
                     continue
                 return res.read_text(encoding="utf-8", errors="replace"), f"sites/{res.name}"
             except Exception:
@@ -3657,6 +3662,7 @@ class SingleAgentManager:
             adapter_path=adapter_path,
             include_code=include_code,
         )
+        base["llm_refined"] = False
         if use_llm_refine:
             try:
                 prompt = build_handoff_llm_refine_prompt(base["markdown"])
@@ -3667,11 +3673,12 @@ class SingleAgentManager:
                     str(snap.get("llm_model") or ""),
                     default_pid,
                 )
-                resp = llm_client.chat_completion(
+                resp = _call_compat_chat_completion(
                     messages=[{"role": "user", "content": prompt}],
                     tools=[],
                     system_prompt="你是 RegisterHub 逆向与自动化专家，请严格按要求输出脱敏、精炼、高信噪比的 Markdown 摘要。",
-                    overrides=ov,
+                    config_override=ov,
+                    session_id=f"{session_id}:share",
                 )
                 refined_txt = str((resp or {}).get("content") or "").strip()
                 if refined_txt:
@@ -3686,8 +3693,6 @@ class SingleAgentManager:
                     base["llm_refined"] = True
             except Exception:
                 base["llm_refined"] = False
-        else:
-            base["llm_refined"] = False
         return base
 
     def import_session_handoff(
@@ -3699,31 +3704,45 @@ class SingleAgentManager:
         llm_model: str = "",
     ) -> Dict[str, Any]:
         parsed = parse_handoff_markdown(markdown, target_edition="community")
+        clean_pid = (llm_profile_id or "").strip()
+        if clean_pid == "__follow_global__":
+            clean_pid = ""
+        clean_model = (llm_model or "").strip()[:160]
+        if clean_model == "__follow_profile__":
+            clean_model = ""
         sess = self.create_session(
             title=parsed["suggested_title"],
             target_url=parsed["target_url"],
-            llm_profile_id=llm_profile_id,
-            llm_model=llm_model,
+            llm_profile_id=clean_pid,
+            llm_model=clean_model,
             title_source="auto",
         )
         started = False
+        start_error = ""
         if auto_start:
-            self.send_message(
-                sess.id,
-                parsed["initial_prompt"],
-                target_url=parsed["target_url"],
-                llm_profile_id=llm_profile_id or None,
-                llm_model=llm_model or None,
-                mode="steer",
-            )
-            started = True
-        return {
+            try:
+                self.send_message(
+                    sess.id,
+                    parsed["initial_prompt"],
+                    target_url=parsed["target_url"],
+                    llm_profile_id=clean_pid or None,
+                    llm_model=clean_model or None,
+                    mode="steer",
+                )
+                started = True
+            except RuntimeError as exc:
+                started = False
+                start_error = str(exc)
+        out: Dict[str, Any] = {
             "ok": True,
             "session": sess.to_detail(),
             "parsed": {k: v for k, v in parsed.items() if k != "adapter_code"},
             "initial_prompt": parsed["initial_prompt"],
             "started": started,
         }
+        if start_error:
+            out["start_error"] = start_error
+        return out
 
     def _maybe_auto_update_title(
         self,
@@ -3731,6 +3750,7 @@ class SingleAgentManager:
         *,
         status_override: Optional[str] = None,
         error_override: Optional[str] = None,
+        persist: bool = True,
     ) -> None:
         try:
             with sess._lock:
@@ -3769,7 +3789,7 @@ class SingleAgentManager:
                     sess.updated_at = time.strftime("%Y-%m-%d %H:%M:%S")
             if changed_title:
                 sess.emit("session_renamed", session_id=sess.id, title=changed_title, auto=True)
-            if changed_any:
+            if changed_any and persist:
                 sess.persist()
         except Exception:
             pass
@@ -3789,6 +3809,7 @@ class SingleAgentManager:
         st = sess.stop()
         with sess._lock:
             err = sess.last_error
+        self._maybe_auto_update_title(sess, status_override=st, error_override=err, persist=True)
         return {"ok": True, "id": session_id, "status": st, "error": err}
 
     def export_session_markdown(self, session_id: str) -> Optional[Dict[str, Any]]:
@@ -4305,9 +4326,14 @@ class SingleAgentManager:
             sess.emit("compaction", item=comp_item)
             sess.emit(
                 "usage",
-                prompt_tokens=int(res.get("input_tokens") or 0),
-                completion_tokens=int(res.get("output_tokens") or 0),
-                total_tokens=int(res.get("input_tokens") or 0) + int(res.get("output_tokens") or 0),
+                prompt_tokens=in_tot,
+                completion_tokens=out_tot,
+                total_tokens=in_tot + out_tot,
+                session_usage={
+                    "prompt_tokens": in_tot,
+                    "completion_tokens": out_tot,
+                    "total_tokens": in_tot + out_tot,
+                },
                 input_tokens=in_tot,
                 output_tokens=out_tot,
                 cache_read_tokens=cr_tot,
@@ -4829,7 +4855,7 @@ class SingleAgentManager:
                     return False
         # Persist complete message history to disk BEFORE flipping status so readers
         # observing `sess.status == "done"` never read a stale pre-final snapshot.
-        self._maybe_auto_update_title(sess, status_override=status, error_override=str(error or ""))
+        self._maybe_auto_update_title(sess, status_override=status, error_override=str(error or ""), persist=False)
         sess.persist(status_override=status, error_override=str(error or ""))
 
         next_q: Optional[Dict[str, Any]] = None
@@ -4873,6 +4899,7 @@ class SingleAgentManager:
         max_tokens_recovery_count = 0
         last_compact_step = -999
         failed_call_streaks: Dict[str, int] = {}
+        consecutive_loop_guard_hits = 0
 
         try:
             eff_cfg = load_agent_config()
@@ -4973,6 +5000,14 @@ class SingleAgentManager:
                                 sess.emit("compaction", item=comp_item)
                                 sess.emit(
                                     "usage",
+                                    prompt_tokens=in_tot,
+                                    completion_tokens=out_tot,
+                                    total_tokens=in_tot + out_tot,
+                                    session_usage={
+                                        "prompt_tokens": in_tot,
+                                        "completion_tokens": out_tot,
+                                        "total_tokens": in_tot + out_tot,
+                                    },
                                     input_tokens=in_tot,
                                     output_tokens=out_tot,
                                     cache_read_tokens=cr_tot,
@@ -5269,8 +5304,13 @@ class SingleAgentManager:
 
                     if bool(tool_res.get("ok", True)):
                         failed_call_streaks.pop(call_sig, None)
-                    elif not tool_res.get("loop_blocked"):
+                        consecutive_loop_guard_hits = 0
+                    elif tool_res.get("loop_blocked"):
                         failed_call_streaks[call_sig] = prev_same_fails + 1
+                        consecutive_loop_guard_hits += 1
+                    else:
+                        failed_call_streaks[call_sig] = prev_same_fails + 1
+                        consecutive_loop_guard_hits = 0
 
                     ui_res = _compact_tool_result_for_ui(tool_res)
                     tool_end_extra: Dict[str, Any] = {}
@@ -5291,7 +5331,24 @@ class SingleAgentManager:
 
                     tool_text = json.dumps(tool_res, ensure_ascii=False)
                     if len(tool_text) > 12_000:
-                        tool_text = tool_text[:12_000] + " ... [truncated]"
+                        if isinstance(tool_res, dict):
+                            compact_keep: Dict[str, Any] = {}
+                            for sk in (
+                                "ok", "adapter", "returncode", "exit_code", "accounts_delta",
+                                "new_accounts_added", "new_valid_credentials_added", "valid_count",
+                                "checkpoint_id", "written_path", "path", "error", "loop_blocked",
+                            ):
+                                if sk in tool_res:
+                                    compact_keep[sk] = tool_res[sk]
+                            if isinstance(tool_res.get("new_accounts"), list):
+                                compact_keep["new_accounts"] = tool_res["new_accounts"][:5]
+                            compact_keep["output_tail"] = str(
+                                tool_res.get("output_tail") or tool_res.get("stderr") or tool_text[:6000]
+                            )[-4000:]
+                            compact_keep["truncated"] = True
+                            tool_text = json.dumps(compact_keep, ensure_ascii=False)[:12_000]
+                        else:
+                            tool_text = tool_text[:12_000] + " ... [truncated]"
                     with sess._lock:
                         sess.messages.append({
                             "role": "tool",
@@ -5302,9 +5359,22 @@ class SingleAgentManager:
                     sess.persist()
                     if fn_name in (
                         "probe_url", "analyze_har", "scaffold_site",
-                        "write_adapter", "patch_adapter", "run_adapter_once",
+                        "write_adapter", "patch_adapter", "run_adapter_once", "verify_accounts",
                     ):
                         self._maybe_auto_update_title(sess, status_override="running")
+
+                    # 无步数上限模式下连续 >= 3 次触发防死循环熔断则安全暂停，防止空烧 Token
+                    if consecutive_loop_guard_hits >= 3:
+                        self._finalize_goal_state(sess, "blocked", "连续重复触发防死循环熔断")
+                        halt_msg = (
+                            "检测到模型连续多次重复发起完全相同的失败工具调用，已触发防死循环保护并自动暂停本轮，"
+                            "避免继续消耗 Token。请根据上方最后一次工具报错调整策略后发送新指令继续。"
+                        )
+                        with sess._lock:
+                            sess.messages.append({"role": "assistant", "content": halt_msg})
+                        sess.emit("assistant_msg", content=halt_msg)
+                        self._finish_turn_status(sess, stop_ev, "done")
+                        return
 
                     # Mid-run steering: inject user's new instruction right after current tool finishes
                     if sess.has_pending_steer():

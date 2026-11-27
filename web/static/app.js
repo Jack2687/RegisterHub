@@ -2431,6 +2431,24 @@
     if (evType === 'text_delta' || evType === 'thinking_delta' || evType === 'tool_call_delta') {
       return;
     }
+    if (evType === 'session_renamed' || evType === 'title_updated') {
+      const sid = String(ev.session_id || activeAgentSessionId || '');
+      const newTitle = String(ev.title || '').trim();
+      if (newTitle) {
+        if (sid && sid === activeAgentSessionId && $('#agent-chat-title')) {
+          $('#agent-chat-title').textContent = newTitle;
+        }
+        if (Array.isArray(agentSessionsCache)) {
+          agentSessionsCache = agentSessionsCache.map((s) =>
+            s && s.id === sid ? { ...s, title: newTitle } : s
+          );
+          if (!editingAgentSessionId || !document.activeElement?.matches('.agent-rename-input')) {
+            renderAgentSessions();
+          }
+        }
+      }
+      return;
+    }
     if (typeof ev.seq === 'number' && ev.seq + 1 > agentStreamSeq) {
       agentStreamSeq = ev.seq + 1;
     }
@@ -2559,6 +2577,12 @@
       }
       if (!editingAgentSessionId || !document.activeElement?.matches('.agent-rename-input')) {
         renderAgentSessions();
+      }
+      if (activeAgentSessionId && $('#agent-chat-title')) {
+        const curMeta = agentSessionsCache.find((s) => s && s.id === activeAgentSessionId);
+        if (curMeta && curMeta.title) {
+          $('#agent-chat-title').textContent = curMeta.title;
+        }
       }
       if (autoReconnect && activeId) {
         await selectAgentSession(activeId);

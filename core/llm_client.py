@@ -1084,6 +1084,9 @@ def _parse_non_stream_json_response(
         raw_fr = str(choice0.get("finish_reason") or "")
         stop_reason = _normalize_stop_reason(raw_fr)
 
+    from core.llm_context import split_inline_thinking_tags
+
+    content, thinking = split_inline_thinking_tags(content, thinking)
     total_t = prompt_t + comp_t
     hit_pct = min(100, max(0, round(cache_r / prompt_t * 100))) if prompt_t > 0 else 0
     tok_s = round(comp_t / max(0.05, lat_ms / 1000.0), 1) if comp_t > 0 else 0.0
@@ -1548,7 +1551,7 @@ def stream_chat_completion(
                             content_parts.append(txt)
                             _mark_first_token()
                             _fire({"type": "text_delta", "delta": txt})
-                    elif ev_type in ("response.reasoning_summary_text.delta", "response.reasoning.delta"):
+                    elif ev_type in ("response.reasoning_summary_text.delta", "response.reasoning_text.delta", "response.reasoning.delta"):
                         th = str(ev.get("delta") or "")
                         if th:
                             thinking_parts.append(th)
@@ -1656,8 +1659,9 @@ def stream_chat_completion(
             _emit_call_log(cfg, fmt, t_start, ok=False, session_id=session_id, err_msg=err_s, req_body=payload)
             raise LLMClientError(err_s) from exc
 
-    content = "".join(content_parts)
-    thinking = "".join(thinking_parts)
+    from core.llm_context import split_inline_thinking_tags
+
+    content, thinking = split_inline_thinking_tags("".join(content_parts), "".join(thinking_parts))
     if aborted:
         lat_ms = round((time.perf_counter() - t_start) * 1000, 1)
         ttft_ms = round((first_token_at - t_start) * 1000, 1) if first_token_at is not None else lat_ms
@@ -1815,8 +1819,14 @@ def discover_models(
             with opener.open(req, timeout=timeout) as resp:
                 raw_bytes = resp.read(2_000_000)
         except urllib.error.HTTPError as he:
-            last_error = sanitize_error_text(f"HTTP {he.code}: {_parse_http_error(he)}")
-            if he.code in (401, 403):
+            err_body = _parse_http_error(he)
+            last_error = sanitize_error_text(f"HTTP {he.code}: {err_body}")
+            if he.code == 401:
+                break
+            if he.code == 403 and not any(
+                k in err_body.lower()
+                for k in ("api path", "path ", "not allowed for this domain", "not found", "no route")
+            ):
                 break
             continue
         except urllib.error.URLError as ue:

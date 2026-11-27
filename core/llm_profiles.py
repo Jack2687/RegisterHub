@@ -129,7 +129,7 @@ def _normalize_profile(raw: Dict[str, Any], default_id: str = "") -> Dict[str, A
     if tm not in ("none", "enabled", "disabled"):
         tm = "none"
     re_val = str(raw.get("reasoning_effort") or "none").strip()
-    if re_val not in ("none", "low", "medium", "high", "xhigh", "max"):
+    if re_val not in ("none", "minimal", "low", "medium", "high", "xhigh", "max"):
         re_val = "none"
 
     health = raw.get("health") if isinstance(raw.get("health"), dict) else {}
@@ -383,6 +383,8 @@ def upsert_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
             "retry_policy",
         ):
             if field in payload:
+                if field == "model_context_windows" and payload[field] is None:
+                    continue
                 if field == "proxy_url" and "***@" in str(payload[field] or "") and merged.get("proxy_url"):
                     continue
                 merged[field] = payload[field]
@@ -419,15 +421,22 @@ def upsert_profile(payload: Dict[str, Any]) -> Dict[str, Any]:
         else:
             merged["keys"] = existing_keys
 
-        # 未显式指定 context_window_k 时，按模型元数据/家族自动识别真实窗口（与母港/PRO 完全一致）
+        # 未显式指定 context_window_k 时：
+        # - 同模型局部编辑保留已有自定义窗口（仅对历史默认 128K 做家族自动升级）；
+        # - 新建或切换模型时按新模型元数据/家族自动识别，未命中回落 128K
         if "context_window_k" not in payload or payload.get("context_window_k") is None:
             eff_model = str(merged.get("model") or "").strip()
             eff_mcw = _clean_ctx_map(merged.get("model_context_windows"))
+            prev_model = str(profs[existing_idx].get("model") or "").strip() if existing_idx >= 0 else ""
+            prev_k = llm_client._clamp_int(profs[existing_idx].get("context_window_k"), 128, 16, 1000) if existing_idx >= 0 else 128
+            model_changed = (existing_idx < 0) or (eff_model.lower() != prev_model.lower())
             inferred_ctx = infer_model_context_window_k(eff_model, eff_mcw)
-            if inferred_ctx is not None:
+            if model_changed:
+                merged["context_window_k"] = inferred_ctx if inferred_ctx is not None else 128
+            elif prev_k == 128 and inferred_ctx is not None:
                 merged["context_window_k"] = inferred_ctx
-            elif existing_idx < 0:
-                merged.pop("context_window_k", None)
+            else:
+                merged["context_window_k"] = prev_k
 
         # Ensure default model stays in pinned_models if user hasn't explicitly emptied it on first create
         normalized = _normalize_profile(merged, default_id=merged["id"])
@@ -523,6 +532,50 @@ def mutate_profile_keys(
         return to_public_profile(prof, store["active_id"]), delta
 
 
+def export_profile_credentials(profile_id: str, key_id: str = "") -> Optional[Dict[str, Any]]:
+    """按显式请求返回单个供应商的明文 Base URL / Model / API Key（用于一键复制与跨端迁移）。"""
+    pid = str(profile_id or "").strip()
+    kid_want = str(key_id or "").strip()
+    if not pid:
+        return None
+    with _STORE_LOCK:
+        store = _load_store_unlocked()
+        prof = next((p for p in store["profiles"] if p["id"] == pid), None)
+        if prof is None:
+            return None
+        key_pairs: List[Tuple[str, str]] = []
+        seen: set[str] = set()
+        for item in prof.get("keys") or []:
+            if not isinstance(item, dict):
+                continue
+            kv = str(item.get("key") or "").strip()
+            kid = str(item.get("id") or "").strip()
+            if kv and kv not in seen:
+                seen.add(kv)
+                key_pairs.append((kid, kv))
+        if kid_want:
+            matched = next((kv for kid, kv in key_pairs if kid == kid_want), None)
+            if matched is None:
+                raise KeyError(f"Key 不存在: {kid_want}")
+            return {
+                "ok": True,
+                "id": pid,
+                "key_id": kid_want,
+                "key": matched,
+            }
+        keys_only = [kv for _, kv in key_pairs]
+        return {
+            "ok": True,
+            "id": pid,
+            "name": str(prof.get("name") or ""),
+            "format": str(prof.get("format") or "openai"),
+            "base_url": str(prof.get("base_url") or ""),
+            "model": str(prof.get("model") or ""),
+            "keys": keys_only,
+            "key_count": len(keys_only),
+        }
+
+
 def reset_pool_cooldown(profile_id: str = "") -> int:
     pid = str(profile_id or "").strip()
     with _STORE_LOCK:
@@ -560,8 +613,10 @@ def save_catalog_models(
             merged_ctx = dict(prof.get("model_context_windows") or {})
             merged_ctx.update(_clean_ctx_map(ctx_map))
             prof["model_context_windows"] = merged_ctx
-        inferred_k = infer_model_context_window_k(str(prof.get("model") or ""), prof.get("model_context_windows"))
-        if inferred_k is not None:
+        cur_m = str(prof.get("model") or "")
+        inferred_k = infer_model_context_window_k(cur_m, prof.get("model_context_windows"))
+        cur_stored_k = llm_client._clamp_int(prof.get("context_window_k"), 128, 16, 1000)
+        if inferred_k is not None and (cur_stored_k == 128 or (ctx_map and cur_m in ctx_map)):
             prof["context_window_k"] = inferred_k
         store["profiles"][idx] = prof
         _save_store_unlocked(store)

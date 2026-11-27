@@ -2248,8 +2248,14 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
             updated_prof = llm_profiles.save_catalog_models(pid, res["models"], ctx_map=res.get("model_context_windows"))
             if updated_prof:
                 saved_flag = True
-                if res.get("detected_context_window_k") is None and updated_prof.get("context_window_k"):
-                    res["detected_context_window_k"] = updated_prof["context_window_k"]
+                explicit_m = str(body.get("model") or "").strip()
+                if not explicit_m and res.get("detected_context_window_k") is None:
+                    inferred_u = llm_profiles.infer_model_context_window_k(
+                        str(updated_prof.get("model") or ""),
+                        updated_prof.get("model_context_windows"),
+                    )
+                    if inferred_u is not None:
+                        res["detected_context_window_k"] = inferred_u
         handler._send_json({**res, "saved": saved_flag})
         return True
 
@@ -2310,6 +2316,24 @@ def handle_studio_post(handler: Any, srv: Any, path: str, body: Dict[str, Any]) 
 
         cnt = llm_profiles.reset_pool_cooldown(str(body.get("profile_id") or ""))
         handler._send_json({"ok": True, "reset": cnt})
+        return True
+
+    m_prof_export = re.fullmatch(r"/api/llm/profiles/([^/]+)/export-credentials", path)
+    if m_prof_export:
+        from core import llm_profiles
+
+        pid = unquote(m_prof_export.group(1))
+        kid = str(body.get("key_id") or "").strip()
+        try:
+            res = llm_profiles.export_profile_credentials(pid, key_id=kid)
+            if res is None:
+                handler._send_json({"ok": False, "error": f"供应商不存在: {pid}"}, status=404)
+                return True
+            handler._send_json(res)
+        except KeyError as ke:
+            handler._send_json({"ok": False, "error": str(ke)}, status=404)
+        except Exception as e:
+            handler._send_json({"ok": False, "error": str(e)}, status=400)
         return True
 
     m_prof_keys = re.fullmatch(r"/api/llm/profiles/([^/]+)/keys", path)

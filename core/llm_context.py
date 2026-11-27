@@ -9,15 +9,16 @@
 
 from __future__ import annotations
 
+import math
 import re
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 MIN_CONTEXT_WINDOW_K = 16
 MAX_CONTEXT_WINDOW_K = 1000
 DEFAULT_CONTEXT_WINDOW_K = 128
 
 _AT_K_RE = re.compile(r"@(\d+)k\b")
-_ONE_M_SUFFIX_RE = re.compile(r"[@\-_]1m\b")
+_ONE_M_SUFFIX_RE = re.compile(r"[@\-_:\[]1m(?:\]|$|\b)")
 
 _1M_MODEL_PREFIXES: tuple[str, ...] = (
     "gemini-1.5",
@@ -33,6 +34,12 @@ _1M_MODEL_PREFIXES: tuple[str, ...] = (
     "minimax-m3",
     "qwen4",
     "qwen3.8",
+    "claude-4-6",
+    "claude-4.6",
+    "claude-4-7",
+    "claude-4.7",
+    "claude-4-8",
+    "claude-4.8",
     "claude-opus-4-6",
     "claude-opus-4.6",
     "claude-opus-4-7",
@@ -55,6 +62,11 @@ _256K_MODEL_PREFIXES: tuple[str, ...] = (
     "kimi-k2",
     "qwen3",
     "grok-4",
+)
+
+_128K_EXPLICIT_PREFIXES: tuple[str, ...] = (
+    "o1-mini",
+    "o1-preview",
 )
 
 _200K_MODEL_PREFIXES: tuple[str, ...] = (
@@ -89,21 +101,24 @@ def _clamp_ctx_k(val: int, default: int = DEFAULT_CONTEXT_WINDOW_K) -> int:
     return max(MIN_CONTEXT_WINDOW_K, min(MAX_CONTEXT_WINDOW_K, iv))
 
 
-def tokens_to_context_k(raw_tokens: Any) -> Optional[int]:
+def tokens_to_context_k(raw_tokens: Any, *, raw_tokens_only: bool = False) -> Optional[int]:
     """将上游 /models 返回的原始上下文 token 数（如 1048576 / 1000000 / 200000）归一化为 K（16..1000，1000=1M）。"""
     if raw_tokens is None or isinstance(raw_tokens, bool):
         return None
     try:
-        val = int(float(raw_tokens))
-    except (TypeError, ValueError):
+        fval = float(raw_tokens)
+        if not math.isfinite(fval):
+            return None
+        val = int(fval)
+    except (TypeError, ValueError, OverflowError):
         return None
     if val <= 0:
         return None
-    if val <= 2048:
+    if not raw_tokens_only and val <= MAX_CONTEXT_WINDOW_K:
         k = val
     elif val >= 1_000_000:
-        k = 1000
-    elif val % 1024 == 0:
+        k = MAX_CONTEXT_WINDOW_K
+    elif val % 1024 == 0 and val % 1000 != 0:
         k = val // 1024
     else:
         k = round(val / 1000)
@@ -137,17 +152,21 @@ def extract_model_context_windows(
         if not mid or (skip_model_fn is not None and skip_model_fn(mid)):
             continue
 
-        raw_ctx: Any = None
+        k: Optional[int] = None
         for key in _CONTEXT_META_KEYS:
-            if item.get(key):
-                raw_ctx = item.get(key)
-                break
-        if not raw_ctx and isinstance(item.get("top_provider"), dict):
-            raw_ctx = item["top_provider"].get("context_length")
-        if not raw_ctx and isinstance(item.get("limits"), dict):
-            raw_ctx = item["limits"].get("context") or item["limits"].get("input")
+            if item.get(key) is not None:
+                cand_k = tokens_to_context_k(item.get(key), raw_tokens_only=True)
+                if cand_k is not None:
+                    k = cand_k
+                    break
+        if k is None and isinstance(item.get("top_provider"), dict):
+            k = tokens_to_context_k(item["top_provider"].get("context_length"), raw_tokens_only=True)
+        if k is None and isinstance(item.get("limits"), dict):
+            lim = item["limits"]
+            k = tokens_to_context_k(lim.get("context"), raw_tokens_only=True)
+            if k is None:
+                k = tokens_to_context_k(lim.get("input"), raw_tokens_only=True)
 
-        k = tokens_to_context_k(raw_ctx)
         if k is not None:
             out[mid] = k
     return out
@@ -179,7 +198,7 @@ def lookup_model_context_window_k(
     model_id: str,
     model_contexts: Optional[Dict[str, int]] = None,
 ) -> Optional[int]:
-    """仅从上游 /models 元数据映射中查找模型上下文窗口（精确 -> 去前缀短名 -> 忽略大小写）。"""
+    """仅从上游 /models 元数据映射中查找模型上下文窗口（精确 -> 去前缀短名 -> 忽略大小写精确 -> 短名回退）。"""
     mid = (model_id or "").strip()
     if not mid or not isinstance(model_contexts, dict) or not model_contexts:
         return None
@@ -190,10 +209,20 @@ def lookup_model_context_window_k(
         return tokens_to_context_k(model_contexts[short])
     low_mid = mid.lower()
     low_short = short.lower()
+    # Pass 1: 优先忽略大小写的完整模型 ID 精确匹配，避免不同渠道前缀互相遮蔽
     for k, v in model_contexts.items():
         kl = str(k or "").strip().lower()
-        if kl == low_mid or kl == low_short or kl.endswith("/" + low_short):
-            return tokens_to_context_k(v)
+        if kl == low_mid:
+            hit = tokens_to_context_k(v)
+            if hit is not None:
+                return hit
+    # Pass 2: 退回到忽略大小写的短名/尾段匹配
+    for k, v in model_contexts.items():
+        kl = str(k or "").strip().lower()
+        if kl == low_short or kl.endswith("/" + low_short):
+            hit = tokens_to_context_k(v)
+            if hit is not None:
+                return hit
     return None
 
 
@@ -213,11 +242,15 @@ def infer_model_context_window_k(
     low = mid.lower()
     m_at = _AT_K_RE.search(low)
     if m_at:
-        return _clamp_ctx_k(int(m_at.group(1)))
+        at_val = int(m_at.group(1))
+        if at_val > 0:
+            return _clamp_ctx_k(at_val)
     if _ONE_M_SUFFIX_RE.search(low):
         return MAX_CONTEXT_WINDOW_K
 
     short_l = low.rsplit("/", 1)[-1]
+    if any(short_l.startswith(pfx) for pfx in _128K_EXPLICIT_PREFIXES):
+        return DEFAULT_CONTEXT_WINDOW_K
     if any(short_l.startswith(pfx) for pfx in _1M_MODEL_PREFIXES):
         return MAX_CONTEXT_WINDOW_K
     if any(short_l.startswith(pfx) for pfx in _256K_MODEL_PREFIXES):
@@ -235,14 +268,15 @@ def resolve_context_window_k(
 
     优先级：
       1. 档案 `model_context_windows` 中的上游真实元数据；
-      2. 若会话临时切换了与档案默认不同的模型：优先按模型家族推断；
+      2. 若会话临时切换了与档案默认不同的模型：按模型家族推断，未命中则回落默认 128K（绝不继承原模型的 1M 窗口）；
       3. 若档案保存了非默认值（!= 128）的 `context_window_k`：尊重档案值；
       4. 按模型家族推断（修复旧档案遗留的默认 128K）；
       5. 兜底返回档案值或 128K。
     """
     prof = profile if isinstance(profile, dict) else {}
     prof_model = str(prof.get("model") or "").strip()
-    eff_model = (model_name or "").strip() or prof_model
+    req_model = (model_name or "").strip()
+    eff_model = req_model or prof_model
     mcw = prof.get("model_context_windows") if isinstance(prof.get("model_context_windows"), dict) else None
 
     if eff_model and mcw:
@@ -250,13 +284,12 @@ def resolve_context_window_k(
         if hit is not None:
             return hit
 
-    same_model = (not model_name.strip()) or (eff_model.lower() == prof_model.lower())
+    is_model_override = bool(req_model and prof_model and req_model.lower() != prof_model.lower())
     stored_k = tokens_to_context_k(prof.get("context_window_k")) if prof else None
 
-    if not same_model and eff_model:
+    if is_model_override:
         inferred_override = infer_model_context_window_k(eff_model, None)
-        if inferred_override is not None:
-            return inferred_override
+        return inferred_override if inferred_override is not None else DEFAULT_CONTEXT_WINDOW_K
 
     if stored_k is not None and stored_k != DEFAULT_CONTEXT_WINDOW_K:
         return stored_k
@@ -275,3 +308,102 @@ def resolve_context_window_tokens(
 ) -> int:
     """返回有效上下文窗口 Token 总数（K * 1000）。"""
     return resolve_context_window_k(profile, model_name) * 1000
+
+
+_INLINE_THINK_OPEN_RE = re.compile(r"<(think|thinking)\b[^>]*>", re.I)
+_INLINE_THINK_CLOSE_RE = re.compile(r"</(think|thinking)\s*>", re.I)
+
+
+def split_inline_thinking_tags(content: str, existing_thinking: str = "") -> Tuple[str, str]:
+    """安全剥离正文中的 `<think>...</think>` / `<thinking>...</thinking>` 标签并并入 thinking 字段。
+
+    单遍扫描：
+    - 顶层三反引号/波浪线围栏代码块原样保留（不破坏代码片段中的示例标签）；
+    - `<thinking>...</thinking>` 内部允许包含代码块（完整折叠进 thinking，不被误切）；
+    - 兼容 DeepSeek/R1 类模型省略开头 `<think>`、仅输出尾部 `</think>` 的前缀思考模式。
+    """
+    raw_content = str(content or "")
+    base_thinking = str(existing_thinking or "").strip()
+    low_raw = raw_content.lower()
+    if not raw_content or ("<think" not in low_raw and "</think" not in low_raw):
+        return raw_content, base_thinking
+
+    extracted: list[str] = []
+    out_chars: list[str] = []
+    n = len(raw_content)
+    i = 0
+    in_fence = False
+    fence_char = ""
+    fence_len = 0
+    at_line_start = True
+
+    while i < n:
+        if at_line_start:
+            ws = i
+            while ws < n and raw_content[ws] in (" ", "\t"):
+                ws += 1
+            if ws < n and raw_content[ws] in ("`", "~"):
+                ch = raw_content[ws]
+                end_run = ws
+                while end_run < n and raw_content[end_run] == ch:
+                    end_run += 1
+                run_len = end_run - ws
+                if run_len >= 3:
+                    line_end = raw_content.find("\n", end_run)
+                    line_end = n if line_end == -1 else line_end + 1
+                    if not in_fence:
+                        in_fence = True
+                        fence_char = ch
+                        fence_len = run_len
+                        out_chars.append(raw_content[i:line_end])
+                        i = line_end
+                        at_line_start = True
+                        continue
+                    if ch == fence_char and run_len >= fence_len and raw_content[end_run:line_end].strip() == "":
+                        in_fence = False
+                        fence_char = ""
+                        fence_len = 0
+                        out_chars.append(raw_content[i:line_end])
+                        i = line_end
+                        at_line_start = True
+                        continue
+
+        if not in_fence and raw_content[i] == "<":
+            m_open = _INLINE_THINK_OPEN_RE.match(raw_content, i)
+            if m_open:
+                m_close = _INLINE_THINK_CLOSE_RE.search(raw_content, m_open.end())
+                if m_close:
+                    inner = raw_content[m_open.end() : m_close.start()].strip()
+                    if inner:
+                        extracted.append(inner)
+                    i = m_close.end()
+                    at_line_start = i == 0 or raw_content[i - 1] == "\n"
+                    continue
+            # 兼容模型省略开头 <think> 仅输出 `...思考内容...</think>` 的场景
+            m_orphan_close = _INLINE_THINK_CLOSE_RE.match(raw_content, i)
+            if m_orphan_close and not extracted:
+                prefix_think = _INLINE_THINK_OPEN_RE.sub("", "".join(out_chars)).strip()
+                if prefix_think:
+                    extracted.append(prefix_think)
+                out_chars.clear()
+                i = m_orphan_close.end()
+                at_line_start = i == 0 or raw_content[i - 1] == "\n"
+                continue
+
+        ch = raw_content[i]
+        out_chars.append(ch)
+        at_line_start = ch == "\n"
+        i += 1
+
+    if not extracted:
+        return raw_content, base_thinking
+
+    clean_content = re.sub(r"\n{3,}", "\n\n", "".join(out_chars)).strip()
+    merged_parts: list[str] = []
+    if base_thinking:
+        merged_parts.append(base_thinking)
+    for chunk in extracted:
+        if not any(chunk == existing or chunk in existing for existing in merged_parts):
+            merged_parts.append(chunk)
+    merged_thinking = "\n\n".join(merged_parts).strip()
+    return clean_content, merged_thinking

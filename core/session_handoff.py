@@ -19,6 +19,7 @@ HANDOFF_SCHEMA_VERSION = "v1"
 DEFAULT_SESSION_TITLES = frozenset({
     "",
     "新 AI 直跑会话",
+    "新注册会话",
     "新会话",
     "New Session",
     "AI 注册工程师",
@@ -28,6 +29,7 @@ DEFAULT_SESSION_TITLES = frozenset({
 _AUTO_STAGE_SUFFIXES = (
     "探测中",
     "调测中",
+    "待审批",
     "已跑通",
     "待续跑",
     "已完成",
@@ -54,13 +56,54 @@ _STRIP_SUBDOMAIN_PREFIXES = (
     "api.",
 )
 
-_GENERIC_TLDS = (".com", ".io", ".ai", ".net", ".org", ".dev", ".co", ".cn", ".top", ".xyz", ".app", ".cc", ".me", ".gg")
+_COMPOUND_PUBLIC_SUFFIXES = (
+    ".co.uk",
+    ".org.uk",
+    ".ac.uk",
+    ".com.cn",
+    ".org.cn",
+    ".net.cn",
+    ".gov.cn",
+    ".edu.cn",
+    ".co.jp",
+    ".ne.jp",
+    ".or.jp",
+    ".com.au",
+    ".net.au",
+    ".com.hk",
+    ".com.tw",
+    ".co.kr",
+    ".com.br",
+    ".com.sg",
+    ".cc.cd",
+    ".vercel.app",
+    ".pages.dev",
+    ".netlify.app",
+    ".workers.dev",
+    ".onrender.com",
+    ".fly.dev",
+    ".railway.app",
+    ".herokuapp.com",
+    ".github.io",
+)
 
 _URL_RE = re.compile(r"https?://[^\s<>\"'\]\)）}，。；、]+", re.I)
 
 # 脱敏正则集合
+_RE_PEM_PRIVATE_KEY = re.compile(
+    r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----"
+)
+_RE_WEBHOOK_URL = re.compile(
+    r"https?://(?:(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/[^\s\"'`<>)\]]+|"
+    r"hooks\.slack\.com/services/[^\s\"'`<>)\]]+|"
+    r"api\.telegram\.org/bot[^\s/]+/[^\s\"'`<>)\]]+|"
+    r"open\.(?:feishu|larksuite)\.cn/open-apis/bot/v2/hook/[^\s\"'`<>)\]]+|"
+    r"oapi\.dingtalk\.com/robot/send\?[^\s\"'`<>)\]]+|"
+    r"qyapi\.weixin\.qq\.com/cgi-bin/webhook/send\?[^\s\"'`<>)\]]+)",
+    re.I,
+)
 _RE_PROXY_CREDS = re.compile(r"((?:https?|socks5h?)://)([^/\s:@\"']{1,120}):([^/\s@\"']{1,200})@", re.I)
-_RE_BEARER = re.compile(r"\b(Bearer\s+)[A-Za-z0-9._~+/=-]{12,}\b", re.I)
+_RE_AUTH_SCHEME = re.compile(r"\b((?:Bearer|Basic|Token|ApiKey|Api-Key)\s+)[A-Za-z0-9._~+/=-]{10,}\b", re.I)
 _RE_JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{6,}\b")
 _RE_KNOWN_KEY = re.compile(
     r"\b(?:sk-ant-[A-Za-z0-9_-]{12,}|sk-or-[A-Za-z0-9_-]{12,}|sk-[A-Za-z0-9_-]{14,}|"
@@ -69,24 +112,35 @@ _RE_KNOWN_KEY = re.compile(
     r"nvapi-[A-Za-z0-9_-]{16,}|rk_[A-Za-z0-9_-]{12,}|csk-[A-Za-z0-9_-]{14,}|"
     r"AKIA[0-9A-Z]{16})\b"
 )
-_RE_ACCOUNT_DUMP = re.compile(
-    r"(?m)^[^\s#]{3,120}----[^\s]{3,120}(?:----[^\s]*){1,6}$"
+_RE_ACCOUNT_DUMP_LINE = re.compile(
+    r"(?m)^(\s*(?:[-*•]\s+)?)[^\s#\"'`]{3,120}----[^\s\"'`]{4,120}(?:----[^\s\"'`]*){0,6}$"
+)
+_RE_ACCOUNT_DUMP_INLINE = re.compile(
+    r"\b[A-Za-z0-9._%+-]{2,64}@[A-Za-z0-9.-]+\.[A-Za-z]{2,16}----[^\s\"'`,;}{]{4,120}(?:----[^\s\"'`,;}{]*){0,6}"
 )
 _RE_EMAIL = re.compile(
     r"\b[A-Za-z0-9._%+-]{2,64}@(?!example\.(?:com|org|net)\b|test\.local\b|redacted\b)[A-Za-z0-9.-]+\.[A-Za-z]{2,16}\b"
 )
+# 支持单反斜杠、JSON 转义双反斜杠、正斜杠以及含空格的 Windows 用户名目录
+_RE_WIN_USER_PATH = re.compile(
+    r"(?i)[A-Z]:(?:\\\\|\\|/)Users(?:\\\\|\\|/)[A-Za-z0-9._ -]{1,36}(?=(?:\\\\|\\|/))(?:(?:\\\\|\\|/)[^\s\"'`<>)\],;：。\n]+)*"
+)
 _RE_WIN_PATH = re.compile(
-    r"(?i)[A-Z]:\\(?:Users|VsCodeProjects|Softwares|Documents|Desktop|Downloads|Projects|Work)(?:\\[^\s\"'`<>)\],;：。]+)*"
+    r"(?i)[A-Z]:(?:\\\\|\\|/)(?:Users|VsCodeProjects|Softwares|Documents|Desktop|Downloads|Projects|Work)(?:(?:\\\\|\\|/)[^\s\"'`<>)\],;：。\n]+)*"
 )
 _RE_UNIX_HOME_PATH = re.compile(r"/(?:Users|home)/[^/\s\"'`<>)\],;]+(?:/[^\s\"'`<>)\],;]+)*")
+_RE_COOKIE_HEADER_PROSE = re.compile(
+    r"(?i)(['\"]?(?:cookie|set-cookie)['\"]?\s*[:=]\s*)(['\"]?)([^\n\"']{10,400})\2"
+)
 _RE_SECRET_KV_PROSE = re.compile(
     r"(?i)(['\"]?(?:api_?key|secret_?key|access_?token|refresh_?token|id_?token|auth_?token|"
-    r"mail_hub_token|client_secret|x-api-key|authorization|cookie|set-cookie|password|passwd)['\"]?"
-    r"\s*[:=]\s*)(['\"]?)([^\s,\"'}{;\n]{8,240})\2"
+    r"mail_hub_token|client_secret|x-api-key|x-auth-token|authorization|cookie|set-cookie|password|passwd)['\"]?"
+    r"\s*[:=]\s*)(['\"]?)([^\s,\"'}{;\n&`)]{6,240})\2"
 )
 _RE_SECRET_LITERAL_CODE = re.compile(
-    r"(?i)((?:api_?key|secret_?key|access_?token|refresh_?token|mail_hub_token|client_secret|"
-    r"x-api-key|authorization|cookie)\s*[:=]\s*)(['\"])([^'\"\n]{12,240})\2"
+    r"(?i)(['\"]?(?:api_?key|secret_?key|access_?token|refresh_?token|id_?token|auth_?token|"
+    r"mail_hub_token|client_secret|x-api-key|x-auth-token|authorization|cookie|set-cookie|password|passwd)['\"]?"
+    r"\s*[:=]\s*)(['\"])([^'\"\n]{8,240})\2"
 )
 
 _SAFE_VALUE_PREFIXES = (
@@ -99,11 +153,16 @@ _SAFE_VALUE_PREFIXES = (
     "profile.",
     "resp.",
     "data.",
+    "req.",
+    "headers.",
+    "result.",
     "...",
     "***",
     "http://",
     "https://",
     "bearer <",
+    "basic <",
+    "token <",
     "${",
     "{{",
 )
@@ -114,7 +173,7 @@ def _count_sub(pattern: re.Pattern[str], repl: Any, text: str) -> Tuple[str, int
 
 
 def _shorten_local_path(raw_path: str) -> str:
-    norm = raw_path.replace("\\", "/")
+    norm = raw_path.replace("\\\\", "/").replace("\\", "/")
     lower = norm.lower()
     for marker in ("/sites/", "/core/", "/web/", "/results/", "/scratch/", "/data/", "/docs/"):
         idx = lower.find(marker)
@@ -128,6 +187,29 @@ def _shorten_local_path(raw_path: str) -> str:
     return "<LOCAL_PATH>"
 
 
+def _looks_like_safe_code_expr(val: str) -> bool:
+    """识别明显属于代码标识符/属性链/CSS 选择器的非凭据值，避免误伤有效代码。"""
+    s = val.strip()
+    if not s:
+        return True
+    sl = s.lower()
+    if any(sl.startswith(p) for p in _SAFE_VALUE_PREFIXES):
+        return True
+    if sl in ("none", "null", "true", "false", "empty", "required", "optional", "string", "str", "int", "bool"):
+        return True
+    # 函数调用、点分属性访问（无数字）、CSS 选择器（如 input[name=api_key]）
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\([^)]*\)", s):
+        return True
+    if re.fullmatch(r"[A-Za-z_][A-Za-z_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+", s):
+        return True
+    if re.match(r"^(?:[a-z]+\[|[#.]?[a-z_][a-z0-9_-]*\[)", sl):
+        return True
+    # 纯小写下划线占位标识（不含数字，如 my_api_key / user_password）
+    if re.fullmatch(r"[a-z_]{3,40}", s) and "_" in s:
+        return True
+    return False
+
+
 def redact_handoff_text(text: str) -> Tuple[str, Dict[str, int]]:
     """对分享接力单正文执行严格脱敏，返回 (脱敏文本, 分项统计)。"""
     out = str(text or "")
@@ -135,13 +217,22 @@ def redact_handoff_text(text: str) -> Tuple[str, Dict[str, int]]:
     if not out:
         return out, stats
 
-    out, n = _count_sub(_RE_ACCOUNT_DUMP, "<REDACTED_ACCOUNT_LINE>", out)
+    out, n = _count_sub(_RE_PEM_PRIVATE_KEY, "<REDACTED_PRIVATE_KEY>", out)
+    stats["secrets"] += n
+
+    out, n = _count_sub(_RE_WEBHOOK_URL, "<REDACTED_WEBHOOK>", out)
+    stats["secrets"] += n
+
+    out, n = _count_sub(_RE_ACCOUNT_DUMP_LINE, r"\1<REDACTED_ACCOUNT_LINE>", out)
+    stats["accounts"] += n
+
+    out, n = _count_sub(_RE_ACCOUNT_DUMP_INLINE, "<REDACTED_ACCOUNT_LINE>", out)
     stats["accounts"] += n
 
     out, n = _count_sub(_RE_PROXY_CREDS, r"\1<proxy-user>:<proxy-pass>@", out)
     stats["proxies"] += n
 
-    out, n = _count_sub(_RE_BEARER, r"\1<REDACTED_TOKEN>", out)
+    out, n = _count_sub(_RE_AUTH_SCHEME, r"\1<REDACTED_TOKEN>", out)
     stats["secrets"] += n
 
     out, n = _count_sub(_RE_JWT, "<REDACTED_JWT>", out)
@@ -150,13 +241,21 @@ def redact_handoff_text(text: str) -> Tuple[str, Dict[str, int]]:
     out, n = _count_sub(_RE_KNOWN_KEY, "<REDACTED_KEY>", out)
     stats["secrets"] += n
 
-    def _kv_repl(m: re.Match[str]) -> str:
+    def _cookie_repl(m: re.Match[str]) -> str:
         prefix, quote, val = m.group(1), m.group(2), m.group(3)
         vl = val.strip().lower()
-        if any(vl.startswith(p) for p in _SAFE_VALUE_PREFIXES) or vl in ("none", "null", "true", "false", "empty"):
+        if any(vl.startswith(p) for p in _SAFE_VALUE_PREFIXES):
             return m.group(0)
-        # 跳过形如 foo_bar / module.attr 等纯代码标识符（无引号时）
-        if not quote and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.\(\)]*", val):
+        if "=" not in val:
+            return m.group(0)
+        stats["secrets"] += 1
+        return f"{prefix}{quote}<REDACTED_COOKIE>{quote}"
+
+    out = _RE_COOKIE_HEADER_PROSE.sub(_cookie_repl, out)
+
+    def _kv_repl(m: re.Match[str]) -> str:
+        prefix, quote, val = m.group(1), m.group(2), m.group(3)
+        if _looks_like_safe_code_expr(val):
             return m.group(0)
         stats["secrets"] += 1
         return f"{prefix}{quote}<REDACTED>{quote}"
@@ -170,6 +269,7 @@ def redact_handoff_text(text: str) -> Tuple[str, Dict[str, int]]:
         stats["paths"] += 1
         return _shorten_local_path(m.group(0))
 
+    out = _RE_WIN_USER_PATH.sub(_win_repl, out)
     out = _RE_WIN_PATH.sub(_win_repl, out)
 
     def _unix_repl(m: re.Match[str]) -> str:
@@ -189,10 +289,22 @@ def redact_source_code(code: str) -> Tuple[str, Dict[str, int]]:
     if not out:
         return out, stats
 
+    out, n = _count_sub(_RE_PEM_PRIVATE_KEY, "<REDACTED_PRIVATE_KEY>", out)
+    stats["secrets"] += n
+
+    out, n = _count_sub(_RE_WEBHOOK_URL, "<REDACTED_WEBHOOK>", out)
+    stats["secrets"] += n
+
+    out, n = _count_sub(_RE_ACCOUNT_DUMP_LINE, r"\1<REDACTED_ACCOUNT_LINE>", out)
+    stats["accounts"] += n
+
+    out, n = _count_sub(_RE_ACCOUNT_DUMP_INLINE, "<REDACTED_ACCOUNT_LINE>", out)
+    stats["accounts"] += n
+
     out, n = _count_sub(_RE_PROXY_CREDS, r"\1<proxy-user>:<proxy-pass>@", out)
     stats["proxies"] += n
 
-    out, n = _count_sub(_RE_BEARER, r"\1<REDACTED_TOKEN>", out)
+    out, n = _count_sub(_RE_AUTH_SCHEME, r"\1<REDACTED_TOKEN>", out)
     stats["secrets"] += n
 
     out, n = _count_sub(_RE_JWT, "<REDACTED_JWT>", out)
@@ -204,10 +316,19 @@ def redact_source_code(code: str) -> Tuple[str, Dict[str, int]]:
     def _code_lit_repl(m: re.Match[str]) -> str:
         prefix, quote, val = m.group(1), m.group(2), m.group(3)
         vl = val.strip().lower()
-        if any(vl.startswith(p) for p in _SAFE_VALUE_PREFIXES) or "{" in val or "}" in val:
+        if _looks_like_safe_code_expr(val) or "{" in val or "}" in val:
             return m.group(0)
-        # 仅当字面量像真实凭据（含数字/符号且非普通中文/英文提示句）时脱敏
-        if " " in val.strip() and not val.strip().lower().startswith("bearer "):
+        is_cookie_or_auth = any(k in prefix.lower() for k in ("cookie", "authorization"))
+        if is_cookie_or_auth:
+            if "cookie" in prefix.lower() and "=" not in val and len(val.strip()) < 16:
+                return m.group(0)
+            stats["secrets"] += 1
+            return f"{prefix}{quote}<REDACTED>{quote}"
+        # 非 cookie/authorization 字段：跳过纯自然语言提示短语（含空格且无等号/凭据前缀）
+        if " " in val.strip() and "=" not in val and not re.match(r"^(?:bearer|basic|token|apikey)\s+", vl):
+            return m.group(0)
+        # 跳过纯小写短词提示（无数字与特殊凭据符号）
+        if re.fullmatch(r"[a-z_-]{1,32}", val.strip()):
             return m.group(0)
         stats["secrets"] += 1
         return f"{prefix}{quote}<REDACTED>{quote}"
@@ -221,6 +342,7 @@ def redact_source_code(code: str) -> Tuple[str, Dict[str, int]]:
         stats["paths"] += 1
         return _shorten_local_path(m.group(0))
 
+    out = _RE_WIN_USER_PATH.sub(_win_repl, out)
     out = _RE_WIN_PATH.sub(_win_repl, out)
 
     def _unix_repl(m: re.Match[str]) -> str:
@@ -279,13 +401,24 @@ def is_auto_managed_title(title: str, title_source: str = "") -> bool:
     t = (title or "").strip()
     if is_default_title(t):
         return True
-    if t.startswith(("直跑 · ", "修站 · ")):
+    if t.startswith(_AUTO_TITLE_PREFIXES):
         return True
     if " · " in t:
         tail = t.rsplit(" · ", 1)[-1].strip()
         if tail in _AUTO_STAGE_SUFFIXES or tail.startswith("卡在"):
             return True
     return False
+
+
+def _is_loopback_url(url: str) -> bool:
+    raw = (url or "").strip()
+    if not raw:
+        return False
+    try:
+        host = (urlparse(raw if "://" in raw else f"https://{raw}").hostname or "").strip().lower()
+        return host in ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+    except Exception:
+        return False
 
 
 def _brand_from_url(url: str) -> str:
@@ -295,20 +428,30 @@ def _brand_from_url(url: str) -> str:
     if "://" not in raw:
         raw = "https://" + raw
     try:
-        host = (urlparse(raw).hostname or "").strip().lower()
+        host = (urlparse(raw).hostname or "").strip().lower().rstrip(".")
     except Exception:
         return ""
-    if not host or host in ("localhost", "127.0.0.1", "0.0.0.0"):
+    if not host or host in ("localhost", "127.0.0.1", "0.0.0.0", "::1"):
         return ""
+    # IP 地址不剥离段
+    if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", host):
+        return host[:16]
     for pfx in _STRIP_SUBDOMAIN_PREFIXES:
         if host.startswith(pfx) and len(host) > len(pfx) + 3:
             host = host[len(pfx):]
             break
-    for tld in _GENERIC_TLDS:
-        if host.endswith(tld) and len(host) > len(tld) + 1:
-            host = host[:-len(tld)]
+    stripped_suffix = False
+    for sfx in _COMPOUND_PUBLIC_SUFFIXES:
+        if host.endswith(sfx) and len(host) > len(sfx) + 1:
+            host = host[:-len(sfx)]
+            stripped_suffix = True
             break
-    # 去掉多余二级前缀（如 sub.foo -> foo，保留短主干）
+    if not stripped_suffix and "." in host:
+        parts = [p for p in host.split(".") if p]
+        if len(parts) >= 2:
+            # 去掉最末级单段 TLD（兼容 .cloud / .pro / .tech / .site 等全部新顶级域）
+            parts = parts[:-1]
+            host = ".".join(parts)
     if "." in host:
         parts = [p for p in host.split(".") if p]
         if len(parts) >= 2:
@@ -328,9 +471,23 @@ def _clean_site_slug(raw: str) -> str:
     if s.endswith("-register"):
         s = s[:-len("-register")]
     s = re.sub(r"[^A-Za-z0-9_.-]+", "", s).strip("._-")
-    if s.lower() in ("_template", "template", "example", "demo", "main", "base"):
+    if s.lower() in ("_template", "template", "example", "demo", "main", "base", "__init__", "adapter", "probe"):
         return ""
     return s[:32]
+
+
+def _is_adapter_file_path(fp: str) -> bool:
+    norm = str(fp or "").replace("\\", "/").strip().lower()
+    if not norm.endswith(".py"):
+        return False
+    fname = norm.rsplit("/", 1)[-1]
+    if fname in ("__init__.py", "base.py", "_template.py") or fname.startswith("_"):
+        return False
+    if any(seg in norm for seg in ("/core/", "/scratch/", "/tests/", "/scripts/", "/web/")):
+        return False
+    if norm.startswith(("core/", "scratch/", "tests/", "scripts/", "web/")):
+        return False
+    return ("/sites/" in norm) or norm.startswith("sites/") or ("-register/" in norm and fname.endswith("_register.py"))
 
 
 def _extract_tool_events(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -415,6 +572,21 @@ def _extract_tool_events(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     return out
 
 
+_COMPACTION_OPEN_TAGS = (
+    "<compaction_summary>",
+    "<compaction-summary>",
+    "<compaction-checkpoint>",
+)
+_COMPACTION_TAG_STRIP_RE = re.compile(
+    r"</?(?:compaction_summary|compaction-summary|compaction-checkpoint)>",
+    re.I,
+)
+_NEGATED_BLOCKER_PREFIX_RE = re.compile(
+    r"(?:没有|无|未发现|不存在|未触发|已绕过|不需要|无需|不涉及|no\s+|without\s+|bypassed\s+)\s*$",
+    re.I,
+)
+
+
 def _detect_blocker_label(text: str) -> str:
     low = (text or "").lower()
     if not low:
@@ -430,8 +602,13 @@ def _detect_blocker_label(text: str) -> str:
         (("403", "429", "waf", "rate limit", "too many requests", "风控", "forbidden", "access denied"), "风控403"),
     )
     for keywords, label in rules:
-        if any(k in low for k in keywords):
-            return label
+        for k in keywords:
+            pos = low.find(k)
+            while pos != -1:
+                prefix_window = low[max(0, pos - 16):pos]
+                if not _NEGATED_BLOCKER_PREFIX_RE.search(prefix_window):
+                    return label
+                pos = low.find(k, pos + len(k))
     return ""
 
 
@@ -440,7 +617,7 @@ def _extract_user_topic_snippet(messages: List[Dict[str, Any]]) -> str:
         if not isinstance(m, dict) or m.get("role") != "user":
             continue
         raw = str(m.get("content") or "").strip()
-        if not raw or raw.startswith(("<compaction_summary>", "[用户运行中实时纠偏]")):
+        if not raw or raw.startswith(_COMPACTION_OPEN_TAGS) or raw.startswith("[用户运行中实时纠偏]"):
             continue
         # 去掉附件头和 /goal 前缀
         lines = [
@@ -460,23 +637,39 @@ def _extract_user_topic_snippet(messages: List[Dict[str, Any]]) -> str:
     return ""
 
 
+def _safe_added_count(val: Any) -> int:
+    if isinstance(val, list):
+        return len(val)
+    if val is None or isinstance(val, bool):
+        return 0
+    try:
+        return max(0, int(val))
+    except Exception:
+        return 0
+
+
 def analyze_session_progress(session_dict: Dict[str, Any]) -> Dict[str, Any]:
     """跨三仓统一提取会话目标站、关联适配器、阶段状态、新增凭据数与关键结论。"""
     messages = session_dict.get("messages") if isinstance(session_dict.get("messages"), list) else []
     status = str(session_dict.get("status") or "idle").strip().lower()
     last_error = str(session_dict.get("error") or session_dict.get("last_error") or "").strip()
     goal_state = session_dict.get("goal_state") if isinstance(session_dict.get("goal_state"), dict) else None
-    target_url = str(session_dict.get("target_url") or "").strip()
+    init_target_url = str(session_dict.get("target_url") or "").strip()
 
     tool_evs = _extract_tool_events(messages)
 
-    # 1. 提取目标 URL、站点/适配器 slug、触及文件、运行结果
+    # 1. 提取目标 URL（支持多站切换取最新匹配）、站点/适配器 slug、触及文件、运行结果
     site_slug = ""
     touched_files: List[str] = []
+    candidate_urls: List[str] = []
+    if init_target_url and not _is_loopback_url(init_target_url):
+        candidate_urls.append(init_target_url)
+
     has_probed = False
     has_written_adapter = False
     has_run_adapter = False
     passed = False
+    edited_since_pass = False
     new_accounts_count = 0
     last_run_ok: Optional[bool] = None
     last_run_err = ""
@@ -490,14 +683,15 @@ def analyze_session_progress(session_dict: Dict[str, Any]) -> Dict[str, Any]:
 
         for k in ("url", "target_url"):
             u = str(args.get(k) or "").strip()
-            if u.startswith(("http://", "https://")) and not target_url:
-                target_url = u
+            if u.startswith(("http://", "https://")) and not _is_loopback_url(u):
+                candidate_urls.append(u)
 
+        prev_slug = site_slug
         for k in ("adapter", "site", "site_name", "project", "name"):
             if tn in (
                 "write_adapter", "patch_adapter", "read_adapter", "run_adapter", "run_adapter_once",
-                "scaffold_site", "scaffold_project", "verify_key", "inspect_project", "read_project_file",
-                "write_project_file", "patch_project_file", "run_project",
+                "scaffold_site", "scaffold_project", "verify_key", "verify_artifacts", "verify_accounts",
+                "inspect_project", "read_project_file", "write_project_file", "patch_project_file", "run_project",
             ):
                 cand = _clean_site_slug(str(args.get(k) or ""))
                 if cand:
@@ -506,73 +700,105 @@ def analyze_session_progress(session_dict: Dict[str, Any]) -> Dict[str, Any]:
 
         for k in ("file", "path", "written_path", "adapter_file"):
             fp = str(args.get(k) or res_obj.get(k) or "").strip()
-            if fp and fp not in touched_files and len(touched_files) < 12:
+            if fp:
+                if fp in touched_files:
+                    touched_files.remove(fp)
                 touched_files.append(fp)
-                if not site_slug and fp.endswith(".py"):
+                if len(touched_files) > 12:
+                    touched_files = touched_files[-12:]
+                if not site_slug and _is_adapter_file_path(fp):
                     cand = _clean_site_slug(fp)
                     if cand:
                         site_slug = cand
 
-        if tn in ("probe_url", "probe_site", "inspect_form", "inspect_site", "capture_network", "browser_probe", "analyze_har"):
+        # 切换到新站点时重置前一站的通过锁存与报错
+        if prev_slug and site_slug and site_slug.lower() != prev_slug.lower():
+            passed = False
+            edited_since_pass = False
+            last_run_ok = None
+            last_run_err = ""
+            new_accounts_count = 0
+
+        if tn in (
+            "probe_url", "probe_site", "inspect_form", "inspect_site",
+            "capture_network", "deep_capture", "browser_probe", "analyze_har",
+        ):
             has_probed = True
             key_steps.append(f"探测 `{tn}`" + (f" ({args.get('url')})" if args.get("url") else ""))
         elif tn in ("scaffold_site", "scaffold_project", "write_adapter", "patch_adapter", "write_project_file", "patch_project_file"):
             has_written_adapter = True
+            if passed:
+                edited_since_pass = True
             key_steps.append(f"编写/修改 `{site_slug or args.get('adapter') or args.get('path') or tn}`")
         elif tn in ("run_adapter", "run_adapter_once", "run_project"):
             has_run_adapter = True
             added = 0
-            for ak in ("new_valid_credentials_added", "new_accounts_added", "new_accounts", "added", "success_count", "created"):
-                try:
-                    v = int(res_obj.get(ak) or 0)
-                    if v > added:
-                        added = v
-                except Exception:
-                    pass
+            for ak in ("new_valid_credentials_added", "new_accounts_added", "accounts_delta", "new_accounts", "added", "success_count", "created"):
+                v = _safe_added_count(res_obj.get(ak))
+                if v > added:
+                    added = v
             if added > 0:
                 new_accounts_count = max(new_accounts_count, added)
                 passed = True
+                edited_since_pass = False
                 last_run_ok = True
+                last_run_err = ""
                 key_steps.append(f"试跑 `{site_slug or tn}` 成功（+{added} 账号）")
             else:
-                rc = res_obj.get("returncode")
+                rc = res_obj.get("returncode") if "returncode" in res_obj else res_obj.get("exit_code")
                 if ev["ok"] is True and rc == 0 and ("成功" in res_text or "saved" in res_text.lower()):
                     last_run_ok = True
                 else:
                     last_run_ok = False
-                    last_run_err = ev["error"] or str(res_obj.get("stderr") or res_obj.get("log_tail") or res_text)[:400]
+                    if edited_since_pass:
+                        passed = False
+                    last_run_err = (
+                        ev["error"]
+                        or str(res_obj.get("stderr") or res_obj.get("log_tail") or res_obj.get("output_tail") or res_text)[:400]
+                    )
                 key_steps.append(f"试跑 `{site_slug or tn}` {'通过' if last_run_ok else '失败'}")
-        elif tn == "verify_key":
-            if res_obj.get("valid") is True or res_obj.get("ok") is True:
+        elif tn in ("verify_key", "verify_artifacts", "verify_accounts"):
+            valid_cnt = _safe_added_count(res_obj.get("valid_count") or res_obj.get("valid_credentials"))
+            if res_obj.get("valid") is True or valid_cnt > 0 or (res_obj.get("ok") is True and tn == "verify_key"):
                 passed = True
-                key_steps.append("在线验活 Key 通过")
+                edited_since_pass = False
+                key_steps.append("在线验活凭据通过")
 
-    # 从用户消息补抽 URL
-    if not target_url:
-        for m in messages:
-            if not isinstance(m, dict) or m.get("role") != "user":
-                continue
-            txt = str(m.get("content") or "")
-            hit = _URL_RE.search(txt)
-            if hit:
-                cand_u = hit.group(0).rstrip(".,;:!?`'\"")
-                if not any(h in cand_u.lower() for h in ("127.0.0.1", "localhost")):
+    # 从用户消息补抽 URL（跳过本机回环地址）
+    user_urls: List[str] = []
+    for m in messages:
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        txt = str(m.get("content") or "")
+        for hit in _URL_RE.finditer(txt):
+            cand_u = hit.group(0).rstrip(".,;:!?`'\"")
+            if not _is_loopback_url(cand_u):
+                user_urls.append(cand_u)
+    all_urls = candidate_urls + user_urls
+
+    # 优先选与当前 site_slug 匹配的最新 URL，否则取最新非回环 URL
+    target_url = ""
+    if all_urls:
+        if site_slug:
+            norm_slug = site_slug.lower().replace("_", "").replace("-", "")
+            for cand_u in reversed(all_urls):
+                b = _brand_from_url(cand_u).lower().replace("_", "").replace("-", "")
+                if b and (b in norm_slug or norm_slug in b):
                     target_url = cand_u
                     break
+        if not target_url:
+            target_url = candidate_urls[-1] if candidate_urls else user_urls[-1]
 
     # 检查 goal_state
     if goal_state:
         gs_status = str(goal_state.get("status") or "").lower()
         if gs_status == "achieved":
             passed = True
-            try:
-                ach = int(goal_state.get("achieved_credentials") or 0)
-                if ach > new_accounts_count:
-                    new_accounts_count = ach
-            except Exception:
-                pass
+            ach = _safe_added_count(goal_state.get("achieved_credentials"))
+            if ach > new_accounts_count:
+                new_accounts_count = ach
 
-    # 提取最后若干条高价值 assistant 结论
+    # 提取最后若干条高价值 assistant 结论与压缩检查点（兼容三仓 XML 标签）
     assistant_notes: List[str] = []
     compaction_summary = ""
     for m in messages:
@@ -582,21 +808,22 @@ def analyze_session_progress(session_dict: Dict[str, Any]) -> Dict[str, Any]:
         content = str(m.get("content") or "").strip()
         if role == "compaction" and content:
             compaction_summary = content
-        elif role == "user" and content.startswith("<compaction_summary>"):
-            compaction_summary = content.replace("<compaction_summary>", "").replace("</compaction_summary>", "").strip()
+        elif role == "user" and content.startswith(_COMPACTION_OPEN_TAGS):
+            compaction_summary = _COMPACTION_TAG_STRIP_RE.sub("", content).strip()
         elif role == "assistant" and content and len(content) >= 12:
             if "已达到单轮最大" in content:
                 continue
             assistant_notes.append(content)
 
-    # 失败/阻塞归因
-    blocker_source = " ".join(filter(None, [
+    # 失败/阻塞归因：优先明确报错源，无报错时再从末条结论扫描（带否定词过滤）
+    primary_blocker_src = " ".join(filter(None, [
         str((goal_state or {}).get("blocked_reason") or ""),
         last_error,
         last_run_err,
-        assistant_notes[-1][:600] if assistant_notes else "",
     ]))
-    blocker_label = _detect_blocker_label(blocker_source)
+    blocker_label = _detect_blocker_label(primary_blocker_src)
+    if not blocker_label and not passed and assistant_notes:
+        blocker_label = _detect_blocker_label(assistant_notes[-1][:600])
 
     # 判定阶段与展示标签
     if passed:
@@ -659,6 +886,22 @@ def analyze_session_progress(session_dict: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _display_width(s: str) -> int:
+    return sum(2 if ord(ch) > 0x2E7F else 1 for ch in s)
+
+
+def _truncate_display_width(s: str, max_units: int) -> str:
+    used = 0
+    out_chars: List[str] = []
+    for ch in s:
+        w = 2 if ord(ch) > 0x2E7F else 1
+        if used + w > max_units:
+            break
+        out_chars.append(ch)
+        used += w
+    return "".join(out_chars).rstrip("-_ .")
+
+
 def compute_staged_session_title(
     session_dict: Dict[str, Any],
     *,
@@ -681,10 +924,11 @@ def compute_staged_session_title(
         return None
 
     stage_label = str(prog.get("stage_label") or "").strip()
-    # 控制标题长度适中且不截断常见站点主干名（ASCII 宽度约为汉字一半，侧边栏可单行完整展示）
-    max_label_len = max(12, 26 - len(stage_label) - 3)
-    if len(label) > max_label_len:
-        label = label[:max_label_len].rstrip("-_ .")
+    # 按东西方显示宽度截断（汉字=2，ASCII=1），保证中英文标题在侧边栏单行都不溢出
+    stage_units = _display_width(stage_label)
+    max_label_units = max(12, 28 - stage_units - 3)
+    if _display_width(label) > max_label_units:
+        label = _truncate_display_width(label, max_label_units)
 
     candidate = f"{label} · {stage_label}" if stage_label else label
     if candidate == cur:
@@ -728,10 +972,14 @@ def build_handoff_markdown(
     site_slug = prog["site_slug"] or _safe_filename_slug(prog["target_label"]).replace("-", "_")
     target_url = prog["target_url"]
     raw_title = str(session_dict.get("title") or "").strip()
-    display_title = (
-        compute_staged_session_title(session_dict, current_title=raw_title, title_source="auto")
-        or (raw_title if not is_default_title(raw_title) else (prog["target_label"] or site_slug))
-    )
+    raw_title_src = str(session_dict.get("title_source") or "").strip().lower()
+    if raw_title_src == "user" and raw_title:
+        display_title = raw_title
+    else:
+        display_title = (
+            compute_staged_session_title(session_dict, current_title=raw_title, title_source="auto")
+            or (raw_title if not is_default_title(raw_title) else (prog["target_label"] or site_slug))
+        )
     steps_count = int(session_dict.get("steps_count") or session_dict.get("step_count") or len(_extract_tool_events(session_dict.get("messages") or [])))
     created_at = time.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -825,14 +1073,16 @@ def build_handoff_markdown(
             body_lines.append("```")
             body_lines.append("")
 
-    # 适配器源码段
+    # 适配器源码段（动态围栏长度，避免源码内三反引号破坏 Markdown 闭合）
     if clean_code:
+        max_bt = max((len(m.group(0)) for m in re.finditer(r"`+", clean_code)), default=0)
+        code_fence = "`" * max(3, max_bt + 1)
         body_lines.append("## 4. 当前适配器源码（已脱敏）")
         body_lines.append(f"- 参考路径：`{clean_adapter_path}`")
         body_lines.append("")
-        body_lines.append("```python")
+        body_lines.append(f"{code_fence}python")
         body_lines.append(clean_code.rstrip())
-        body_lines.append("```")
+        body_lines.append(code_fence)
         body_lines.append("")
 
     # 下一步接力指令
@@ -898,9 +1148,24 @@ def build_handoff_llm_refine_prompt(handoff_md: str) -> str:
     )
 
 
+def _truncate_handoff_preserving_sections(text: str, max_chars: int = 28000) -> str:
+    """超长接力单按章节安全截断：优先保留顶部元信息与末尾「接力执行指令」，只裁剪中段过长日志/代码。"""
+    if len(text) <= max_chars:
+        return text
+    tail_idx = text.rfind("## 5. 接力执行指令")
+    if tail_idx < 0:
+        tail_idx = text.rfind("## 4. 接力执行指令")
+    if tail_idx > 0 and (len(text) - tail_idx) < max_chars // 3:
+        tail = text[tail_idx:]
+        marker = "\n\n... [接力单中段过长已自动裁剪，完整内容请查看原 .handoff.md 文件] ...\n\n"
+        head_budget = max(1000, max_chars - len(tail) - len(marker))
+        return text[:head_budget].rstrip() + marker + tail
+    return text[:max_chars]
+
+
 def parse_handoff_markdown(raw_text: str, *, target_edition: str = "community") -> Dict[str, Any]:
     """解析 *.handoff.md（或普通任务 Markdown），输出新建接力会话所需的标题、目标 URL 与首轮执行指令。"""
-    text = str(raw_text or "").replace("\r\n", "\n").strip()
+    text = str(raw_text or "").lstrip("\ufeff").replace("\r\n", "\n").strip()
     if not text:
         raise ValueError("接力单内容不能为空")
 
@@ -931,15 +1196,27 @@ def parse_handoff_markdown(raw_text: str, *, target_edition: str = "community") 
     site_slug = _clean_site_slug(meta.get("site_slug", ""))
     target_url = meta.get("target_url", "").strip()
     if not target_url:
-        hit = _URL_RE.search(body)
-        if hit:
-            target_url = hit.group(0).rstrip(".,;:!?`'\"")
+        for hit in _URL_RE.finditer(body):
+            cand_u = hit.group(0).rstrip(".,;:!?`'\"")
+            if not _is_loopback_url(cand_u):
+                target_url = cand_u
+                break
 
-    # 提取附带的 Python 代码块（若有）
+    # 优先从「## 4. 当前适配器源码」章节按动态围栏精准提取源码，避免被第 3 节的零散 Python 片段劫持
     adapter_code = ""
-    m_code = re.search(r"```python\s*\n(.*?)\n```", body, re.S)
-    if m_code:
-        adapter_code = m_code.group(1).strip()
+    py_fence_re = re.compile(r"(?m)^(?P<fence>`{3,})python\s*\n([\s\S]*?)\n(?P=fence)\s*$")
+    sec4_idx = body.find("## 4. 当前适配器源码")
+    if sec4_idx >= 0:
+        sec4_tail = body[sec4_idx:]
+        next_sec = re.search(r"(?m)^## \d+\.", sec4_tail[10:])
+        sec4_chunk = sec4_tail[: 10 + next_sec.start()] if next_sec else sec4_tail
+        m_sec4 = py_fence_re.search(sec4_chunk)
+        if m_sec4:
+            adapter_code = m_sec4.group(2).strip()
+    elif not is_handoff or meta.get("has_adapter_code", "").lower() == "true":
+        matches = [m.group(2).strip() for m in py_fence_re.finditer(body) if m.group(2).strip()]
+        if matches:
+            adapter_code = max(matches, key=len)
 
     label = (
         site_slug.replace("_", "-")
@@ -963,10 +1240,11 @@ def parse_handoff_markdown(raw_text: str, *, target_edition: str = "community") 
         else "请基于下方未跑通的接力单，先吸收已有探测结论与半成品代码，跳过已验证的死路，直接从当前卡点继续修复并单并发试跑 1 号验收。"
     )
 
+    body_for_prompt = _truncate_handoff_preserving_sections(text, 28000)
     initial_prompt = (
         f"[已导入 RegisterHub 任务接力单（状态：{stage}）]\n"
         f"{action_hint}{cross_note}\n\n"
-        f"{text[:28000]}"
+        f"{body_for_prompt}"
     )
 
     return {

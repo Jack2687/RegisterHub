@@ -139,3 +139,62 @@ def test_community_staged_naming_share_and_import_http(tmp_path: Path, monkeypat
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_community_passed_list_accounts_and_llm_refine_config_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sites_dir = tmp_path / "sites"
+    sites_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(ai_agent, "ROOT_DIR", tmp_path)
+    monkeypatch.setattr(ai_agent, "SITES_DIR", sites_dir)
+    monkeypatch.setattr(ai_agent, "RESULTS_DIR", tmp_path)
+    monkeypatch.setattr(ai_agent, "AGENT_SESSIONS_DIR", tmp_path / "agent_sessions")
+    monkeypatch.setattr(ai_agent.agent_manager, "_sessions", {})
+
+    sess = ai_agent.agent_manager.create_session(title="新 AI 直跑会话")
+    sess.target_url = "https://acme.example.com/signup"
+    sess.status = "done"
+    sess.messages.append(
+        {
+            "role": "tool",
+            "tool_name": "run_adapter_once",
+            "tool_args": {"adapter": "acme"},
+            "ok": True,
+            "tool_result": json.dumps({"ok": True, "accounts_delta": 1, "new_accounts": ["u1@outlook.com----p"]}),
+        }
+    )
+
+    called_kw: dict = {}
+
+    def _fake_compat(messages, tools=None, system_prompt="", config_override=None, **kw):
+        called_kw["config_override"] = config_override
+        return {"content": "- 精炼结论：acme 已跑通", "tool_calls": [], "usage": {}}
+
+    monkeypatch.setattr(ai_agent, "_call_compat_chat_completion", _fake_compat)
+    shared = ai_agent.agent_manager.export_session_handoff(sess.id, include_code=False, use_llm_refine=True)
+    assert shared["ok"] is True
+    assert shared["status"] == "passed"
+    assert shared["llm_refined"] is True
+    assert "精炼结论：acme 已跑通" in shared["markdown"]
+    assert "config_override" in called_kw
+
+    # 开源版供应商明文 URL/Key 与单把 Key 导出验证
+    from core import llm_profiles
+
+    monkeypatch.setattr(llm_client, "LLM_CONFIG_FILE", tmp_path / "llm_config.json")
+    prof = llm_profiles.upsert_profile(
+        {
+            "name": "CommExp",
+            "format": "openai",
+            "base_url": "https://sub2.example.cc/v1",
+            "model": "deepseek-v4.1-flash-1017",
+            "api_key": "sk-comm-export-987654",
+        }
+    )
+    exp_all = llm_profiles.export_profile_credentials(prof["id"])
+    assert exp_all is not None and exp_all["base_url"] == "https://sub2.example.cc/v1"
+    assert exp_all["keys"] == ["sk-comm-export-987654"]
+    kid = prof["key_pool"][0]["id"]
+    exp_one = llm_profiles.export_profile_credentials(prof["id"], key_id=kid)
+    assert exp_one is not None and exp_one["key"] == "sk-comm-export-987654"
