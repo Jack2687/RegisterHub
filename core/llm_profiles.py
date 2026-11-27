@@ -830,7 +830,7 @@ def probe_reasoning_capability(
     base_ov = resolve_runtime_override(profile_id=pid, model_override=target_model)
     base_ov["streaming"] = False
     base_ov["max_tokens"] = 2048 if fmt == "anthropic" else 1024
-    if not str(base_ov.get("api_key") or "").strip() and not llm_client._is_loopback_host(str(base_ov.get("base_url") or "")):
+    if not str(base_ov.get("api_key") or "").strip() and not llm_client._is_local_endpoint(str(base_ov.get("base_url") or "")):
         return {"ok": False, "cached": False, "profile_id": pid, "model": target_model, "spec": spec, "capability": None, "error": "该配置尚未填写 API Key"}
 
     probe_msgs = [{"role": "user", "content": "What is 37*43+19*23? Reply ONLY the integer."}]
@@ -854,7 +854,7 @@ def probe_reasoning_capability(
                 messages=probe_msgs,
                 tools=None,
                 system_prompt="Reply ONLY with the integer answer.",
-                overrides=ov_run,
+                config_override=ov_run,
                 timeout=18,
             )
             return {
@@ -867,7 +867,9 @@ def probe_reasoning_capability(
             }
         except Exception as exc:
             err_s = str(exc)[:160]
-            sc = 400 if ("HTTP 400" in err_s or " 400" in err_s) else (422 if ("HTTP 422" in err_s or " 422" in err_s) else 0)
+            sc = int(getattr(exc, "status_code", 0) or 0)
+            if not sc:
+                sc = 400 if ("HTTP 400" in err_s or " 400" in err_s) else (422 if ("HTTP 422" in err_s or " 422" in err_s) else 0)
             return {"ok": False, "status_code": sc, "param_rejected": _is_param_reject(sc, err_s), "error": err_s}
 
     def _sig_score(sample: Dict[str, Any]) -> int:

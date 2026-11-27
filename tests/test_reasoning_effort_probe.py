@@ -48,8 +48,8 @@ def test_community_payloads_and_probe(tmp_path: Path, monkeypatch):
     )
     assert payload_ant["thinking"]["type"] == "enabled"
 
-    def fake_chat(messages, tools=None, system_prompt="", overrides=None, timeout=18):
-        eff = str((overrides or {}).get("reasoning_effort") or "none")
+    def fake_chat(messages, tools=None, system_prompt="", *, config_override=None, timeout=18):
+        eff = str((config_override or {}).get("reasoning_effort") or "none")
         tok_map = {"low": 22, "high": 46, "xhigh": 62, "max": 72}
         return {
             "ok": True,
@@ -66,6 +66,17 @@ def test_community_payloads_and_probe(tmp_path: Path, monkeypatch):
     assert res["capability"]["mode"] == "graded"
     assert "max" in res["capability"]["supported_levels"]
 
+    # Localhost keyless profile must not fail with AttributeError on _is_local_endpoint
+    local_prof = llm_profiles.upsert_profile({
+        "name": "local-ollama",
+        "format": "openai",
+        "model": "gpt-5.4-mini",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "api_key": "",
+    })
+    res_local = llm_profiles.probe_reasoning_capability(local_prof["id"], model="gpt-5.4-mini", force=True)
+    assert res_local["ok"] is True
+
     res_cached = llm_profiles.probe_reasoning_capability(pid, model="gpt-5.4-mini", force=False)
     assert res_cached["cached"] is True
 
@@ -74,3 +85,61 @@ def test_community_payloads_and_probe(tmp_path: Path, monkeypatch):
     sess = mgr.create_session(title="c-test", llm_profile_id=pid, llm_model="gpt-5.4-mini", llm_reasoning_effort="high")
     assert sess.llm_reasoning_effort == "high"
     assert sess.to_detail()["llm_reasoning_effort"] == "high"
+
+
+def test_community_probe_real_chat_completion_wire(tmp_path: Path, monkeypatch):
+    """Regression guard: probe_reasoning_capability must call real llm_client.chat_completion(config_override=...)."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    monkeypatch.setattr(llm_client, "LLM_CONFIG_FILE", tmp_path / "llm_config.json")
+
+    class _MockRelay(BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):
+            return
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
+            eff = str(body.get("reasoning_effort") or "none").lower()
+            if eff == "max":
+                raw = json.dumps({"error": {"message": "unsupported reasoning_effort: max"}}).encode("utf-8")
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+                return
+            rtok = {"low": 16, "high": 42, "xhigh": 64}.get(eff, 12)
+            raw = json.dumps({
+                "choices": [{"message": {"role": "assistant", "content": "2028", "reasoning_content": "r" * rtok}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 2 + rtok, "completion_tokens_details": {"reasoning_tokens": rtok}},
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _MockRelay)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        prof = llm_profiles.upsert_profile({
+            "name": "local-wire-test",
+            "format": "openai",
+            "model": "gpt-5.4-mini",
+            "base_url": f"http://127.0.0.1:{port}/v1",
+            "api_key": "",
+        })
+        res = llm_profiles.probe_reasoning_capability(prof["id"], model="gpt-5.4-mini", force=True)
+        assert res["ok"] is True, res
+        cap = res["capability"]
+        assert cap["status"] == "verified"
+        assert cap["mode"] == "graded"
+        assert "xhigh" in cap["supported_levels"]
+        assert "max" in cap["rejected_levels"]
+    finally:
+        srv.shutdown()
+        srv.server_close()
